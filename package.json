@@ -1,0 +1,13 @@
+{
+  "name": "bookpilot-ai",
+  "version": "0.1.0",
+  "description": "AI-powered WhatsApp booking bot driven by a config-based dynamic workflow engine. Add a new industry by dropping a JSON file in workflows/ — no code changes required.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  }
+}

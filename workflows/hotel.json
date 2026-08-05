@@ -1,0 +1,56 @@
+{
+  "id": "hotel",
+  "description": "hotel room booking or a place to stay",
+  "matchLabel": "a hotel room",
+  "label": "Hotel Room",
+  "keywords": ["hotel", "room", "stay", "check in", "check-in", "reservation", "resort", "night stay"],
+  "bookingIdPrefix": "HTL",
+  "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee}/night)",
+  "providerRowDescription": "{provider.attribute} (₹{provider.fee}/night)",
+  "dateRangeAvailability": { "startField": "checkInDate", "nightsField": "nights" },
+  "hotels": [
+    {
+      "id": "h1",
+      "name": "Grand Palace Hotel",
+      "location": "MG Road, Bengaluru",
+      "rating": "4.5★ (1,204 reviews)",
+      "rooms": [
+        { "id": "h1-r1", "name": "Deluxe Room", "attribute": "1 King Bed, City View", "fee": 4200 },
+        { "id": "h1-r2", "name": "Executive Suite", "attribute": "2 Rooms, Balcony", "fee": 7800 }
+      ]
+    },
+    {
+      "id": "h2",
+      "name": "Seaside Resort & Spa",
+      "location": "ECR, Chennai",
+      "rating": "4.7★ (860 reviews)",
+      "rooms": [
+        { "id": "h2-r1", "name": "Garden View Room", "attribute": "1 Queen Bed", "fee": 3500 },
+        { "id": "h2-r2", "name": "Ocean View Suite", "attribute": "1 King Bed, Sea Facing", "fee": 9000 }
+      ]
+    },
+    {
+      "id": "h3",
+      "name": "City Central Inn",
+      "location": "Connaught Place, Delhi",
+      "rating": "4.2★ (530 reviews)",
+      "rooms": [
+        { "id": "h3-r1", "name": "Standard Room", "attribute": "1 Double Bed", "fee": 2200 },
+        { "id": "h3-r2", "name": "Business Room", "attribute": "1 King Bed, Work Desk", "fee": 3800 }
+      ]
+    }
+  ],
+  "steps": [
+    { "type": "select_hotel", "prompt": "Here are our available hotels:" },
+    { "type": "select_room", "prompt": "Great choice! Here are the room types at {hotel.name}:" },
+    { "type": "select_date", "field": "checkInDate", "prompt": "Please select your check-in date.", "days": 10, "editTarget": true },
+    { "type": "select_option", "field": "nights", "prompt": "How many nights?", "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] },
+    { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name." },
+    {
+      "type": "review_confirm",
+      "prompt": "Please review your reservation.",
+      "template": "🏨 Hotel: {hotel.name} — {hotel.location}\n🛏️ Room: {provider.name} ({provider.attribute})\n📅 Check-in: {checkInDateLabel}\n🌙 Nights: {nights}\n👤 For: {customerName}\n💰 Rate: ₹{provider.fee}/night"
+    }
+  ],
+  "confirmationTemplate": "✅ Reservation confirmed!\n\nID: {bookingId}\nHotel: {hotel.name} — {hotel.location}\nRoom: {provider.name} ({provider.attribute})\nCheck-in: {checkInDateLabel}\nNights: {nights}\nFor: {customerName}\nRate: ₹{provider.fee}/night\n\nReply STATUS anytime to check your reservation."
+}

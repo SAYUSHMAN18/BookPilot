@@ -1,0 +1,28 @@
+{
+  "id": "makeup",
+  "description": "bridal/party/event makeup or beauty services",
+  "matchLabel": "a makeup artist",
+  "label": "Makeup",
+  "keywords": ["makeup", "bridal", "wedding", "bride", "party look", "makeover", "engagement"],
+  "businessHours": { "start": "08:00", "end": "20:00" },
+  "slotMinutes": 60,
+  "bookingIdPrefix": "MKP",
+  "providers": [
+    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500 },
+    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200 }
+  ],
+  "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
+  "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
+  "steps": [
+    { "type": "select_provider", "prompt": "Here are your options:" },
+    { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
+    { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
+    { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name.", "editTarget": true },
+    {
+      "type": "review_confirm",
+      "prompt": "Please review your booking.",
+      "template": "💄 Artist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
+    }
+  ],
+  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+}

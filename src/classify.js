@@ -1,0 +1,89 @@
+const { log } = require("./logger");
+const { capForAI } = require("./textLimits");
+
+// Keyword fallback: checks each workflow's own `keywords` list. Used when no
+// Groq key is set, or the AI call fails/returns something unrecognized — the
+// bot never breaks because of a missing/expired key. Returns workflowId:null
+// when nothing matches — callers must NOT silently guess a business, or a
+// plain "hii" ends up booking a haircut (this was a real bug).
+function keywordClassify(text, workflows) {
+  const q = text.toLowerCase();
+  for (const workflow of Object.values(workflows)) {
+    if (workflow.keywords.some((k) => q.includes(k))) {
+      return { workflowId: workflow.id, source: "keyword-fallback" };
+    }
+  }
+  return { workflowId: null, source: "no-match" };
+}
+
+// Business Detection Engine (MVP): classifies a free-text customer message
+// into one of the loaded workflow ids, using every workflow's `description`
+// as the hint for what that category covers — so the AI prompt updates
+// automatically as workflows are added/removed, same as the categories list.
+// Returns workflowId:null for greetings/small talk/anything that doesn't
+// clearly indicate a business — the caller should ask a clarifying question
+// rather than guess.
+async function classifyBusiness(text, workflows) {
+  if (!process.env.GROQ_API_KEY) {
+    log("WARN", "GROQ_API_KEY not set — using keyword fallback classifier.");
+    return keywordClassify(text, workflows);
+  }
+
+  const ids = Object.keys(workflows);
+  const hints = Object.values(workflows)
+    .map((w) => `"${w.id}" = ${w.description}`)
+    .join(". ");
+
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        temperature: 0,
+        max_tokens: 8,
+        messages: [
+          {
+            role: "system",
+            content:
+              `You classify a customer's WhatsApp message into exactly one business category: ${ids.join(", ")}, ` +
+              `or "unclear" for anything else. ${hints}. ` +
+              "Only classify into a category if the customer is clearly trying to BOOK or SCHEDULE something with " +
+              "that business right now (e.g. \"I need a doctor\", \"book a haircut\", \"a room for 2 nights\"). " +
+              "A question ABOUT a business — hours, prices, location, whether a specific provider exists — is " +
+              "NOT a booking intent even if it names that business or provider by name; reply \"unclear\" for " +
+              "those too, same as a greeting or small talk. Reply with ONLY the single category word (or " +
+              '"unclear") and nothing else.',
+          },
+          { role: "user", content: capForAI(text) },
+        ],
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`Groq API responded ${resp.status}`);
+    const data = await resp.json();
+    const raw = (data.choices?.[0]?.message?.content || "").trim().toLowerCase();
+
+    // Trust the AI's explicit "unclear" as-is — do NOT fall back to keyword
+    // matching here. Keywords are a coarse substring match with no concept
+    // of intent, so re-running them after the AI correctly determined
+    // "this mentions a provider name but isn't a booking request" would
+    // undo that judgment (verified live: "how much does The Barber Co
+    // charge?" — the AI correctly said unclear, but the keyword fallback
+    // then matched "barber" and forced it into a hair booking anyway).
+    // Keywords stay the fallback ONLY for when the AI call itself fails.
+    if (raw.includes("unclear")) return { workflowId: null, source: "ai-unclear" };
+
+    const workflowId = ids.find((id) => raw.includes(id));
+    if (!workflowId) throw new Error(`Unrecognized AI output: "${raw}"`);
+    return { workflowId, source: "groq-ai" };
+  } catch (err) {
+    log("ERROR", `AI classification failed (${err.message}) — falling back to keywords.`);
+    return keywordClassify(text, workflows);
+  }
+}
+
+module.exports = { classifyBusiness };

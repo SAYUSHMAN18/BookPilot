@@ -1,0 +1,38 @@
+{
+  "id": "medical",
+  "description": "medical symptoms or wanting to see a doctor",
+  "matchLabel": "a doctor",
+  "label": "Doctor Appointment",
+  "keywords": ["pain", "fever", "headache", "cough", "cold", "stomach", "chest", "breathing", "doctor", "appointment", "checkup", "sick", "injury", "skin", "rash", "vomit"],
+  "businessName": "ABC Multispeciality Clinic",
+  "businessHours": { "start": "09:00", "end": "21:00" },
+  "slotMinutes": 30,
+  "bookingIdPrefix": "APT",
+  "providers": [
+    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500 },
+    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700 },
+    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600 }
+  ],
+  "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
+  "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
+  "steps": [
+    {
+      "type": "select_provider",
+      "prompt": "Please select the doctor you'd like to consult.",
+      "confirmCard": true,
+      "confirmTemplate": "{provider.name}\n🩺 {provider.attribute}\n💰 Consultation Fee: ₹{provider.fee}"
+    },
+    { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
+    { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
+    { "type": "text_input", "field": "customerName", "prompt": "What's your name?", "validate": "required", "validationError": "Please share your name.", "editTarget": true },
+    { "type": "text_input", "field": "age", "prompt": "What's your age?", "validate": "number", "validationError": "Please enter a valid age (numbers only)." },
+    { "type": "select_option", "field": "gender", "prompt": "Gender? (reply SKIP if you'd rather not say)", "options": ["Male", "Female", "Other"], "skippable": true },
+    { "type": "text_input", "field": "reason", "prompt": "What's the reason for your visit?", "validate": "required", "validationError": "Please share a reason for the visit." },
+    {
+      "type": "review_confirm",
+      "prompt": "Please review your appointment.",
+      "template": "👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 Patient: {customerName}\n🎂 Age: {age}\n⚧️ Gender: {gender}\n📝 Reason: {reason}\n💰 Fee: ₹{provider.fee}"
+    }
+  ],
+  "confirmationTemplate": "✅ Your appointment has been confirmed!\n\n🆔 Appointment ID: {bookingId}\n👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n💰 Consultation Fee: ₹{provider.fee}\n📍 {businessName}\n🔑 Booking Code: {bookingCode}\n\nReply HERE when you arrive at the clinic.\nReply STATUS anytime to check your appointment."
+}

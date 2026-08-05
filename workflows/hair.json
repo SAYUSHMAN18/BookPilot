@@ -1,0 +1,77 @@
+{
+  "id": "hair",
+  "description": "haircut, hair color, hairstyle, salon/barber services",
+  "matchLabel": "a hair stylist",
+  "label": "Haircut / Grooming",
+  "keywords": [
+    "haircut",
+    "hair cut",
+    "hair color",
+    "hair colour",
+    "hairstyle",
+    "trim",
+    "salon",
+    "barber",
+    "beard",
+    "highlight"
+  ],
+  "businessHours": {
+    "start": "10:00",
+    "end": "20:00"
+  },
+  "slotMinutes": 45,
+  "bookingIdPrefix": "SAL",
+  "providers": [
+    {
+      "id": "p1",
+      "name": "Snip & Style",
+      "attribute": "Hair Stylist",
+      "fee": 400
+    },
+    {
+      "id": "p2",
+      "name": "The Barber Co.",
+      "attribute": "Men's Grooming & Haircut",
+      "fee": 300
+    },
+    {
+      "id": "p3",
+      "name": "TONI & GUY",
+      "attribute": "UNISEX Haircut & Styling",
+      "fee": 1000
+    }
+  ],
+  "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
+  "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
+  "steps": [
+    {
+      "type": "select_provider",
+      "prompt": "Here are your options:"
+    },
+    {
+      "type": "select_date",
+      "field": "visitDate",
+      "prompt": "Please select your preferred date."
+    },
+    {
+      "type": "select_time_slot",
+      "field": "visitTime",
+      "dateField": "visitDate",
+      "prompt": "Please choose a time slot."
+    },
+    {
+      "type": "text_input",
+      "field": "customerName",
+      "prompt": "What name should I book this under?",
+      "validate": "required",
+      "validationError": "Please share a name.",
+      "editTarget": true
+    },
+    {
+      "type": "review_confirm",
+      "prompt": "Please review your booking.",
+      "template": "💇 Stylist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
+    }
+  ],
+  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+}

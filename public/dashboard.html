@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BookPilot AI — Provider Dashboard</title>
+<style>
+  :root {
+    --bg: #f7f7fa;
+    --card: #ffffff;
+    --border: #e2e2e8;
+    --text: #1a1a2e;
+    --muted: #6b6b7b;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --success: #16a34a;
+    --profile: #4f46e5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    border-top: 4px solid var(--profile);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    transition: border-top-color 0.2s;
+  }
+  header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  header .sub { font-size: 13px; color: var(--muted); }
+  .profile-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--profile) 15%, white);
+    color: var(--profile);
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  select, input, button {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+  }
+  select { min-width: 260px; }
+  button {
+    background: var(--profile);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  button:hover { filter: brightness(0.9); }
+  button.secondary { background: #eee; color: var(--text); }
+  button.secondary:hover { background: #ddd; }
+  button.danger { background: var(--danger); }
+  button.danger:hover { background: var(--danger-hover); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  .table-scroll { overflow-x: auto; }
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-booked { background: #dbeafe; color: #1e40af; }
+  .status-arrived { background: #dcfce7; color: #166534; }
+  .status-cancelled { background: #fee2e2; color: #991b1b; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  .filters { margin-bottom: 12px; }
+  .filters select { min-width: 140px; }
+  .block-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .block-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #fafafa;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  #errorBanner {
+    display: none;
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1><span id="profileIcon">📋</span> BookPilot AI — Provider Dashboard <span class="profile-badge" id="profileBadge" style="display:none;"></span></h1>
+    <div class="sub">Bookings made on WhatsApp, and your availability, in one place.</div>
+  </div>
+  <div class="row">
+    <select id="providerSelect"><option>Loading providers…</option></select>
+    <button id="refreshBtn" class="secondary">↻ Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div id="errorBanner"></div>
+
+  <div class="card">
+    <h2>Bookings</h2>
+    <div class="row filters">
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="booked">Booked</option>
+        <option value="arrived">Arrived</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <input type="date" id="dateFilter" />
+      <button id="clearFiltersBtn" class="secondary">Clear filters</button>
+    </div>
+    <div class="table-scroll" id="bookingsContainer"><div class="empty">Select a provider above.</div></div>
+  </div>
+
+  <div class="card" id="availabilityCard">
+    <h2>Availability</h2>
+    <div class="row">
+      <input type="date" id="blockDate" />
+      <input type="time" id="blockTime" placeholder="Leave blank to block the whole day" />
+      <input type="text" id="blockReason" placeholder="Reason (optional)" style="min-width: 200px;" />
+      <button id="addBlockBtn">Block</button>
+    </div>
+    <div class="note">Leave the time field blank to block the entire day. Blocks apply immediately to the WhatsApp bot's available slots.</div>
+    <div class="block-list" id="blockList"></div>
+  </div>
+</main>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const dashboardKey = params.get("key");
+
+  function withKey(url) {
+    if (!dashboardKey) return url;
+    const u = new URL(url, location.origin);
+    u.searchParams.set("key", dashboardKey);
+    return u.toString();
+  }
+
+  async function api(path, options) {
+    const resp = await fetch(withKey(path), {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || `Request failed (${resp.status})`);
+    }
+    return resp.status === 204 ? null : resp.json();
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("errorBanner");
+    el.textContent = msg;
+    el.style.display = msg ? "block" : "none";
+  }
+
+  function statusBadge(status) {
+    return `<span class="status-badge status-${status}">${status}</span>`;
+  }
+
+  function formatIST(ms) {
+    return new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+  }
+
+  // Local-midnight date math matching the server's isoDate/parseIsoDate
+  // convention (never `new Date(isoString)` directly — that parses as UTC
+  // and silently shifts a day in timezones ahead of UTC, a real bug that
+  // was already found and fixed server-side).
+  function addDaysToIso(iso, days) {
+    if (!iso) return null;
+    const [y, m, d] = iso.split("-").map(Number);
+    const date = new Date(y, m - 1, d + days);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  // Every business type shows different information — a doctor's booking
+  // is meaningless without patient/age/reason, a hotel booking is
+  // meaningless without check-in/nights, and neither wants the other's
+  // fields cluttering their table. Falls back to a generic shape for any
+  // workflow not listed here, so a brand-new workflows/*.json still gets a
+  // usable (if generic) dashboard view with zero dashboard code changes.
+  const PROFILES = {
+    medical: {
+      icon: "🩺",
+      theme: "#0891b2",
+      columns: [
+        { label: "Booking ID", render: (b) => b.bookingId },
+        { label: "Patient", render: (b) => b.customerName || "—" },
+        { label: "Age", render: (b) => b.age || "—" },
+        { label: "Gender", render: (b) => b.gender || "—" },
+        { label: "Reason", render: (b) => b.reason || "—" },
+        { label: "Doctor", render: (b) => b.providerName || "—" },
+        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+        { label: "Time", render: (b) => b.visitTime || "—" },
+        { label: "Status", render: (b) => statusBadge(b.status) },
+        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+      ],
+    },
+    hair: {
+      icon: "💇",
+      theme: "#a855f7",
+      columns: [
+        { label: "Booking ID", render: (b) => b.bookingId },
+        { label: "Customer", render: (b) => b.customerName || "—" },
+        { label: "Stylist", render: (b) => b.providerName || "—" },
+        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+        { label: "Time", render: (b) => b.visitTime || "—" },
+        { label: "Status", render: (b) => statusBadge(b.status) },
+        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+      ],
+    },
+    makeup: {
+      icon: "💄",
+      theme: "#ec4899",
+      columns: [
+        { label: "Booking ID", render: (b) => b.bookingId },
+        { label: "Customer", render: (b) => b.customerName || "—" },
+        { label: "Artist", render: (b) => b.providerName || "—" },
+        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+        { label: "Time", render: (b) => b.visitTime || "—" },
+        { label: "Status", render: (b) => statusBadge(b.status) },
+        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+      ],
+    },
+    hotel: {
+      icon: "🏨",
+      theme: "#f59e0b",
+      columns: [
+        { label: "Booking ID", render: (b) => b.bookingId },
+        { label: "Guest", render: (b) => b.customerName || "—" },
+        { label: "Hotel", render: (b) => b.hotelName || "—" },
+        { label: "Room", render: (b) => b.providerName || "—" },
+        { label: "Check-in", render: (b) => b.checkInIso || "—" },
+        { label: "Check-out", render: (b) => addDaysToIso(b.checkInIso, Number(b.nights) || 0) || "—" },
+        { label: "Nights", render: (b) => b.nights ?? "—" },
+        { label: "Status", render: (b) => statusBadge(b.status) },
+        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+      ],
+    },
+  };
+
+  const DEFAULT_PROFILE = {
+    icon: "📋",
+    theme: "#4f46e5",
+    columns: [
+      { label: "Booking ID", render: (b) => b.bookingId },
+      { label: "Customer", render: (b) => b.customerName || "—" },
+      { label: "Provider", render: (b) => b.providerName || "—" },
+      { label: "When", render: (b) => b.checkInIso ? `${b.checkInIso} (${b.nights} night${b.nights === 1 ? "" : "s"})` : `${b.visitDateLabel || b.visitDate || "—"} ${b.visitTime || ""}` },
+      { label: "Status", render: (b) => statusBadge(b.status) },
+      { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+    ],
+  };
+
+  function profileFor(workflowId) {
+    return PROFILES[workflowId] || DEFAULT_PROFILE;
+  }
+
+  let providers = [];
+  let currentBookings = [];
+
+  function selectedProvider() {
+    const el = document.getElementById("providerSelect");
+    const [workflowId, providerId] = (el.value || "").split("::");
+    return providers.find((p) => p.workflowId === workflowId && p.providerId === providerId);
+  }
+
+  function applyProfileTheme(provider) {
+    const profile = profileFor(provider?.workflowId);
+    document.documentElement.style.setProperty("--profile", profile.theme);
+    document.getElementById("profileIcon").textContent = profile.icon;
+    const badge = document.getElementById("profileBadge");
+    if (provider) {
+      badge.style.display = "inline-flex";
+      badge.textContent = `${profile.icon} ${provider.workflowLabel}`;
+    } else {
+      badge.style.display = "none";
+    }
+  }
+
+  async function loadProviders() {
+    providers = await api("/api/dashboard/providers");
+    const select = document.getElementById("providerSelect");
+    select.innerHTML = providers
+      .map((p) => `<option value="${p.workflowId}::${p.providerId}">${p.workflowLabel} — ${p.providerName}</option>`)
+      .join("");
+    if (providers.length > 0) await loadAll();
+  }
+
+  function renderBookings() {
+    const provider = selectedProvider();
+    const profile = profileFor(provider?.workflowId);
+    const statusFilter = document.getElementById("statusFilter").value;
+    const dateFilter = document.getElementById("dateFilter").value;
+    const filtered = currentBookings.filter((b) => {
+      if (statusFilter && b.status !== statusFilter) return false;
+      if (dateFilter) {
+        const bookingDate = b.checkInIso || b.visitDate;
+        if (bookingDate !== dateFilter) return false;
+      }
+      return true;
+    });
+    const container = document.getElementById("bookingsContainer");
+    if (filtered.length === 0) {
+      container.innerHTML = `<div class="empty">No bookings match.</div>`;
+      return;
+    }
+    const rows = filtered
+      .map((b) => `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}</tr>`)
+      .join("");
+    container.innerHTML = `<table>
+      <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  async function loadBookings() {
+    const provider = selectedProvider();
+    if (!provider) return;
+    currentBookings = await api(`/api/dashboard/bookings?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`);
+    renderBookings();
+  }
+
+  async function loadAvailability() {
+    const provider = selectedProvider();
+    const card = document.getElementById("availabilityCard");
+    if (!provider) return;
+
+    if (!provider.supportsAvailability) {
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "block";
+
+    const blocks = await api(`/api/dashboard/availability?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`);
+    const list = document.getElementById("blockList");
+    if (blocks.length === 0) {
+      list.innerHTML = `<div class="empty">No blocks set.</div>`;
+      return;
+    }
+    list.innerHTML = blocks
+      .map(
+        (b) => `<div class="block-item">
+          <span>${b.date}${b.time ? " at " + b.time : " (whole day)"}${b.reason ? " — " + b.reason : ""}</span>
+          <button class="danger" data-block-id="${b.id}">Remove</button>
+        </div>`
+      )
+      .join("");
+    list.querySelectorAll("button[data-block-id]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api(`/api/dashboard/availability/${btn.dataset.blockId}`, { method: "DELETE" });
+          await loadAvailability();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+    });
+  }
+
+  async function loadAll() {
+    showError("");
+    applyProfileTheme(selectedProvider());
+    try {
+      await Promise.all([loadBookings(), loadAvailability()]);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  document.getElementById("providerSelect").addEventListener("change", loadAll);
+  document.getElementById("refreshBtn").addEventListener("click", loadAll);
+  document.getElementById("statusFilter").addEventListener("change", renderBookings);
+  document.getElementById("dateFilter").addEventListener("change", renderBookings);
+  document.getElementById("clearFiltersBtn").addEventListener("click", () => {
+    document.getElementById("statusFilter").value = "";
+    document.getElementById("dateFilter").value = "";
+    renderBookings();
+  });
+
+  document.getElementById("addBlockBtn").addEventListener("click", async () => {
+    const provider = selectedProvider();
+    if (!provider) return;
+    const date = document.getElementById("blockDate").value;
+    const time = document.getElementById("blockTime").value;
+    const reason = document.getElementById("blockReason").value;
+    if (!date) { showError("Pick a date to block first."); return; }
+    try {
+      await api("/api/dashboard/availability", {
+        method: "POST",
+        body: JSON.stringify({ workflowId: provider.workflowId, providerId: provider.providerId, date, time: time || null, reason: reason || null }),
+      });
+      document.getElementById("blockDate").value = "";
+      document.getElementById("blockTime").value = "";
+      document.getElementById("blockReason").value = "";
+      await loadAvailability();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  loadProviders().catch((err) => showError(err.message));
+</script>
+
+</body>
+</html>
