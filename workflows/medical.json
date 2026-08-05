@@ -5,13 +5,15 @@
   "label": "Doctor Appointment",
   "keywords": ["pain", "fever", "headache", "cough", "cold", "stomach", "chest", "breathing", "doctor", "appointment", "checkup", "sick", "injury", "skin", "rash", "vomit"],
   "businessName": "ABC Multispeciality Clinic",
+  "businessAddress": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054",
+  "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai",
   "businessHours": { "start": "09:00", "end": "21:00" },
   "slotMinutes": 30,
   "bookingIdPrefix": "APT",
   "providers": [
-    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500 },
-    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700 },
-    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600 }
+    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" },
+    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" },
+    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",

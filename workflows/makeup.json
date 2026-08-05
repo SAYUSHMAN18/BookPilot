@@ -8,8 +8,8 @@
   "slotMinutes": 60,
   "bookingIdPrefix": "MKP",
   "providers": [
-    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500 },
-    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200 }
+    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500, "address": "28 Nungambakkam High Road, Chennai, Tamil Nadu 600034", "mapQuery": "Priya+Studio+Bridal+Makeup+Nungambakkam+Chennai" },
+    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200, "address": "7 Kala Ghoda, Fort, Mumbai, Maharashtra 400001", "mapQuery": "Glow+Grace+Makeup+Studio+Kala+Ghoda+Mumbai" }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",

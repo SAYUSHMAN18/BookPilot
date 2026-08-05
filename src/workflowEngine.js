@@ -628,7 +628,7 @@ async function handleDetecting(waId, session, trimmed, workflows) {
     return;
   }
 
-  if (ALREADY_BOOKED_RE.test(trimmed) && bookings.has(waId)) {
+  if (ALREADY_BOOKED_RE.test(trimmed) && bookings.hasAny(waId)) {
     await handleStatusCommand(waId);
     return;
   }
@@ -658,7 +658,7 @@ async function handleDetecting(waId, session, trimmed, workflows) {
     }
 
     session.awaitingBusinessPick = true;
-    if (bookings.has(waId)) {
+    if (bookings.hasAny(waId)) {
       await sendWhatsAppText(waId, "Looks like you already have a booking with us — reply STATUS anytime to check it. If you'd like to book something else too, here's what we offer:");
     }
     await sendBusinessMenu(waId, workflows);
@@ -763,7 +763,7 @@ async function handleRunning(waId, session, trimmed, workflows) {
 }
 
 async function handleStatusCommand(waId) {
-  const booking = bookings.get(waId);
+  const booking = bookings.mostRecentForCustomer(waId);
   if (!booking) {
     await sendWhatsAppText(waId, "No active booking found. Send a message anytime describing what you'd like to book.");
     return;
@@ -807,13 +807,12 @@ async function handleStatusCommand(waId) {
 }
 
 async function handleHereCommand(waId) {
-  const booking = bookings.get(waId);
+  const booking = bookings.mostRecentForCustomer(waId);
   if (!booking) {
     await sendWhatsAppText(waId, "No active booking found to check in.");
     return;
   }
-  booking.status = "arrived";
-  bookings.set(waId, booking);
+  bookings.updateStatus(booking.id, "arrived");
   await sendWhatsAppText(waId, `✅ Marked you as arrived${booking.visitTime ? ` for your ${booking.visitTime} appointment` : ""}. Please wait to be called.`);
 }
 

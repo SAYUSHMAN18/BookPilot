@@ -1,452 +1,1931 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>BookPilot AI — Provider Dashboard</title>
-<style>
-  :root {
-    --bg: #f7f7fa;
-    --card: #ffffff;
-    --border: #e2e2e8;
-    --text: #1a1a2e;
-    --muted: #6b6b7b;
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
-    --danger: #dc2626;
-    --danger-hover: #b91c1c;
-    --success: #16a34a;
-    --profile: #4f46e5;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
-  header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    border-top: 4px solid var(--profile);
-    padding: 16px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    transition: border-top-color 0.2s;
-  }
-  header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
-  header .sub { font-size: 13px; color: var(--muted); }
-  .profile-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    background: color-mix(in srgb, var(--profile) 15%, white);
-    color: var(--profile);
-  }
-  main {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
-  }
-  .card h2 { font-size: 15px; margin: 0 0 12px; }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-  select, input, button {
-    font-family: inherit;
-    font-size: 14px;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #fff;
-    color: var(--text);
-  }
-  select { min-width: 260px; }
-  button {
-    background: var(--profile);
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    font-weight: 500;
-  }
-  button:hover { filter: brightness(0.9); }
-  button.secondary { background: #eee; color: var(--text); }
-  button.secondary:hover { background: #ddd; }
-  button.danger { background: var(--danger); }
-  button.danger:hover { background: var(--danger-hover); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  .table-scroll { overflow-x: auto; }
-  .status-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .status-booked { background: #dbeafe; color: #1e40af; }
-  .status-arrived { background: #dcfce7; color: #166534; }
-  .status-cancelled { background: #fee2e2; color: #991b1b; }
-  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
-  .filters { margin-bottom: 12px; }
-  .filters select { min-width: 140px; }
-  .block-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-  .block-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px;
-    background: #fafafa;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 13px;
-  }
-  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
-  #errorBanner {
-    display: none;
-    background: #fee2e2;
-    color: #991b1b;
-    padding: 10px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BookPilot AI — Dashboard</title>
+  <meta name="description"
+    content="BookPilot AI provider and admin dashboard — manage bookings, availability, and business metrics." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Design tokens ────────────────────────────────── */
+    :root {
+      --bg: #f4f4f8;
+      --card: #ffffff;
+      --border: #e4e4eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --subtle: #9ca3af;
+      --profile: #4f46e5;
+      --admin-accent: #d97706;
+      --danger: #dc2626;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.09);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-xs: 6px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Header ─────────────────────────────────────── */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      border-top: 3px solid var(--profile);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: var(--shadow-sm);
+      transition: border-top-color 0.3s ease;
+    }
+
+    .header-left h1 {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .header-left .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .profile-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: color-mix(in srgb, var(--profile) 12%, white);
+      color: var(--profile);
+      border: 1px solid color-mix(in srgb, var(--profile) 22%, white);
+      transition: background 0.3s, color 0.3s, border-color 0.3s;
+    }
+
+    /* ─── Role Toggle ─────────────────────────────────── */
+    .role-toggle {
+      position: relative;
+      display: inline-flex;
+      background: #ececf1;
+      border-radius: 10px;
+      padding: 4px;
+      gap: 0;
+    }
+
+    .role-slider {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      background: white;
+      border-radius: 7px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.13), 0 0 0 1px rgba(0, 0, 0, 0.05);
+      transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+        width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .role-toggle button {
+      position: relative;
+      z-index: 1;
+      background: transparent;
+      border: none;
+      padding: 7px 18px;
+      border-radius: 7px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .role-toggle button.active {
+      color: var(--text);
+    }
+
+    .role-toggle button:hover:not(.active) {
+      color: var(--text);
+    }
+
+    /* ─── Provider select ─────────────────────────────── */
+    .provider-select-wrap {
+      display: flex;
+      align-items: center;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      overflow: hidden;
+    }
+
+    .provider-select-wrap select {
+      border: none;
+      outline: none;
+      padding: 8px 8px 8px 12px;
+      background: transparent;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text);
+      min-width: 210px;
+      cursor: pointer;
+    }
+
+    /* ─── Generic buttons ─────────────────────────────── */
+    button {
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+    }
+
+    .btn-secondary {
+      background: #f0f0f4;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: var(--radius-xs);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .btn-secondary:hover {
+      background: #e6e6ec;
+    }
+
+    .btn-primary {
+      background: var(--profile);
+      color: white;
+      padding: 8px 16px;
+      border-radius: var(--radius-xs);
+      font-size: 13px;
+      font-weight: 600;
+      transition: filter 0.15s;
+    }
+
+    .btn-primary:hover {
+      filter: brightness(0.88);
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+      padding: 5px 11px;
+      border-radius: var(--radius-xs);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .btn-danger:hover {
+      background: #b91c1c;
+    }
+
+    .btn-link {
+      background: transparent;
+      color: var(--muted);
+      padding: 6px 8px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: var(--radius-xs);
+    }
+
+    .btn-link:hover {
+      color: var(--text);
+      background: #f0f0f4;
+    }
+
+    /* ─── Layout ──────────────────────────────────────── */
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* ─── Cards ───────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .count-badge {
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 1px 9px;
+      border-radius: 999px;
+    }
+
+    /* ─── Stat bar ────────────────────────────────────── */
+    .stat-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .stat-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .stat-body .value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-body .label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 3px;
+    }
+
+    /* Stat color families */
+    .stat-total .stat-icon {
+      background: #eef2ff;
+    }
+
+    .stat-today .stat-icon {
+      background: #f0fdf4;
+    }
+
+    .stat-arrived .stat-icon {
+      background: #dcfce7;
+    }
+
+    .stat-cancel .stat-icon {
+      background: #fef2f2;
+    }
+
+    .stat-biz .stat-icon {
+      background: #fefce8;
+    }
+
+    .stat-total .value {
+      color: #4f46e5;
+    }
+
+    .stat-today .value {
+      color: #16a34a;
+    }
+
+    .stat-arrived .value {
+      color: #059669;
+    }
+
+    .stat-cancel .value {
+      color: #dc2626;
+    }
+
+    .stat-biz .value {
+      color: #d97706;
+    }
+
+    /* ─── Search bar ──────────────────────────────────── */
+    .search-wrap {
+      position: relative;
+      margin-bottom: 12px;
+    }
+
+    .search-wrap .s-icon {
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 15px;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .search-wrap input {
+      width: 100%;
+      padding: 10px 14px 10px 40px;
+      font-family: inherit;
+      font-size: 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fafafa;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+
+    .search-wrap input:focus {
+      border-color: var(--profile);
+      background: white;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--profile) 14%, transparent);
+    }
+
+    /* ─── Filters row ─────────────────────────────────── */
+    .filters-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 10px 12px;
+      background: #f8f8fb;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 10px;
+    }
+
+    .filters-row select,
+    .filters-row input[type="date"] {
+      font-family: inherit;
+      font-size: 13px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: white;
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .filters-row select:focus,
+    .filters-row input[type="date"]:focus {
+      border-color: var(--profile);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--profile) 12%, transparent);
+    }
+
+    /* ─── Active filter chips ─────────────────────────── */
+    .active-filters {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-height: 0;
+      margin-bottom: 0;
+    }
+
+    .active-filters:not(:empty) {
+      margin-bottom: 14px;
+    }
+
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px 3px 12px;
+      background: color-mix(in srgb, var(--profile) 9%, white);
+      color: var(--profile);
+      border: 1px solid color-mix(in srgb, var(--profile) 22%, white);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      animation: chipIn 0.14s ease;
+    }
+
+    @keyframes chipIn {
+      from {
+        opacity: 0;
+        transform: scale(0.88);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .filter-chip .chip-x {
+      background: none;
+      border: none;
+      padding: 0 2px;
+      color: inherit;
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0.55;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      transition: opacity 0.1s;
+    }
+
+    .filter-chip .chip-x:hover {
+      opacity: 1;
+    }
+
+    /* ─── Provider view filters ───────────────────────── */
+    .prov-filters {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .prov-filters select,
+    .prov-filters input[type="date"] {
+      font-family: inherit;
+      font-size: 13px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: white;
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .prov-filters select:focus,
+    .prov-filters input[type="date"]:focus {
+      border-color: var(--profile);
+    }
+
+    /* ─── Table ───────────────────────────────────────── */
+    .table-scroll {
+      overflow-x: auto;
+      border-radius: var(--radius-xs);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 10px 13px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #fafafa;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr {
+      transition: background 0.1s;
+    }
+
+    tbody tr:hover {
+      background: #f9f9fb;
+    }
+
+    /* ─── Status badges ───────────────────────────────── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .status-booked {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .status-arrived {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status-cancelled {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .biz-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    /* ─── Availability ────────────────────────────────── */
+    .avail-add {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 13px 14px;
+      background: #f8f8fb;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+    }
+
+    .avail-add input {
+      font-family: inherit;
+      font-size: 13px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: white;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .avail-add input:focus {
+      border-color: var(--profile);
+    }
+
+    .note {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .block-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .block-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 14px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+    }
+
+    /* ─── Empty state ─────────────────────────────────── */
+    .empty {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 36px 0;
+      text-align: center;
+    }
+
+    /* ─── Error banner ────────────────────────────────── */
+    #errorBanner {
+      display: none;
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 10px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      border: 1px solid #fecaca;
+    }
+
+    /* ─── Admin-mode header accent ────────────────────── */
+    body.admin-mode header {
+      border-top-color: var(--admin-accent);
+    }
+
+    /* ─── Provider info card ──────────────────────────── */
+    .provider-info-banner {
+      display: flex;
+      gap: 0;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      background: var(--card);
+    }
+    .provider-info-photo {
+      width: 220px;
+      min-width: 220px;
+      object-fit: cover;
+      display: block;
+      background: #e8e8f0;
+    }
+    .provider-info-photo-placeholder {
+      width: 220px;
+      min-width: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 56px;
+      background: color-mix(in srgb, var(--profile) 8%, white);
+    }
+    .provider-info-body {
+      flex: 1;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .provider-info-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .provider-info-sub {
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .provider-info-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .info-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .map-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-xs);
+      font-size: 13px;
+      font-weight: 600;
+      background: #4285f4;
+      color: white;
+      text-decoration: none;
+      transition: filter 0.15s;
+      width: fit-content;
+      margin-top: 6px;
+    }
+    .map-link:hover { filter: brightness(0.9); }
+    @media (max-width: 640px) {
+      .provider-info-banner { flex-direction: column; }
+      .provider-info-photo, .provider-info-photo-placeholder { width: 100%; min-width: 0; height: 160px; }
+    }
+
+    /* ─── Workflow modal ─────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      backdrop-filter: blur(4px);
+    }
+
+    .modal-card {
+      background: var(--card);
+      width: 100%;
+      max-width: 750px;
+      max-height: 90vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--border);
+      animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes modalIn {
+      from {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .form-group-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .form-control-wrap {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .form-label {
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .form-input,
+    .form-select,
+    .form-textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      background: #fafafa;
+      color: var(--text);
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+
+    .form-input:focus,
+    .form-select:focus,
+    .form-textarea:focus {
+      border-color: var(--profile);
+      background: white;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--profile) 14%, transparent);
+    }
+
+    .form-textarea {
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      resize: vertical;
+    }
+  </style>
 </head>
+
 <body>
 
-<header>
-  <div>
-    <h1><span id="profileIcon">📋</span> BookPilot AI — Provider Dashboard <span class="profile-badge" id="profileBadge" style="display:none;"></span></h1>
-    <div class="sub">Bookings made on WhatsApp, and your availability, in one place.</div>
-  </div>
-  <div class="row">
-    <select id="providerSelect"><option>Loading providers…</option></select>
-    <button id="refreshBtn" class="secondary">↻ Refresh</button>
-  </div>
-</header>
-
-<main>
-  <div id="errorBanner"></div>
-
-  <div class="card">
-    <h2>Bookings</h2>
-    <div class="row filters">
-      <select id="statusFilter">
-        <option value="">All statuses</option>
-        <option value="booked">Booked</option>
-        <option value="arrived">Arrived</option>
-        <option value="cancelled">Cancelled</option>
-      </select>
-      <input type="date" id="dateFilter" />
-      <button id="clearFiltersBtn" class="secondary">Clear filters</button>
+  <header>
+    <div class="header-left">
+      <h1>
+        <span id="profileIcon">📋</span>
+        BookPilot AI
+        <span class="profile-badge" id="profileBadge" style="display:none;"></span>
+      </h1>
+      <div class="sub">Bookings made on WhatsApp — all in one place.</div>
     </div>
-    <div class="table-scroll" id="bookingsContainer"><div class="empty">Select a provider above.</div></div>
-  </div>
 
-  <div class="card" id="availabilityCard">
-    <h2>Availability</h2>
-    <div class="row">
-      <input type="date" id="blockDate" />
-      <input type="time" id="blockTime" placeholder="Leave blank to block the whole day" />
-      <input type="text" id="blockReason" placeholder="Reason (optional)" style="min-width: 200px;" />
-      <button id="addBlockBtn">Block</button>
+    <div class="header-right">
+      <!-- Sliding pill role toggle -->
+      <div class="role-toggle" id="roleToggle">
+        <div class="role-slider" id="roleSlider"></div>
+        <button id="roleProviderBtn" class="active">🏢 Provider</button>
+        <button id="roleAdminBtn">👑 Admin</button>
+      </div>
+
+      <!-- Provider selector (hidden in admin mode) -->
+      <div class="provider-select-wrap" id="providerSelectWrap">
+        <select id="providerSelect">
+          <option>Loading providers…</option>
+        </select>
+      </div>
+
+      <button class="btn-secondary" id="refreshBtn">↻ Refresh</button>
     </div>
-    <div class="note">Leave the time field blank to block the entire day. Blocks apply immediately to the WhatsApp bot's available slots.</div>
-    <div class="block-list" id="blockList"></div>
-  </div>
-</main>
+  </header>
 
-<script>
-  const params = new URLSearchParams(location.search);
-  const dashboardKey = params.get("key");
+  <main>
+    <div id="errorBanner"></div>
 
-  function withKey(url) {
-    if (!dashboardKey) return url;
-    const u = new URL(url, location.origin);
-    u.searchParams.set("key", dashboardKey);
-    return u.toString();
-  }
+    <!-- ── Always-visible stats bar ── -->
+    <div class="stat-bar" id="statBar"></div>
 
-  async function api(path, options) {
-    const resp = await fetch(withKey(path), {
-      ...options,
-      headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
-    });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      throw new Error(body.error || `Request failed (${resp.status})`);
+    <!-- ── ADMIN VIEW: search + filters + all-bookings table ── -->
+    <div class="card" id="adminFiltersCard" style="display:none;">
+      <div class="card-header">
+        <span class="card-title">
+          📊 All Bookings
+          <span class="count-badge" id="adminCountBadge">—</span>
+        </span>
+      </div>
+
+      <!-- Promoted full-width search -->
+      <div class="search-wrap">
+        <span class="s-icon">🔍</span>
+        <input type="text" id="searchFilter" placeholder="Search by customer name or booking ID…" autocomplete="off" />
+      </div>
+
+      <!-- Filters row -->
+      <div class="filters-row">
+        <select id="businessFilter">
+          <option value="">All businesses</option>
+        </select>
+        <select id="adminStatusFilter">
+          <option value="">All statuses</option>
+          <option value="booked">Booked</option>
+          <option value="arrived">Arrived</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <input type="date" id="adminDateFilter" title="Filter by appointment / check-in date" />
+        <button class="btn-link" id="clearAdminFiltersBtn">× Clear all</button>
+      </div>
+
+      <!-- Active filter chips -->
+      <div class="active-filters" id="activeFilters"></div>
+
+      <div class="table-scroll" id="adminBookingsContainer">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
+
+    <!-- ── ADMIN VIEW: Manage Businesses ── -->
+    <div class="card" id="adminWorkflowsCard" style="display:none; margin-top: 18px;">
+      <div class="card-header">
+        <span class="card-title">
+          🏪 Manage Businesses
+          <span class="count-badge" id="workflowsCountBadge">—</span>
+        </span>
+        <button class="btn-primary" id="addWorkflowBtn">＋ Add Business</button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Business ID</th>
+              <th>Label (Name)</th>
+              <th>Description</th>
+              <th>Type/Providers</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="workflowsList">
+            <tr>
+              <td colspan="5" class="empty">Loading businesses…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── PROVIDER VIEW: info banner (photo + geolocation) ── -->
+    <div id="providerInfoBanner" style="display:none;"></div>
+
+    <!-- ── PROVIDER VIEW: bookings table ── -->
+    <div class="card" id="providerBookingsCard">
+      <div class="card-header">
+        <span class="card-title">📋 Bookings</span>
+      </div>
+      <div class="prov-filters">
+        <select id="statusFilter">
+          <option value="">All statuses</option>
+          <option value="booked">Booked</option>
+          <option value="arrived">Arrived</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <input type="date" id="dateFilter" title="Filter by date" />
+        <button class="btn-link" id="clearFiltersBtn">× Clear filters</button>
+      </div>
+      <div class="table-scroll" id="bookingsContainer">
+        <div class="empty">Select a provider above.</div>
+      </div>
+    </div>
+
+    <!-- ── PROVIDER VIEW: availability ── -->
+    <div class="card" id="availabilityCard">
+      <div class="card-header">
+        <span class="card-title">🗓 Availability</span>
+      </div>
+      <div class="avail-add">
+        <input type="date" id="blockDate" />
+        <input type="time" id="blockTime" placeholder="Time (optional)" />
+        <input type="text" id="blockReason" placeholder="Reason (optional)" style="min-width:190px;" />
+        <button class="btn-primary" id="addBlockBtn">Block slot</button>
+      </div>
+      <div class="note">Leave the time blank to block the entire day. Blocks apply immediately to the WhatsApp bot's
+        available slots.</div>
+      <div class="block-list" id="blockList"></div>
+    </div>
+
+    <!-- Modal for Workflow Add/Edit -->
+    <div id="workflowModal" class="modal-overlay">
+      <div class="modal-card">
+        <div class="card-header" style="margin-bottom: 0;">
+          <span class="card-title" id="workflowModalTitle" style="font-size: 16px;">Add Business Workflow</span>
+          <button class="btn-link" id="closeWorkflowModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+        </div>
+
+        <div id="workflowModalError"
+          style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="form-group-row">
+            <div class="form-control-wrap">
+              <label class="form-label">Start from Template</label>
+              <select id="workflowTemplateSelect" class="form-select">
+                <option value="custom">Custom (Blank / Custom JSON)</option>
+                <option value="hair">💇 Haircut / Grooming Template</option>
+                <option value="hotel">🏨 Hotel Room Template</option>
+                <option value="medical">🩺 Doctor Appointment Template</option>
+              </select>
+            </div>
+            <div class="form-control-wrap">
+              <label class="form-label">Workflow / Business ID</label>
+              <input type="text" id="workflowIdInput" placeholder="e.g. spa (lowercase, no spaces)"
+                class="form-input" />
+            </div>
+          </div>
+
+          <div class="form-group-row">
+            <div class="form-control-wrap">
+              <label class="form-label">Label (Name)</label>
+              <input type="text" id="workflowLabelInput" placeholder="e.g. Zen Massage & Spa" class="form-input" />
+            </div>
+            <div class="form-control-wrap">
+              <label class="form-label">Booking ID Prefix</label>
+              <input type="text" id="workflowPrefixInput" placeholder="e.g. SPA" class="form-input" />
+            </div>
+          </div>
+
+          <div>
+            <label class="form-label">Description</label>
+            <input type="text" id="workflowDescInput" placeholder="e.g. massage, therapy, relaxation, wellness"
+              class="form-input" />
+          </div>
+
+          <div>
+            <label class="form-label">Full Workflow JSON Config</label>
+            <textarea id="workflowJsonInput" rows="12" class="form-textarea"
+              placeholder="Paste or edit workflow JSON configuration..."></textarea>
+            <div style="font-size:11px; color:var(--muted); margin-top:4px;">The metadata fields above will
+              automatically update key properties of this JSON on save. Use standard syntax matching existing workflows.
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="btn-secondary" id="cancelWorkflowModalBtn">Cancel</button>
+          <button class="btn-primary" id="saveWorkflowBtn">Save Business</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    /* ─────────────────────────────────────────────────────
+       Helpers
+    ───────────────────────────────────────────────────── */
+    const params = new URLSearchParams(location.search);
+    const dashboardKey = params.get("key");
+
+    function withKey(url) {
+      if (!dashboardKey) return url;
+      const u = new URL(url, location.origin);
+      u.searchParams.set("key", dashboardKey);
+      return u.toString();
     }
-    return resp.status === 204 ? null : resp.json();
-  }
 
-  function showError(msg) {
-    const el = document.getElementById("errorBanner");
-    el.textContent = msg;
-    el.style.display = msg ? "block" : "none";
-  }
-
-  function statusBadge(status) {
-    return `<span class="status-badge status-${status}">${status}</span>`;
-  }
-
-  function formatIST(ms) {
-    return new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-  }
-
-  // Local-midnight date math matching the server's isoDate/parseIsoDate
-  // convention (never `new Date(isoString)` directly — that parses as UTC
-  // and silently shifts a day in timezones ahead of UTC, a real bug that
-  // was already found and fixed server-side).
-  function addDaysToIso(iso, days) {
-    if (!iso) return null;
-    const [y, m, d] = iso.split("-").map(Number);
-    const date = new Date(y, m - 1, d + days);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  }
-
-  // Every business type shows different information — a doctor's booking
-  // is meaningless without patient/age/reason, a hotel booking is
-  // meaningless without check-in/nights, and neither wants the other's
-  // fields cluttering their table. Falls back to a generic shape for any
-  // workflow not listed here, so a brand-new workflows/*.json still gets a
-  // usable (if generic) dashboard view with zero dashboard code changes.
-  const PROFILES = {
-    medical: {
-      icon: "🩺",
-      theme: "#0891b2",
-      columns: [
-        { label: "Booking ID", render: (b) => b.bookingId },
-        { label: "Patient", render: (b) => b.customerName || "—" },
-        { label: "Age", render: (b) => b.age || "—" },
-        { label: "Gender", render: (b) => b.gender || "—" },
-        { label: "Reason", render: (b) => b.reason || "—" },
-        { label: "Doctor", render: (b) => b.providerName || "—" },
-        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-        { label: "Time", render: (b) => b.visitTime || "—" },
-        { label: "Status", render: (b) => statusBadge(b.status) },
-        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
-      ],
-    },
-    hair: {
-      icon: "💇",
-      theme: "#a855f7",
-      columns: [
-        { label: "Booking ID", render: (b) => b.bookingId },
-        { label: "Customer", render: (b) => b.customerName || "—" },
-        { label: "Stylist", render: (b) => b.providerName || "—" },
-        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-        { label: "Time", render: (b) => b.visitTime || "—" },
-        { label: "Status", render: (b) => statusBadge(b.status) },
-        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
-      ],
-    },
-    makeup: {
-      icon: "💄",
-      theme: "#ec4899",
-      columns: [
-        { label: "Booking ID", render: (b) => b.bookingId },
-        { label: "Customer", render: (b) => b.customerName || "—" },
-        { label: "Artist", render: (b) => b.providerName || "—" },
-        { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-        { label: "Time", render: (b) => b.visitTime || "—" },
-        { label: "Status", render: (b) => statusBadge(b.status) },
-        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
-      ],
-    },
-    hotel: {
-      icon: "🏨",
-      theme: "#f59e0b",
-      columns: [
-        { label: "Booking ID", render: (b) => b.bookingId },
-        { label: "Guest", render: (b) => b.customerName || "—" },
-        { label: "Hotel", render: (b) => b.hotelName || "—" },
-        { label: "Room", render: (b) => b.providerName || "—" },
-        { label: "Check-in", render: (b) => b.checkInIso || "—" },
-        { label: "Check-out", render: (b) => addDaysToIso(b.checkInIso, Number(b.nights) || 0) || "—" },
-        { label: "Nights", render: (b) => b.nights ?? "—" },
-        { label: "Status", render: (b) => statusBadge(b.status) },
-        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
-      ],
-    },
-  };
-
-  const DEFAULT_PROFILE = {
-    icon: "📋",
-    theme: "#4f46e5",
-    columns: [
-      { label: "Booking ID", render: (b) => b.bookingId },
-      { label: "Customer", render: (b) => b.customerName || "—" },
-      { label: "Provider", render: (b) => b.providerName || "—" },
-      { label: "When", render: (b) => b.checkInIso ? `${b.checkInIso} (${b.nights} night${b.nights === 1 ? "" : "s"})` : `${b.visitDateLabel || b.visitDate || "—"} ${b.visitTime || ""}` },
-      { label: "Status", render: (b) => statusBadge(b.status) },
-      { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
-    ],
-  };
-
-  function profileFor(workflowId) {
-    return PROFILES[workflowId] || DEFAULT_PROFILE;
-  }
-
-  let providers = [];
-  let currentBookings = [];
-
-  function selectedProvider() {
-    const el = document.getElementById("providerSelect");
-    const [workflowId, providerId] = (el.value || "").split("::");
-    return providers.find((p) => p.workflowId === workflowId && p.providerId === providerId);
-  }
-
-  function applyProfileTheme(provider) {
-    const profile = profileFor(provider?.workflowId);
-    document.documentElement.style.setProperty("--profile", profile.theme);
-    document.getElementById("profileIcon").textContent = profile.icon;
-    const badge = document.getElementById("profileBadge");
-    if (provider) {
-      badge.style.display = "inline-flex";
-      badge.textContent = `${profile.icon} ${provider.workflowLabel}`;
-    } else {
-      badge.style.display = "none";
-    }
-  }
-
-  async function loadProviders() {
-    providers = await api("/api/dashboard/providers");
-    const select = document.getElementById("providerSelect");
-    select.innerHTML = providers
-      .map((p) => `<option value="${p.workflowId}::${p.providerId}">${p.workflowLabel} — ${p.providerName}</option>`)
-      .join("");
-    if (providers.length > 0) await loadAll();
-  }
-
-  function renderBookings() {
-    const provider = selectedProvider();
-    const profile = profileFor(provider?.workflowId);
-    const statusFilter = document.getElementById("statusFilter").value;
-    const dateFilter = document.getElementById("dateFilter").value;
-    const filtered = currentBookings.filter((b) => {
-      if (statusFilter && b.status !== statusFilter) return false;
-      if (dateFilter) {
-        const bookingDate = b.checkInIso || b.visitDate;
-        if (bookingDate !== dateFilter) return false;
+    async function api(path, options) {
+      const resp = await fetch(withKey(path), {
+        ...options,
+        headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `Request failed (${resp.status})`);
       }
-      return true;
-    });
-    const container = document.getElementById("bookingsContainer");
-    if (filtered.length === 0) {
-      container.innerHTML = `<div class="empty">No bookings match.</div>`;
-      return;
+      return resp.status === 204 ? null : resp.json();
     }
-    const rows = filtered
-      .map((b) => `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}</tr>`)
-      .join("");
-    container.innerHTML = `<table>
-      <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}</tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  }
 
-  async function loadBookings() {
-    const provider = selectedProvider();
-    if (!provider) return;
-    currentBookings = await api(`/api/dashboard/bookings?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`);
-    renderBookings();
-  }
-
-  async function loadAvailability() {
-    const provider = selectedProvider();
-    const card = document.getElementById("availabilityCard");
-    if (!provider) return;
-
-    if (!provider.supportsAvailability) {
-      card.style.display = "none";
-      return;
+    function showError(msg) {
+      const el = document.getElementById("errorBanner");
+      el.textContent = msg;
+      el.style.display = msg ? "block" : "none";
     }
-    card.style.display = "block";
 
-    const blocks = await api(`/api/dashboard/availability?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`);
-    const list = document.getElementById("blockList");
-    if (blocks.length === 0) {
-      list.innerHTML = `<div class="empty">No blocks set.</div>`;
-      return;
+    function statusBadge(status) {
+      const icon = { booked: "🔵", arrived: "✅", cancelled: "❌" }[status] || "";
+      return `<span class="status-badge status-${status}">${icon} ${status}</span>`;
     }
-    list.innerHTML = blocks
-      .map(
-        (b) => `<div class="block-item">
-          <span>${b.date}${b.time ? " at " + b.time : " (whole day)"}${b.reason ? " — " + b.reason : ""}</span>
-          <button class="danger" data-block-id="${b.id}">Remove</button>
-        </div>`
-      )
-      .join("");
-    list.querySelectorAll("button[data-block-id]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        try {
-          await api(`/api/dashboard/availability/${btn.dataset.blockId}`, { method: "DELETE" });
-          await loadAvailability();
-        } catch (err) {
-          showError(err.message);
+
+    function formatIST(ms) {
+      return new Date(ms).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short",
+      });
+    }
+
+    function todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+
+    function addDaysToIso(iso, days) {
+      if (!iso) return null;
+      const [y, m, d] = iso.split("-").map(Number);
+      const date = new Date(y, m - 1, d + days);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function whenGeneric(b) {
+      return b.checkInIso
+        ? `${b.checkInIso} (${b.nights} night${b.nights === 1 ? "" : "s"})`
+        : `${b.visitDateLabel || b.visitDate || "—"} ${b.visitTime || ""}`.trim();
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Workflow profiles  (icon + theme + column config)
+    ───────────────────────────────────────────────────── */
+    const PROFILES = {
+      medical: {
+        icon: "🩺", theme: "#0891b2",
+        columns: [
+          { label: "Booking ID", render: (b) => b.bookingId },
+          { label: "Patient", render: (b) => b.customerName || "—" },
+          { label: "Age", render: (b) => b.age || "—" },
+          { label: "Gender", render: (b) => b.gender || "—" },
+          { label: "Reason", render: (b) => b.reason || "—" },
+          { label: "Doctor", render: (b) => b.providerName || "—" },
+          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Status", render: (b) => statusBadge(b.status) },
+          { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+        ],
+      },
+      hair: {
+        icon: "💇", theme: "#a855f7",
+        columns: [
+          { label: "Booking ID", render: (b) => b.bookingId },
+          { label: "Customer", render: (b) => b.customerName || "—" },
+          { label: "Stylist", render: (b) => b.providerName || "—" },
+          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Status", render: (b) => statusBadge(b.status) },
+          { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+        ],
+      },
+      makeup: {
+        icon: "💄", theme: "#ec4899",
+        columns: [
+          { label: "Booking ID", render: (b) => b.bookingId },
+          { label: "Customer", render: (b) => b.customerName || "—" },
+          { label: "Artist", render: (b) => b.providerName || "—" },
+          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
+          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Status", render: (b) => statusBadge(b.status) },
+          { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+        ],
+      },
+      hotel: {
+        icon: "🏨", theme: "#f59e0b",
+        columns: [
+          { label: "Booking ID", render: (b) => b.bookingId },
+          { label: "Guest", render: (b) => b.customerName || "—" },
+          { label: "Hotel", render: (b) => b.hotelName || "—" },
+          { label: "Room", render: (b) => b.providerName || "—" },
+          { label: "Check-in", render: (b) => b.checkInIso || "—" },
+          { label: "Check-out", render: (b) => addDaysToIso(b.checkInIso, Number(b.nights) || 0) || "—" },
+          { label: "Nights", render: (b) => b.nights ?? "—" },
+          { label: "Status", render: (b) => statusBadge(b.status) },
+          { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+        ],
+      },
+    };
+
+    const DEFAULT_PROFILE = {
+      icon: "📋", theme: "#4f46e5",
+      columns: [
+        { label: "Booking ID", render: (b) => b.bookingId },
+        { label: "Customer", render: (b) => b.customerName || "—" },
+        { label: "Provider", render: (b) => b.providerName || "—" },
+        { label: "When", render: whenGeneric },
+        { label: "Status", render: (b) => statusBadge(b.status) },
+        { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
+      ],
+    };
+
+    function profileFor(workflowId) { return PROFILES[workflowId] || DEFAULT_PROFILE; }
+
+    /* ─────────────────────────────────────────────────────
+       State
+    ───────────────────────────────────────────────────── */
+    let role = "provider";
+    let providers = [];
+    let currentBookings = [];
+    let allBookings = [];
+
+    function providerLabel(workflowId, providerId) {
+      const p = providers.find((x) => x.workflowId === workflowId && x.providerId === providerId);
+      return p ? p.providerName : providerId || "—";
+    }
+
+    function workflowLabel(workflowId) {
+      const p = providers.find((x) => x.workflowId === workflowId);
+      return p ? p.workflowLabel : workflowId;
+    }
+
+    function selectedProvider() {
+      const el = document.getElementById("providerSelect");
+      const [wid, pid] = (el.value || "").split("::");
+      return providers.find((p) => p.workflowId === wid && p.providerId === pid);
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Sliding toggle animation
+    ───────────────────────────────────────────────────── */
+    function updateSlider() {
+      const toggle = document.getElementById("roleToggle");
+      const slider = document.getElementById("roleSlider");
+      const active = toggle.querySelector("button.active");
+      if (!active) return;
+      slider.style.left = active.offsetLeft + "px";
+      slider.style.width = active.offsetWidth + "px";
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Theme / header accent
+    ───────────────────────────────────────────────────── */
+    function applyProfileTheme(provider) {
+      const isAdmin = role === "admin";
+      const profile = isAdmin ? { theme: "#d97706", icon: "👑" } : profileFor(provider?.workflowId);
+      document.documentElement.style.setProperty("--profile", profile.theme);
+      document.getElementById("profileIcon").textContent = isAdmin ? "👑" : profile.icon;
+      document.body.classList.toggle("admin-mode", isAdmin);
+
+      const badge = document.getElementById("profileBadge");
+      if (isAdmin) {
+        badge.style.display = "inline-flex";
+        badge.textContent = "👑 Admin — all businesses";
+      } else if (provider) {
+        badge.style.display = "inline-flex";
+        badge.textContent = `${profile.icon} ${provider.workflowLabel}`;
+      } else {
+        badge.style.display = "none";
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Stats bar  — always visible, source depends on role
+    ───────────────────────────────────────────────────── */
+    function renderStatBar(dataset, isAdmin) {
+      const today = todayIso();
+      const total = dataset.length;
+      const todayCnt = dataset.filter((b) => (b.checkInIso || b.visitDate) === today).length;
+      const arrived = dataset.filter((b) => b.status === "arrived").length;
+      const cancelled = dataset.filter((b) => b.status === "cancelled").length;
+      const bizCount = isAdmin ? new Set(dataset.map((b) => b.workflowId)).size : null;
+
+      const bizStat = isAdmin ? `
+      <div class="stat-card stat-biz">
+        <div class="stat-icon">🏪</div>
+        <div class="stat-body">
+          <div class="value">${bizCount}</div>
+          <div class="label">Businesses</div>
+        </div>
+      </div>` : "";
+
+      document.getElementById("statBar").innerHTML = `
+      <div class="stat-card stat-total">
+        <div class="stat-icon">📋</div>
+        <div class="stat-body">
+          <div class="value">${total}</div>
+          <div class="label">Total Bookings</div>
+        </div>
+      </div>
+      <div class="stat-card stat-today">
+        <div class="stat-icon">📅</div>
+        <div class="stat-body">
+          <div class="value">${todayCnt}</div>
+          <div class="label">Today</div>
+        </div>
+      </div>
+      <div class="stat-card stat-arrived">
+        <div class="stat-icon">✅</div>
+        <div class="stat-body">
+          <div class="value">${arrived}</div>
+          <div class="label">Arrived</div>
+        </div>
+      </div>
+      <div class="stat-card stat-cancel">
+        <div class="stat-icon">❌</div>
+        <div class="stat-body">
+          <div class="value">${cancelled}</div>
+          <div class="label">Cancelled</div>
+        </div>
+      </div>
+      ${bizStat}
+    `;
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Active filter chips  (admin mode)
+    ───────────────────────────────────────────────────── */
+    function updateFilterChips() {
+      const searchVal = document.getElementById("searchFilter").value.trim();
+      const bizEl = document.getElementById("businessFilter");
+      const statusEl = document.getElementById("adminStatusFilter");
+      const dateVal = document.getElementById("adminDateFilter").value;
+
+      const chips = [];
+      if (searchVal) chips.push({
+        label: `"${searchVal}"`,
+        clear() { document.getElementById("searchFilter").value = ""; renderAdminBookings(); },
+      });
+      if (bizEl.value) chips.push({
+        label: bizEl.options[bizEl.selectedIndex].text,
+        clear() { bizEl.value = ""; renderAdminBookings(); },
+      });
+      if (statusEl.value) chips.push({
+        label: statusEl.value,
+        clear() { statusEl.value = ""; renderAdminBookings(); },
+      });
+      if (dateVal) chips.push({
+        label: `Date: ${dateVal}`,
+        clear() { document.getElementById("adminDateFilter").value = ""; renderAdminBookings(); },
+      });
+
+      const container = document.getElementById("activeFilters");
+      container.innerHTML = chips.map((c, i) => `
+      <span class="filter-chip">
+        ${c.label}
+        <button class="chip-x" data-chip="${i}" title="Remove filter">×</button>
+      </span>
+    `).join("");
+
+      container.querySelectorAll(".chip-x").forEach((btn) => {
+        btn.addEventListener("click", () => chips[+btn.dataset.chip].clear());
+      });
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Role switching
+    ───────────────────────────────────────────────────── */
+    function setRole(newRole) {
+      role = newRole;
+      const isAdmin = role === "admin";
+      document.getElementById("roleProviderBtn").classList.toggle("active", !isAdmin);
+      document.getElementById("roleAdminBtn").classList.toggle("active", isAdmin);
+      document.getElementById("providerSelectWrap").style.display = isAdmin ? "none" : "";
+      document.getElementById("adminFiltersCard").style.display = isAdmin ? "" : "none";
+      document.getElementById("adminWorkflowsCard").style.display = isAdmin ? "" : "none";
+      document.getElementById("providerBookingsCard").style.display = isAdmin ? "none" : "";
+      document.getElementById("availabilityCard").style.display = isAdmin ? "none" : "";
+      requestAnimationFrame(updateSlider);
+      loadAll();
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Render — provider bookings
+    ───────────────────────────────────────────────────── */
+    function renderBookings() {
+      const provider = selectedProvider();
+      const profile = profileFor(provider?.workflowId);
+      const statusFilt = document.getElementById("statusFilter").value;
+      const dateFilt = document.getElementById("dateFilter").value;
+
+      const filtered = currentBookings.filter((b) => {
+        if (statusFilt && b.status !== statusFilt) return false;
+        if (dateFilt && (b.checkInIso || b.visitDate) !== dateFilt) return false;
+        return true;
+      });
+
+      const container = document.getElementById("bookingsContainer");
+      if (filtered.length === 0) {
+        container.innerHTML = `<div class="empty">No bookings match the current filters.</div>`;
+      } else {
+        const rows = filtered
+          .map((b) => `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}</tr>`)
+          .join("");
+        container.innerHTML = `<table>
+        <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+      }
+      renderStatBar(currentBookings, false);
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Render — admin all-bookings
+    ───────────────────────────────────────────────────── */
+    function renderAdminBookings() {
+      const search = document.getElementById("searchFilter").value.trim().toLowerCase();
+      const biz = document.getElementById("businessFilter").value;
+      const status = document.getElementById("adminStatusFilter").value;
+      const date = document.getElementById("adminDateFilter").value;
+
+      const filtered = allBookings.filter((b) => {
+        if (biz && b.workflowId !== biz) return false;
+        if (status && b.status !== status) return false;
+        if (date && (b.checkInIso || b.visitDate) !== date) return false;
+        if (search) {
+          const hay = `${b.customerName || ""} ${b.bookingId || ""}`.toLowerCase();
+          if (!hay.includes(search)) return false;
         }
+        return true;
       });
+
+      document.getElementById("adminCountBadge").textContent =
+        filtered.length === allBookings.length
+          ? `${filtered.length} total`
+          : `${filtered.length} of ${allBookings.length}`;
+
+      const container = document.getElementById("adminBookingsContainer");
+      if (filtered.length === 0) {
+        container.innerHTML = `<div class="empty">No bookings match the current filters.</div>`;
+      } else {
+        const pIcon = (wid) => (PROFILES[wid] || DEFAULT_PROFILE).icon;
+        const rows = filtered.map((b) => `<tr>
+        <td><span class="biz-tag">${pIcon(b.workflowId)} ${workflowLabel(b.workflowId)}</span></td>
+        <td>${b.bookingId}</td>
+        <td>${b.customerName || "—"}</td>
+        <td>${providerLabel(b.workflowId, b.providerId)}</td>
+        <td>${whenGeneric(b)}</td>
+        <td>${statusBadge(b.status)}</td>
+        <td>${formatIST(b.createdAt)}</td>
+      </tr>`).join("");
+        container.innerHTML = `<table>
+        <thead><tr>
+          <th>Business</th><th>Booking ID</th><th>Customer</th>
+          <th>Provider</th><th>When</th><th>Status</th><th>Booked At (IST)</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+      }
+
+      renderStatBar(allBookings, true);
+      updateFilterChips();
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Data loaders
+    ───────────────────────────────────────────────────── */
+    async function loadBookings() {
+      const provider = selectedProvider();
+      if (!provider) return;
+      currentBookings = await api(
+        `/api/dashboard/bookings?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`
+      );
+      renderBookings();
+    }
+
+    async function loadAllBookings() {
+      allBookings = await api("/api/dashboard/all-bookings");
+      renderAdminBookings();
+    }
+
+    async function loadAvailability() {
+      const provider = selectedProvider();
+      const card = document.getElementById("availabilityCard");
+      if (!provider) return;
+
+      if (!provider.supportsAvailability) { card.style.display = "none"; return; }
+      card.style.display = "";
+
+      const blocks = await api(
+        `/api/dashboard/availability?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`
+      );
+      const list = document.getElementById("blockList");
+      if (blocks.length === 0) {
+        list.innerHTML = `<div class="empty">No availability blocks set.</div>`;
+        return;
+      }
+      list.innerHTML = blocks.map((b) => `
+      <div class="block-item">
+        <span>${b.date}${b.time ? " at " + b.time : " (whole day)"}${b.reason ? " — " + b.reason : ""}</span>
+        <button class="btn-danger" data-block-id="${b.id}">Remove</button>
+      </div>`).join("");
+
+      list.querySelectorAll("[data-block-id]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await api(`/api/dashboard/availability/${btn.dataset.blockId}`, { method: "DELETE" });
+            await loadAvailability();
+          } catch (err) { showError(err.message); }
+        });
+      });
+    }
+
+    async function loadProviders() {
+      providers = await api("/api/dashboard/providers");
+      const select = document.getElementById("providerSelect");
+      select.innerHTML = providers
+        .map((p) => `<option value="${p.workflowId}::${p.providerId}">${p.workflowLabel} — ${p.providerName}</option>`)
+        .join("");
+
+      // Populate business filter with icons
+      const bizFilter = document.getElementById("businessFilter");
+      const seen = new Set();
+      let opts = "";
+      for (const p of providers) {
+        if (seen.has(p.workflowId)) continue;
+        seen.add(p.workflowId);
+        const icon = (PROFILES[p.workflowId] || DEFAULT_PROFILE).icon;
+        opts += `<option value="${p.workflowId}">${icon} ${p.workflowLabel}</option>`;
+      }
+      bizFilter.innerHTML = `<option value="">All businesses</option>${opts}`;
+
+      if (providers.length > 0) await loadAll();
+    }
+
+    async function loadAll() {
+      showError("");
+      applyProfileTheme(selectedProvider());
+      try {
+        if (role === "admin") {
+          await Promise.all([loadAllBookings(), loadWorkflows()]);
+        } else {
+          await Promise.all([loadBookings(), loadAvailability()]);
+        }
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Workflows Management (Admin Only)
+    ───────────────────────────────────────────────────── */
+    let allWorkflows = {};
+    let modalMode = "add";
+    let editingWorkflowId = "";
+
+    const WORKFLOW_TEMPLATES = {
+      hair: {
+        id: "hair-style",
+        label: "Haircut & Styling Salon",
+        description: "haircut, hair color, hairstyle, salon/barber services",
+        matchLabel: "a hair stylist",
+        keywords: ["haircut", "hair cut", "hairstyle", "trim", "salon", "barber"],
+        businessHours: { start: "10:00", end: "20:00" },
+        slotMinutes: 45,
+        bookingIdPrefix: "SAL",
+        providers: [
+          { id: "p1", name: "Snip & Style", attribute: "Hair Stylist", fee: 400 },
+          { id: "p2", name: "The Barber Co.", attribute: "Men's Grooming", fee: 300 }
+        ],
+        providerListItem: "{provider.name} — {provider.attribute} (₹{provider.fee})",
+        providerRowDescription: "{provider.attribute} (₹{provider.fee})",
+        steps: [
+          { "type": "select_provider", "prompt": "Here are your options:" },
+          { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
+          { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
+          { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name.", "editTarget": true },
+          {
+            "type": "review_confirm",
+            "prompt": "Please review your booking.",
+            "template": "💇 Stylist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
+          }
+        ],
+        confirmationTemplate: "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+      },
+      hotel: {
+        id: "grand-stay",
+        label: "Grand Palace Hotel",
+        description: "hotel room booking or a place to stay",
+        matchLabel: "a hotel room",
+        keywords: ["hotel", "room", "stay", "check-in", "reservation"],
+        bookingIdPrefix: "HTL",
+        providerListItem: "{provider.name} — {provider.attribute} (₹{provider.fee}/night)",
+        providerRowDescription: "{provider.attribute} (₹{provider.fee}/night)",
+        dateRangeAvailability: { "startField": "checkInDate", "nightsField": "nights" },
+        hotels: [
+          {
+            "id": "h1",
+            "name": "Grand Palace Hotel",
+            "location": "Central City",
+            "rooms": [
+              { "id": "h1-r1", "name": "Deluxe Room", "attribute": "1 King Bed, City View", "fee": 4200 }
+            ]
+          }
+        ],
+        steps: [
+          { "type": "select_hotel", "prompt": "Here are our available hotels:" },
+          { "type": "select_room", "prompt": "Great choice! Here are the room types at {hotel.name}:" },
+          { "type": "select_date", "field": "checkInDate", "prompt": "Please select your check-in date.", "days": 10, "editTarget": true },
+          { "type": "select_option", "field": "nights", "prompt": "How many nights?", "options": ["1", "2", "3"] },
+          { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name." },
+          {
+            "type": "review_confirm",
+            "prompt": "Please review your stay booking.",
+            "template": "🏨 Hotel: {hotel.name}\n🛏️ Room: {provider.name} ({provider.attribute})\n📅 Check-in: {checkInIso}\n🌙 Nights: {nights}\n👤 For: {customerName}\n💰 Total: ₹{totalPrice}"
+          }
+        ],
+        confirmationTemplate: "✅ Hotel booking confirmed!\n\nID: {bookingId}\nHotel: {hotel.name}\nRoom: {provider.name}\nCheck-in: {checkInIso}\nNights: {nights}\nFor: {customerName}\n\nReply STATUS anytime to check your booking."
+      },
+      medical: {
+        id: "clinic-care",
+        label: "Multispeciality Clinic",
+        description: "medical symptoms or wanting to see a doctor",
+        matchLabel: "a doctor",
+        keywords: ["pain", "fever", "cough", "doctor", "appointment", "checkup"],
+        businessHours: { start: "09:00", end: "17:00" },
+        slotMinutes: 30,
+        bookingIdPrefix: "APT",
+        providers: [
+          { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500 }
+        ],
+        providerListItem: "{provider.name} — {provider.attribute} (₹{provider.fee})",
+        providerRowDescription: "{provider.attribute} (₹{provider.fee})",
+        steps: [
+          { "type": "select_provider", "prompt": "Please select the doctor you'd like to consult." },
+          { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
+          { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
+          { "type": "text_input", "field": "customerName", "prompt": "What's your name?", "validate": "required", "validationError": "Please share your name.", "editTarget": true },
+          { "type": "text_input", "field": "reason", "prompt": "What's the reason for your visit?", "validate": "required", "validationError": "Please share a reason for the visit." },
+          {
+            "type": "review_confirm",
+            "prompt": "Please review your appointment.",
+            "template": "👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 Patient: {customerName}\n📝 Reason: {reason}\n💰 Fee: ₹{provider.fee}"
+          }
+        ],
+        confirmationTemplate: "✅ Your appointment has been confirmed!\n\nID: {bookingId}\nDoctor: {provider.name}\nDate: {visitDateLabel}\nTime: {visitTime}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+      }
+    };
+
+    async function loadWorkflows() {
+      allWorkflows = await api("/api/dashboard/workflows");
+      renderWorkflows();
+    }
+
+    function renderWorkflows() {
+      const list = document.getElementById("workflowsList");
+      const badge = document.getElementById("workflowsCountBadge");
+
+      const keys = Object.keys(allWorkflows);
+      badge.textContent = keys.length;
+
+      if (keys.length === 0) {
+        list.innerHTML = `<tr><td colspan="5" class="empty">No businesses found.</td></tr>`;
+        return;
+      }
+
+      list.innerHTML = keys.map((key) => {
+        const w = allWorkflows[key];
+        const providerCount = w.providers ? w.providers.length : (w.hotels ? w.hotels.length : 0);
+        const bizType = w.hotels ? "Hotels" : "Providers";
+        const icon = (PROFILES[key] || DEFAULT_PROFILE).icon;
+        return `
+        <tr>
+          <td style="font-weight:600;">${icon} ${w.id}</td>
+          <td>${w.label}</td>
+          <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${w.description || "—"}</td>
+          <td><span class="count-badge">${providerCount} ${bizType}</span></td>
+          <td>
+            <button class="btn-secondary btn-edit-workflow" data-id="${w.id}" style="padding: 4px 8px; font-size:12px; margin-right:4px;">Edit</button>
+            <button class="btn-danger btn-delete-workflow" data-id="${w.id}" style="padding: 4px 8px; font-size:12px;">Delete</button>
+          </td>
+        </tr>
+      `;
+      }).join("");
+
+      // Wire buttons
+      list.querySelectorAll(".btn-edit-workflow").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          openWorkflowModal(btn.dataset.id);
+        });
+      });
+
+      list.querySelectorAll(".btn-delete-workflow").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm(`Are you sure you want to delete the business "${btn.dataset.id}"? This will disable its WhatsApp bot flow.`)) return;
+          try {
+            await api(`/api/dashboard/workflows/${encodeURIComponent(btn.dataset.id)}`, { method: "DELETE" });
+            await loadWorkflows();
+            await loadProviders(); // Reload providers list
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+      });
+    }
+
+    function openWorkflowModal(workflowId = "") {
+      const errorEl = document.getElementById("workflowModalError");
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+
+      const templateSelect = document.getElementById("workflowTemplateSelect");
+      const idInput = document.getElementById("workflowIdInput");
+      const labelInput = document.getElementById("workflowLabelInput");
+      const prefixInput = document.getElementById("workflowPrefixInput");
+      const descInput = document.getElementById("workflowDescInput");
+      const jsonInput = document.getElementById("workflowJsonInput");
+      const titleEl = document.getElementById("workflowModalTitle");
+
+      if (workflowId) {
+        modalMode = "edit";
+        editingWorkflowId = workflowId;
+        titleEl.textContent = `Edit Business: ${workflowId}`;
+        idInput.value = workflowId;
+        idInput.disabled = true;
+        templateSelect.disabled = true;
+
+        const workflowObj = allWorkflows[workflowId];
+        labelInput.value = workflowObj.label || "";
+        prefixInput.value = workflowObj.bookingIdPrefix || "";
+        descInput.value = workflowObj.description || "";
+        jsonInput.value = JSON.stringify(workflowObj, null, 2);
+      } else {
+        modalMode = "add";
+        editingWorkflowId = "";
+        titleEl.textContent = "Add Business Workflow";
+        idInput.value = "";
+        idInput.disabled = false;
+        templateSelect.disabled = false;
+        templateSelect.value = "custom";
+        labelInput.value = "";
+        prefixInput.value = "";
+        descInput.value = "";
+        jsonInput.value = JSON.stringify({
+          id: "new-business",
+          label: "New Business",
+          description: "A customized booking service",
+          matchLabel: "our services",
+          bookingIdPrefix: "NEW",
+          providers: [
+            { "id": "p1", "name": "Provider 1", "attribute": "Staff", "fee": 100 }
+          ],
+          steps: [
+            { "type": "select_provider", "prompt": "Choose options:" },
+            { "type": "select_date", "field": "visitDate", "prompt": "Choose date:" }
+          ]
+        }, null, 2);
+      }
+
+      document.getElementById("workflowModal").style.display = "flex";
+    }
+
+    function closeWorkflowModal() {
+      document.getElementById("workflowModal").style.display = "none";
+    }
+
+    function updateJsonFromInputs() {
+      try {
+        const jsonInput = document.getElementById("workflowJsonInput");
+        const obj = JSON.parse(jsonInput.value);
+
+        const idVal = document.getElementById("workflowIdInput").value.trim();
+        const labelVal = document.getElementById("workflowLabelInput").value.trim();
+        const prefixVal = document.getElementById("workflowPrefixInput").value.trim();
+        const descVal = document.getElementById("workflowDescInput").value.trim();
+
+        if (idVal) obj.id = idVal;
+        if (labelVal) obj.label = labelVal;
+        if (prefixVal) obj.bookingIdPrefix = prefixVal;
+        if (descVal) obj.description = descVal;
+
+        jsonInput.value = JSON.stringify(obj, null, 2);
+      } catch (e) {
+        // JSON is currently invalid, do not overwrite
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Event wiring
+    ───────────────────────────────────────────────────── */
+    document.getElementById("roleProviderBtn").addEventListener("click", () => setRole("provider"));
+    document.getElementById("roleAdminBtn").addEventListener("click", () => setRole("admin"));
+    document.getElementById("providerSelect").addEventListener("change", loadAll);
+    document.getElementById("refreshBtn").addEventListener("click", loadAll);
+
+    // Provider view filters
+    document.getElementById("statusFilter").addEventListener("change", renderBookings);
+    document.getElementById("dateFilter").addEventListener("change", renderBookings);
+    document.getElementById("clearFiltersBtn").addEventListener("click", () => {
+      document.getElementById("statusFilter").value = "";
+      document.getElementById("dateFilter").value = "";
+      renderBookings();
     });
-  }
 
-  async function loadAll() {
-    showError("");
-    applyProfileTheme(selectedProvider());
-    try {
-      await Promise.all([loadBookings(), loadAvailability()]);
-    } catch (err) {
-      showError(err.message);
-    }
-  }
+    // Admin view filters
+    document.getElementById("searchFilter").addEventListener("input", renderAdminBookings);
+    document.getElementById("businessFilter").addEventListener("change", renderAdminBookings);
+    document.getElementById("adminStatusFilter").addEventListener("change", renderAdminBookings);
+    document.getElementById("adminDateFilter").addEventListener("change", renderAdminBookings);
+    document.getElementById("clearAdminFiltersBtn").addEventListener("click", () => {
+      document.getElementById("searchFilter").value = "";
+      document.getElementById("businessFilter").value = "";
+      document.getElementById("adminStatusFilter").value = "";
+      document.getElementById("adminDateFilter").value = "";
+      renderAdminBookings();
+    });
 
-  document.getElementById("providerSelect").addEventListener("change", loadAll);
-  document.getElementById("refreshBtn").addEventListener("click", loadAll);
-  document.getElementById("statusFilter").addEventListener("change", renderBookings);
-  document.getElementById("dateFilter").addEventListener("change", renderBookings);
-  document.getElementById("clearFiltersBtn").addEventListener("click", () => {
-    document.getElementById("statusFilter").value = "";
-    document.getElementById("dateFilter").value = "";
-    renderBookings();
-  });
+    // Availability block
+    document.getElementById("addBlockBtn").addEventListener("click", async () => {
+      const provider = selectedProvider();
+      if (!provider) return;
+      const date = document.getElementById("blockDate").value;
+      const time = document.getElementById("blockTime").value;
+      const reason = document.getElementById("blockReason").value;
+      if (!date) { showError("Pick a date to block first."); return; }
+      try {
+        await api("/api/dashboard/availability", {
+          method: "POST",
+          body: JSON.stringify({
+            workflowId: provider.workflowId,
+            providerId: provider.providerId,
+            date,
+            time: time || null,
+            reason: reason || null,
+          }),
+        });
+        document.getElementById("blockDate").value = "";
+        document.getElementById("blockTime").value = "";
+        document.getElementById("blockReason").value = "";
+        await loadAvailability();
+      } catch (err) { showError(err.message); }
+    });
 
-  document.getElementById("addBlockBtn").addEventListener("click", async () => {
-    const provider = selectedProvider();
-    if (!provider) return;
-    const date = document.getElementById("blockDate").value;
-    const time = document.getElementById("blockTime").value;
-    const reason = document.getElementById("blockReason").value;
-    if (!date) { showError("Pick a date to block first."); return; }
-    try {
-      await api("/api/dashboard/availability", {
-        method: "POST",
-        body: JSON.stringify({ workflowId: provider.workflowId, providerId: provider.providerId, date, time: time || null, reason: reason || null }),
-      });
-      document.getElementById("blockDate").value = "";
-      document.getElementById("blockTime").value = "";
-      document.getElementById("blockReason").value = "";
-      await loadAvailability();
-    } catch (err) {
-      showError(err.message);
-    }
-  });
+    // Workflow CRUD button actions
+    document.getElementById("addWorkflowBtn").addEventListener("click", () => openWorkflowModal());
+    document.getElementById("closeWorkflowModalBtn").addEventListener("click", closeWorkflowModal);
+    document.getElementById("cancelWorkflowModalBtn").addEventListener("click", closeWorkflowModal);
 
-  loadProviders().catch((err) => showError(err.message));
-</script>
+    // Sync inputs to textarea JSON
+    document.getElementById("workflowIdInput").addEventListener("input", updateJsonFromInputs);
+    document.getElementById("workflowLabelInput").addEventListener("input", updateJsonFromInputs);
+    document.getElementById("workflowPrefixInput").addEventListener("input", updateJsonFromInputs);
+    document.getElementById("workflowDescInput").addEventListener("input", updateJsonFromInputs);
 
+    // Handle template selection change
+    document.getElementById("workflowTemplateSelect").addEventListener("change", (e) => {
+      const templateKey = e.target.value;
+      if (templateKey !== "custom" && WORKFLOW_TEMPLATES[templateKey]) {
+        const template = JSON.parse(JSON.stringify(WORKFLOW_TEMPLATES[templateKey]));
+
+        const idVal = document.getElementById("workflowIdInput").value.trim();
+        const labelVal = document.getElementById("workflowLabelInput").value.trim();
+        const prefixVal = document.getElementById("workflowPrefixInput").value.trim();
+        const descVal = document.getElementById("workflowDescInput").value.trim();
+
+        if (idVal) template.id = idVal;
+        if (labelVal) template.label = labelVal;
+        if (prefixVal) template.bookingIdPrefix = prefixVal;
+        if (descVal) template.description = descVal;
+
+        document.getElementById("workflowJsonInput").value = JSON.stringify(template, null, 2);
+
+        if (!idVal) document.getElementById("workflowIdInput").value = template.id;
+        if (!labelVal) document.getElementById("workflowLabelInput").value = template.label;
+        if (!prefixVal) document.getElementById("workflowPrefixInput").value = template.bookingIdPrefix;
+        if (!descVal) document.getElementById("workflowDescInput").value = template.description;
+      }
+    });
+
+    // Handle saving the workflow to the server
+    document.getElementById("saveWorkflowBtn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("workflowModalError");
+      errorEl.style.display = "none";
+
+      updateJsonFromInputs();
+
+      const idInput = document.getElementById("workflowIdInput").value.trim();
+      const labelInput = document.getElementById("workflowLabelInput").value.trim();
+      const jsonStr = document.getElementById("workflowJsonInput").value.trim();
+
+      if (!idInput) {
+        errorEl.textContent = "Workflow / Business ID is required.";
+        errorEl.style.display = "block";
+        return;
+      }
+      if (!/^[a-z0-9_-]+$/i.test(idInput)) {
+        errorEl.textContent = "Workflow ID must contain only letters, numbers, dashes, and underscores.";
+        errorEl.style.display = "block";
+        return;
+      }
+      if (!labelInput) {
+        errorEl.textContent = "Business Label (Name) is required.";
+        errorEl.style.display = "block";
+        return;
+      }
+
+      let workflowObj;
+      try {
+        workflowObj = JSON.parse(jsonStr);
+      } catch (e) {
+        errorEl.textContent = `Invalid JSON syntax: ${e.message}`;
+        errorEl.style.display = "block";
+        return;
+      }
+
+      workflowObj.id = idInput;
+      workflowObj.label = labelInput;
+
+      try {
+        await api("/api/dashboard/workflows", {
+          method: "POST",
+          body: JSON.stringify(workflowObj)
+        });
+        closeWorkflowModal();
+        await loadWorkflows();
+        await loadProviders();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+
+    /* ─────────────────────────────────────────────────────
+       Init
+    ───────────────────────────────────────────────────── */
+    document.getElementById("adminFiltersCard").style.display = "none";
+    requestAnimationFrame(updateSlider);
+    window.addEventListener("resize", updateSlider);
+    loadProviders().catch((err) => showError(err.message));
+  </script>
 </body>
+
 </html>

@@ -26,19 +26,25 @@
       "id": "p1",
       "name": "Snip & Style",
       "attribute": "Hair Stylist",
-      "fee": 400
+      "fee": 400,
+      "address": "12 Brigade Road, Bangalore, Karnataka 560025",
+      "mapQuery": "Snip+and+Style+Salon+Brigade+Road+Bangalore"
     },
     {
       "id": "p2",
       "name": "The Barber Co.",
       "attribute": "Men's Grooming & Haircut",
-      "fee": 300
+      "fee": 300,
+      "address": "45 Commercial Street, Bangalore, Karnataka 560001",
+      "mapQuery": "The+Barber+Co+Commercial+Street+Bangalore"
     },
     {
       "id": "p3",
       "name": "TONI & GUY",
       "attribute": "UNISEX Haircut & Styling",
-      "fee": 1000
+      "fee": 1000,
+      "address": "UB City Mall, Vittal Mallya Road, Bangalore, Karnataka 560001",
+      "mapQuery": "TONI+GUY+UB+City+Mall+Bangalore"
     }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",

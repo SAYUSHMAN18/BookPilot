@@ -1,0 +1,26 @@
+{
+  "id": "service",
+  "label": "Automobile",
+  "description": "all automobile servicing and spare parts",
+  "matchLabel": "our services",
+  "bookingIdPrefix": "automobile services",
+  "providers": [
+    {
+      "id": "p1",
+      "name": "Provider 1",
+      "attribute": "Staff",
+      "fee": 100
+    }
+  ],
+  "steps": [
+    {
+      "type": "select_provider",
+      "prompt": "Choose options:"
+    },
+    {
+      "type": "select_date",
+      "field": "visitDate",
+      "prompt": "Choose date:"
+    }
+  ]
+}

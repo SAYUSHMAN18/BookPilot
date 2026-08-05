@@ -192,7 +192,19 @@ function listAllProviders() {
   const list = [];
   for (const workflow of Object.values(workflows)) {
     for (const p of workflow.providers || []) {
-      list.push({ workflowId: workflow.id, workflowLabel: workflow.label, providerId: p.id, providerName: p.name, supportsAvailability: true });
+      list.push({
+        workflowId: workflow.id,
+        workflowLabel: workflow.label,
+        providerId: p.id,
+        providerName: p.name,
+        providerAttribute: p.attribute || null,
+        providerFee: p.fee || null,
+        address: p.address || workflow.businessAddress || null,
+        mapQuery: p.mapQuery || workflow.mapQuery || null,
+        photo: p.photo || null,
+        supportsAvailability: true,
+        type: "provider",
+      });
     }
     for (const hotel of workflow.hotels || []) {
       for (const room of hotel.rooms || []) {
@@ -200,8 +212,14 @@ function listAllProviders() {
           workflowId: workflow.id,
           workflowLabel: workflow.label,
           providerId: room.id,
-          providerName: `${hotel.name} — ${room.name}`,
+          providerName: room.name,           // just the room name — no hotel prefix
+          hotelId: hotel.id,
+          hotelName: hotel.name,
+          hotelLocation: hotel.location || null,
+          hotelPhoto: hotel.photo || null,
+          mapQuery: hotel.mapQuery || null,
           supportsAvailability: false,
+          type: "hotel_room",
         });
       }
     }
