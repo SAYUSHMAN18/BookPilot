@@ -9,6 +9,8 @@ const { extractContext } = require("./extractContext");
 const { isRateLimited } = require("./rateLimit");
 const { isDayBlocked, blockedTimesForDay } = require("./availabilityStore");
 const { tryAnswerFactually } = require("./factualQA");
+const { planNextAction, ACTIONS } = require("./orchestrator");
+const { detectGeneralIntent, INTENTS } = require("./intentDetector");
 
 // One state machine per WhatsApp sender. This is intentionally generic —
 // it has no idea what "medical" or "hotel" mean. It only knows how to walk
@@ -41,8 +43,12 @@ function getSession(waId) {
 }
 
 // Resolves "{field}", "{provider.field}", "{hotel.field}", "{bookingId}",
-// "{bookingCode}" and "{businessName}" placeholders.
+// "{bookingCode}" and "{businessName}" placeholders. Guards against a
+// missing template rather than crashing the whole message handler —
+// found live: a workflow without an (optional) providerRowDescription/
+// providerListItem string passed `undefined` straight through to here.
 function fillTemplate(template, session, workflow) {
+  if (!template) return "";
   return template.replace(/\{([\w.]+)\}/g, (match, key) => {
     if (key.startsWith("provider.")) {
       return session.selectedProvider?.[key.slice("provider.".length)] ?? match;
@@ -59,6 +65,18 @@ function fillTemplate(template, session, workflow) {
 
 function currentStep(workflow, session) {
   return workflow.steps[session.stepIndex];
+}
+
+// Fallback for a provider/room's WhatsApp list row description when the
+// workflow doesn't define its own providerRowDescription/providerListItem
+// template — built from whatever fields the entity actually has, rather
+// than a template string that would show "₹{provider.fee}" literally if a
+// field is missing.
+function describeEntity(entity) {
+  const parts = [];
+  if (entity.attribute) parts.push(entity.attribute);
+  if (typeof entity.fee === "number") parts.push(`₹${entity.fee}`);
+  return parts.join(" · ");
 }
 
 // Every other booking made for the same provider/room that's still active —
@@ -138,10 +156,9 @@ async function sendStepPrompt(waId, workflow, step, session) {
         rows: workflow.providers.map((p) => ({
           id: p.id,
           title: p.name,
-          description: fillTemplate(workflow.providerRowDescription || workflow.providerListItem, {
-            data: {},
-            selectedProvider: p,
-          }),
+          description: workflow.providerRowDescription || workflow.providerListItem
+            ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: p })
+            : describeEntity(p),
         })),
       },
     ];
@@ -172,10 +189,9 @@ async function sendStepPrompt(waId, workflow, step, session) {
         rows: rooms.map((r) => ({
           id: r.id,
           title: r.name,
-          description: fillTemplate(workflow.providerRowDescription || workflow.providerListItem, {
-            data: {},
-            selectedProvider: r,
-          }),
+          description: workflow.providerRowDescription || workflow.providerListItem
+            ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: r })
+            : describeEntity(r),
         })),
       },
     ];
@@ -325,7 +341,13 @@ function applyStepInput(workflow, step, session, text) {
   if (step.validate === "required" && !value) {
     return step.validationError || "This can't be empty — please provide a value.";
   }
-  session.data[step.field] = value || step.default || "Guest";
+  // Capped, not just trimmed — this value is stored verbatim in the
+  // bookings table and later rendered in the dashboard. WhatsApp already
+  // limits a single message to ~4096 chars; nothing legitimate (a name, a
+  // reason for visit) needs more than this, and capping keeps one giant
+  // paste from bloating a DB row indefinitely.
+  const MAX_FIELD_LENGTH = 200;
+  session.data[step.field] = (value || step.default || "Guest").slice(0, MAX_FIELD_LENGTH);
   return null;
 }
 
@@ -602,39 +624,18 @@ async function advanceOrFinish(waId, session, workflow) {
   sessions.delete(waId); // ready for a fresh requirement next time
 }
 
-const SUPPORT_REQUEST_RE = /\b(customer support|human|agent|representative|real person|talk to (a )?(person|someone))\b/i;
-const ALREADY_BOOKED_RE = /\b(already (booked|did|have|made)|booked already|existing booking|my booking)\b/i;
+// cancelActiveBooking — shared helper used by every cancel code path so
+// the DB row is always marked cancelled, not just the in-memory session.
+// Safe to call even when there is no active booking (no-op in that case).
+function cancelActiveBooking(waId) {
+  const booking = bookings.activeForCustomer(waId);
+  if (booking) bookings.updateStatus(booking.id, "cancelled");
+}
 
 async function handleDetecting(waId, session, trimmed, workflows) {
-  // These only apply when we're waiting to find out what the customer
-  // wants (not mid-flow — "I need help with knee pain" as a patient_details
-  // answer shouldn't be mistaken for a request to talk to a human).
-  if (SUPPORT_REQUEST_RE.test(trimmed)) {
-    session.supportAttempts = (session.supportAttempts || 0) + 1;
-    if (session.supportAttempts < 2) {
-      // Don't lead with "I can't help" on the first ask — try to actually
-      // move them forward. Only a second attempt gets the definitive
-      // "I'm a bot" message.
-      await sendWhatsAppText(
-        waId,
-        "I'll do my best to help directly — could you tell me what you're looking for (e.g. \"I need a doctor\"), or reply STATUS to check an existing booking?"
-      );
-      return;
-    }
-    await sendWhatsAppText(
-      waId,
-      "I'm an automated booking assistant, so I can't connect you to a live person here. If you have an existing booking, reply STATUS to check it — otherwise tell me what you'd like to book (e.g. \"I need a doctor\")."
-    );
-    return;
-  }
-
-  if (ALREADY_BOOKED_RE.test(trimmed) && bookings.hasAny(waId)) {
-    await handleStatusCommand(waId);
-    return;
-  }
-
-  // We already showed the "what would you like to book?" menu — check if
-  // this reply is a direct pick from it before running classification again.
+  // Short-circuit: if we already showed the business menu and the customer
+  // is directly tapping/typing a workflow id from it, skip the full intent
+  // classification loop — they've already answered the question.
   if (session.awaitingBusinessPick) {
     const picked = matchWorkflowByIdOrIndex(trimmed, workflows);
     if (picked) {
@@ -643,6 +644,82 @@ async function handleDetecting(waId, session, trimmed, workflows) {
     }
   }
 
+  // Universal intent layer — understand what the customer MEANS regardless
+  // of exact phrasing. This replaces the old SUPPORT_REQUEST_RE /
+  // ALREADY_BOOKED_RE regex block which silently failed for anything
+  // slightly off (e.g. "CANCEL THAT" was misrouted to a hair booking).
+  const hasActive = bookings.hasActive(waId);
+  const intent = await detectGeneralIntent(trimmed, hasActive);
+
+  if (intent === INTENTS.CANCEL_BOOKING) {
+    if (hasActive) {
+      cancelActiveBooking(waId);
+      sessions.delete(waId);
+      await sendWhatsAppText(
+        waId,
+        "❌ Done — your booking has been cancelled. Message me anytime if you'd like to make a new one."
+      );
+    } else {
+      await sendWhatsAppText(
+        waId,
+        "You don't have any active booking to cancel. Would you like to make a new booking? Here's what we offer:"
+      );
+      session.awaitingBusinessPick = true;
+      await sendBusinessMenu(waId, workflows);
+    }
+    return;
+  }
+
+  if (intent === INTENTS.CHECK_STATUS) {
+    await handleStatusCommand(waId);
+    return;
+  }
+
+  if (intent === INTENTS.RESTART) {
+    sessions.delete(waId);
+    await sendWhatsAppText(waId, "🔄 Starting fresh. What would you like to book?");
+    // Refresh session so subsequent logic has a clean state
+    const fresh = getSession(waId);
+    fresh.awaitingBusinessPick = true;
+    await sendBusinessMenu(waId, workflows);
+    return;
+  }
+
+  if (intent === INTENTS.QUESTION) {
+    // Try to answer factually first; if we can't, show the menu anyway.
+    const factualAnswer = await tryAnswerFactually(trimmed, workflows);
+    if (factualAnswer) {
+      await sendWhatsAppText(waId, factualAnswer);
+    } else {
+      session.awaitingBusinessPick = true;
+      if (hasActive) {
+        await sendWhatsAppText(waId, "I don't have an answer for that — but I can help you book something. Here's what we offer:");
+      }
+      await sendBusinessMenu(waId, workflows);
+    }
+    return;
+  }
+
+  if (intent === INTENTS.COMPLAINT) {
+    session.supportAttempts = (session.supportAttempts || 0) + 1;
+    if (session.supportAttempts < 2) {
+      await sendWhatsAppText(
+        waId,
+        "I'm sorry to hear that — I want to make this right. I'm an automated booking assistant, so let me know what you'd like to book and I'll sort it out quickly. Or reply STATUS to check an existing booking."
+      );
+    } else {
+      await sendWhatsAppText(
+        waId,
+        "I apologise for the trouble. I'm an automated assistant and can't escalate to a human here, but I can help you book, check your booking status (reply STATUS), or cancel a booking. What would you like to do?"
+      );
+    }
+    return;
+  }
+
+  // booking_intent or unclear — fall through to AI business classification.
+  // For "unclear" we still run classifyBusiness because a greeting like
+  // "hi doctor needed" contains both noise AND a booking intent the
+  // keyword-level intent check might have missed.
   const { workflowId, source } = await classifyBusiness(trimmed, workflows);
   log("INFO", `Classified "${trimmed}" -> ${workflowId ?? "unclear"} (source: ${source})`);
 
@@ -658,7 +735,7 @@ async function handleDetecting(waId, session, trimmed, workflows) {
     }
 
     session.awaitingBusinessPick = true;
-    if (bookings.hasAny(waId)) {
+    if (hasActive) {
       await sendWhatsAppText(waId, "Looks like you already have a booking with us — reply STATUS anytime to check it. If you'd like to book something else too, here's what we offer:");
     }
     await sendBusinessMenu(waId, workflows);
@@ -723,6 +800,7 @@ async function handleRunning(waId, session, trimmed, workflows) {
       return;
     }
     if (choice === "cancel") {
+      cancelActiveBooking(waId); // persist the cancellation to the DB
       sessions.delete(waId);
       await sendWhatsAppText(waId, "❌ Booking cancelled. Send a message anytime to start a new one.");
       return;
@@ -758,12 +836,79 @@ async function handleRunning(waId, session, trimmed, workflows) {
     }
   }
 
+  // Still unmatched — let the orchestrator decide what the customer
+  // actually wanted (change an earlier answer, ask a question, bail out)
+  // rather than repeating "invalid input" at them indefinitely. It only
+  // ever picks a navigation intent; the engine below still performs the
+  // action, so validation and slot locking are unaffected.
+  if (await runOrchestratedRecovery(waId, session, workflow, trimmed, workflows)) return;
+
   await sendWhatsAppText(waId, error);
   await sendStepPrompt(waId, workflow, step, session);
 }
 
+// Executes whatever the orchestrator planned. Returns true if it handled
+// the message, false to fall through to the normal "invalid input" reply.
+async function runOrchestratedRecovery(waId, session, workflow, trimmed, workflows) {
+  const plan = await planNextAction(trimmed, workflow, session);
+  if (!plan || plan.action === ACTIONS.RETRY_STEP) return false;
+
+  log("INFO", `Orchestrator planned "${plan.action}"${plan.stepIndex !== undefined ? ` -> step ${plan.stepIndex}` : ""} for "${trimmed}"`);
+
+  if (plan.action === ACTIONS.CANCEL) {
+    cancelActiveBooking(waId); // persist the cancellation to the DB before clearing the session
+    sessions.delete(waId);
+    await sendWhatsAppText(waId, "❌ No problem — I've cancelled that booking. Message me anytime to start a new one.");
+    return true;
+  }
+
+  if (plan.action === ACTIONS.RESTART) {
+    sessions.delete(waId);
+    await sendWhatsAppText(waId, "🔄 Starting fresh. What would you like to book?");
+    return true;
+  }
+
+  if (plan.action === ACTIONS.HUMAN) {
+    await sendWhatsAppText(
+      waId,
+      "I'm an automated booking assistant, so I can't transfer you to a person — but I can finish this booking for you. " +
+        'If you\'d rather not continue, reply "cancel".'
+    );
+    await sendStepPrompt(waId, workflow, currentStep(workflow, session), session);
+    return true;
+  }
+
+  if (plan.action === ACTIONS.ANSWER_QUESTION) {
+    const answer = await tryAnswerFactually(trimmed, workflows);
+    if (!answer) return false; // nothing grounded to say — don't invent one
+    await sendWhatsAppText(waId, answer);
+    await sendStepPrompt(waId, workflow, currentStep(workflow, session), session);
+    return true;
+  }
+
+  if (plan.action === ACTIONS.GO_TO_STEP) {
+    const target = workflow.steps[plan.stepIndex];
+    // Clear the target field so the step genuinely re-asks rather than
+    // silently keeping the old value, and drop its resolved *Iso twin
+    // (set by select_date) which would otherwise go stale.
+    if (target.field) {
+      delete session.data[target.field];
+      delete session.data[`${target.field}Iso`];
+    }
+    if (target.type === "select_provider") session.selectedProvider = null;
+    if (target.type === "select_hotel") session.selectedHotel = null;
+    session.stepIndex = plan.stepIndex;
+    session.subStage = null;
+    await sendWhatsAppText(waId, "Sure — let's change that.");
+    await sendStepPrompt(waId, workflow, target, session);
+    return true;
+  }
+
+  return false;
+}
+
 async function handleStatusCommand(waId) {
-  const booking = bookings.mostRecentForCustomer(waId);
+  const booking = bookings.activeForCustomer(waId);
   if (!booking) {
     await sendWhatsAppText(waId, "No active booking found. Send a message anytime describing what you'd like to book.");
     return;
@@ -807,7 +952,7 @@ async function handleStatusCommand(waId) {
 }
 
 async function handleHereCommand(waId) {
-  const booking = bookings.mostRecentForCustomer(waId);
+  const booking = bookings.activeForCustomer(waId);
   if (!booking) {
     await sendWhatsAppText(waId, "No active booking found to check in.");
     return;

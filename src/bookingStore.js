@@ -18,9 +18,16 @@ const insertStmt = db.prepare(`
 `);
 
 const updateStatusStmt = db.prepare("UPDATE bookings SET status = ? WHERE id = ?");
+const updateWithMetaStmt = db.prepare(
+  "UPDATE bookings SET status = ?, cancelled_by = ?, rescheduled_date = ?, rescheduled_time = ?, reschedule_note = ? WHERE id = ?"
+);
 const getByIdStmt = db.prepare("SELECT * FROM bookings WHERE id = ?");
+
 const mostRecentForWaIdStmt = db.prepare("SELECT * FROM bookings WHERE wa_id = ? ORDER BY created_at DESC LIMIT 1");
-const hasAnyForWaIdStmt = db.prepare("SELECT 1 FROM bookings WHERE wa_id = ? LIMIT 1");
+const mostRecentActiveStmt = db.prepare(
+  "SELECT * FROM bookings WHERE wa_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1"
+);
+const hasActiveForWaIdStmt = db.prepare("SELECT 1 FROM bookings WHERE wa_id = ? AND status != 'cancelled' LIMIT 1");
 const allStmt = db.prepare("SELECT * FROM bookings ORDER BY created_at DESC");
 
 function rowToBooking(row) {
@@ -111,12 +118,38 @@ const bookings = {
     return rowToBooking(mostRecentForWaIdStmt.get(waId));
   },
 
-  hasAny(waId) {
-    return !!hasAnyForWaIdStmt.get(waId);
+  // What STATUS/HERE/CANCEL should actually operate on. A cancelled
+  // booking is history, not something to check into or cancel again —
+  // using mostRecentForCustomer() for those made the bot report a
+  // cancelled appointment as if it were upcoming.
+  activeForCustomer(waId) {
+    return rowToBooking(mostRecentActiveStmt.get(waId));
+  },
+
+  // Excludes cancelled deliberately. This drives the "looks like you
+  // already have a booking" nudge — counting cancelled ones meant a
+  // customer who cancelled everything was still told they had a booking,
+  // forever, with no way to make it stop.
+  hasActive(waId) {
+    return !!hasActiveForWaIdStmt.get(waId);
   },
 
   updateStatus(id, status) {
     updateStatusStmt.run(status, id);
+  },
+
+  // Provider-initiated cancel or reschedule. Stores who did it and any new
+  // date/time so the caller can craft a WhatsApp notification with all details.
+  updateWithMeta(id, { status, cancelledBy, rescheduledDate, rescheduledTime, rescheduleNote }) {
+    updateWithMetaStmt.run(
+      status,
+      cancelledBy || null,
+      rescheduledDate || null,
+      rescheduledTime || null,
+      rescheduleNote || null,
+      id
+    );
+    return this.getById(id);
   },
 
   values() {

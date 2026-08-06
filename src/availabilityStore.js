@@ -9,6 +9,7 @@ const insertStmt = db.prepare(
   "INSERT INTO blocked_slots (workflow_id, provider_id, date, time, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)"
 );
 const deleteByIdStmt = db.prepare("DELETE FROM blocked_slots WHERE id = ?");
+const getByIdStmt = db.prepare("SELECT * FROM blocked_slots WHERE id = ?");
 const listForProviderStmt = db.prepare(
   "SELECT * FROM blocked_slots WHERE workflow_id = ? AND provider_id = ? ORDER BY date, time"
 );
@@ -34,6 +35,13 @@ function unblockSlot(id) {
   deleteByIdStmt.run(id);
 }
 
+// Ownership check before delete — a provider must only ever be able to
+// remove their own blocks, never one belonging to another provider_id/
+// workflow_id just because they guessed a numeric id.
+function getBlockById(id) {
+  return rowToBlock(getByIdStmt.get(id));
+}
+
 function listBlocksForProvider(workflowId, providerId) {
   return listForProviderStmt.all(workflowId, providerId).map(rowToBlock);
 }
@@ -50,4 +58,4 @@ function blockedTimesForDay(workflowId, providerId, dateIso) {
   return times;
 }
 
-module.exports = { blockSlot, unblockSlot, listBlocksForProvider, isDayBlocked, blockedTimesForDay };
+module.exports = { blockSlot, unblockSlot, getBlockById, listBlocksForProvider, isDayBlocked, blockedTimesForDay };

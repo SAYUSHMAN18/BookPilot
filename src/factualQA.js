@@ -1,10 +1,22 @@
 const { log } = require("./logger");
 const { capForAI } = require("./textLimits");
+const knowledgeStore = require("./knowledgeStore");
+
+// Per-document and total caps so an admin pasting a huge policy doc (or
+// several businesses each with a full FAQ page) can't blow up the prompt
+// this gets stuffed into — every workflow's data goes into every query
+// regardless of which business the question is about, so the ceiling
+// applies across all of them combined, not per business.
+const MAX_DOC_CHARS = 1500;
+const MAX_TOTAL_FAQ_CHARS = 6000;
 
 // Builds a plain-text summary of only the REAL data each workflow actually
-// has (hours, providers/rooms, fees, location) — this is the entire
-// "knowledge base" the model is allowed to answer from.
+// has (hours, providers/rooms, fees, location, plus any admin/provider-
+// added FAQ documents) — this is the entire "knowledge base" the model is
+// allowed to answer from.
 function buildKnowledgeBase(workflows) {
+  let faqBudget = MAX_TOTAL_FAQ_CHARS;
+
   return Object.values(workflows)
     .map((w) => {
       const lines = [`### ${w.label} (${w.id})`, w.description];
@@ -19,6 +31,17 @@ function buildKnowledgeBase(workflows) {
         for (const h of w.hotels) {
           lines.push(`- ${h.name}, ${h.location}, rating ${h.rating}`);
           for (const r of h.rooms) lines.push(`  - Room: ${r.name} (${r.attribute}), ₹${r.fee}/night`);
+        }
+      }
+
+      const docs = knowledgeStore.listForWorkflow(w.id);
+      if (docs.length > 0 && faqBudget > 0) {
+        lines.push("FAQs / policies:");
+        for (const doc of docs) {
+          const entry = `- ${doc.title}: ${doc.content.slice(0, MAX_DOC_CHARS)}`;
+          if (entry.length > faqBudget) break;
+          lines.push(entry);
+          faqBudget -= entry.length;
         }
       }
       return lines.join("\n");

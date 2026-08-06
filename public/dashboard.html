@@ -860,6 +860,29 @@
 
 <body>
 
+  <!-- ── Login screen (shown until /api/auth/me succeeds) ── -->
+  <div id="loginScreen" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg);">
+    <form id="loginForm" class="card" style="width:100%; max-width:360px; display:flex; flex-direction:column; gap:14px;">
+      <div>
+        <div style="font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">📋 BookPilot AI</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:2px;">Sign in to your dashboard.</div>
+      </div>
+      <div id="loginError" style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;"></div>
+      <div>
+        <label class="form-label">Email</label>
+        <input type="email" id="loginEmail" class="form-input" autocomplete="username" required />
+      </div>
+      <div>
+        <label class="form-label">Password</label>
+        <input type="password" id="loginPassword" class="form-input" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn-primary" id="loginSubmitBtn" style="padding:10px; text-align:center;">Sign in</button>
+    </form>
+  </div>
+
+  <!-- ── App shell (hidden until logged in) ── -->
+  <div id="appShell" style="display:none;">
+
   <header>
     <div class="header-left">
       <h1>
@@ -886,6 +909,8 @@
       </div>
 
       <button class="btn-secondary" id="refreshBtn">↻ Refresh</button>
+      <span id="currentUserLabel" style="font-size:12px; color:var(--muted);"></span>
+      <button class="btn-link" id="logoutBtn">Log out</button>
     </div>
   </header>
 
@@ -962,6 +987,152 @@
       </div>
     </div>
 
+    <!-- ── ADMIN VIEW: Marketplace ── -->
+    <div class="card" id="adminTemplatesCard" style="display:none; margin-top: 18px;">
+      <div class="card-header">
+        <span class="card-title">🧩 Marketplace <span class="count-badge" id="templatesCountBadge">—</span></span>
+        <button class="btn-primary" id="publishTemplateBtn">＋ Publish a Business</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Save a working business as a reusable template, then install it to spin up a new one. Installing copies the config — editing the new business never touches the template.
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Template</th><th>Industry</th><th>Description</th><th>Size</th><th>Published By</th><th>Actions</th></tr></thead>
+          <tbody id="templatesList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal: publish a business as a template -->
+    <div id="publishTemplateModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:480px;">
+        <div class="card-header" style="margin-bottom: 0;">
+          <span class="card-title" style="font-size: 16px;">Publish as Template</span>
+          <button class="btn-link" id="closePublishModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+        </div>
+        <div id="publishModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label class="form-label">Business to publish</label>
+            <select id="publishWorkflowInput" class="form-select"></select>
+          </div>
+          <div class="form-group-row">
+            <div class="form-control-wrap">
+              <label class="form-label">Template name</label>
+              <input type="text" id="publishNameInput" class="form-input" placeholder="e.g. Standard Dental Clinic" />
+            </div>
+            <div class="form-control-wrap">
+              <label class="form-label">Industry</label>
+              <input type="text" id="publishIndustryInput" class="form-input" placeholder="e.g. Healthcare" />
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Description</label>
+            <input type="text" id="publishDescInput" class="form-input" placeholder="What this template sets up" />
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="btn-secondary" id="cancelPublishModalBtn">Cancel</button>
+          <button class="btn-primary" id="savePublishBtn">Publish</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: install a template as a new business -->
+    <div id="installTemplateModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:480px;">
+        <div class="card-header" style="margin-bottom: 0;">
+          <span class="card-title" style="font-size: 16px;" id="installModalTitle">Install Template</span>
+          <button class="btn-link" id="closeInstallModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+        </div>
+        <div id="installModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label class="form-label">New business ID</label>
+            <input type="text" id="installIdInput" class="form-input" placeholder="e.g. dental-central (lowercase, no spaces)" />
+          </div>
+          <div>
+            <label class="form-label">New business name</label>
+            <input type="text" id="installLabelInput" class="form-input" placeholder="e.g. Central Dental Clinic" />
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="btn-secondary" id="cancelInstallModalBtn">Cancel</button>
+          <button class="btn-primary" id="saveInstallBtn">Install</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ADMIN VIEW: Manage Team ── -->
+    <div class="card" id="adminUsersCard" style="display:none; margin-top: 18px;">
+      <div class="card-header">
+        <span class="card-title">👥 Manage Team <span class="count-badge" id="usersCountBadge">—</span></span>
+        <button class="btn-primary" id="addUserBtn">＋ Add Login</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        One login per person — a provider account only ever sees its own workflow/provider's bookings and availability, enforced on the server, not just hidden in this UI.
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Email</th><th>Name</th><th>Role</th><th>Business / Provider</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="usersList"><tr><td colspan="6" class="empty">Loading team…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── ADMIN VIEW: Audit Log ── -->
+    <div class="card" id="adminAuditCard" style="display:none; margin-top: 18px;">
+      <div class="card-header">
+        <span class="card-title">🕵️ Audit Log <span class="count-badge" id="auditCountBadge">—</span></span>
+      </div>
+      <div class="table-scroll" id="auditLogContainer"><div class="empty">Loading…</div></div>
+    </div>
+
+    <!-- Modal for adding a team login -->
+    <div id="userModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:480px;">
+        <div class="card-header" style="margin-bottom: 0;">
+          <span class="card-title" style="font-size: 16px;">Add a Login</span>
+          <button class="btn-link" id="closeUserModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+        </div>
+        <div id="userModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label class="form-label">Role</label>
+            <select id="userRoleInput" class="form-select">
+              <option value="provider">Provider — sees only their own business</option>
+              <option value="admin">Admin — sees everything</option>
+            </select>
+          </div>
+          <div id="userProviderWrap">
+            <label class="form-label">Which provider is this login for?</label>
+            <select id="userProviderInput" class="form-select"></select>
+          </div>
+          <div class="form-group-row">
+            <div class="form-control-wrap">
+              <label class="form-label">Name</label>
+              <input type="text" id="userNameInput" class="form-input" placeholder="e.g. Dr. Rajesh Sharma" />
+            </div>
+            <div class="form-control-wrap">
+              <label class="form-label">Email (their login)</label>
+              <input type="email" id="userEmailInput" class="form-input" placeholder="name@example.com" />
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Temporary Password</label>
+            <input type="text" id="userPasswordInput" class="form-input" placeholder="At least 8 characters" />
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="btn-secondary" id="cancelUserModalBtn">Cancel</button>
+          <button class="btn-primary" id="saveUserBtn">Create Login</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── PROVIDER VIEW: info banner (photo + geolocation) ── -->
     <div id="providerInfoBanner" style="display:none;"></div>
 
@@ -982,6 +1153,65 @@
       </div>
       <div class="table-scroll" id="bookingsContainer">
         <div class="empty">Select a provider above.</div>
+      </div>
+    </div>
+
+    <!-- ── Analytics (both roles; provider sees only their own numbers) ── -->
+    <div class="card" id="analyticsCard">
+      <div class="card-header">
+        <span class="card-title">📈 Analytics</span>
+        <select id="analyticsRangeSelect" style="font-family:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-xs); background:white;">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+      <div id="analyticsBody"><div class="empty">Loading…</div></div>
+    </div>
+
+    <!-- ── Knowledge Base (both roles; provider sees only their own business) ── -->
+    <div class="card" id="knowledgeCard">
+      <div class="card-header">
+        <span class="card-title">📚 Knowledge Base <span class="count-badge" id="knowledgeCountBadge">—</span></span>
+        <button class="btn-primary" id="addKnowledgeBtn">＋ Add Entry</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        FAQs, policies, and pricing the WhatsApp bot can answer customers from. The bot only answers from what's written here plus your business config — it won't invent anything.
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Business</th><th>Title</th><th>Content</th><th>Actions</th></tr></thead>
+          <tbody id="knowledgeList"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal for adding/editing a knowledge entry -->
+    <div id="knowledgeModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:560px;">
+        <div class="card-header" style="margin-bottom: 0;">
+          <span class="card-title" id="knowledgeModalTitle" style="font-size: 16px;">Add Knowledge Entry</span>
+          <button class="btn-link" id="closeKnowledgeModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+        </div>
+        <div id="knowledgeModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div id="knowledgeWorkflowWrap">
+            <label class="form-label">Business</label>
+            <select id="knowledgeWorkflowInput" class="form-select"></select>
+          </div>
+          <div>
+            <label class="form-label">Title / Question</label>
+            <input type="text" id="knowledgeTitleInput" class="form-input" placeholder="e.g. Do you accept insurance?" />
+          </div>
+          <div>
+            <label class="form-label">Answer / Content</label>
+            <textarea id="knowledgeContentInput" class="form-textarea" rows="6" style="font-family:inherit; font-size:13px;" placeholder="e.g. We accept most major insurance providers including..."></textarea>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+          <button class="btn-secondary" id="cancelKnowledgeModalBtn">Cancel</button>
+          <button class="btn-primary" id="saveKnowledgeBtn">Save Entry</button>
+        </div>
       </div>
     </div>
 
@@ -1011,6 +1241,15 @@
 
         <div id="workflowModalError"
           style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+        </div>
+
+        <div style="background: color-mix(in srgb, var(--profile) 6%, white); border: 1px solid color-mix(in srgb, var(--profile) 20%, white); border-radius: var(--radius-sm); padding: 12px 14px; display:flex; flex-direction:column; gap:8px;">
+          <label class="form-label" style="margin:0;">✨ Generate with AI (optional)</label>
+          <textarea id="aiGenDescription" class="form-textarea" rows="2" style="font-family:inherit; font-size:13px;" placeholder="Describe the business in plain language, e.g. &quot;A car wash and detailing shop, two bays, appointments by the hour&quot;"></textarea>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button class="btn-primary" id="aiGenBtn" type="button" style="white-space:nowrap;">✨ Generate</button>
+            <span id="aiGenStatus" style="font-size:12px; color:var(--muted);"></span>
+          </div>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:12px;">
@@ -1064,27 +1303,57 @@
         </div>
       </div>
     </div>
+
+    <!-- ── Reschedule booking modal ── -->
+    <div id="rescheduleModal" class="modal-overlay" style="display:none;">
+      <div class="modal-card" style="max-width:420px;">
+        <div class="card-header" style="margin-bottom:0;">
+          <span class="card-title" style="font-size:15px;">📅 Reschedule Booking</span>
+          <button class="btn-link" id="closeRescheduleModalBtn" style="font-size:20px;font-weight:bold;">×</button>
+        </div>
+        <div id="rescheduleModalSubtitle" style="font-size:13px;color:var(--muted);margin:8px 0 14px;"></div>
+        <div id="rescheduleModalError" style="display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid #fecaca;font-size:13px;margin-bottom:10px;"></div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label class="form-label">New Date <span style="color:var(--danger);">*</span></label>
+            <input type="date" id="rescheduleDate" class="form-input" />
+          </div>
+          <div>
+            <label class="form-label">New Time <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+            <input type="time" id="rescheduleTime" class="form-input" />
+          </div>
+          <div>
+            <label class="form-label">Message to customer <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+            <textarea id="rescheduleNote" class="form-textarea" rows="3" placeholder="e.g. Sorry for the inconvenience — the doctor has an emergency. Your new slot is confirmed."></textarea>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+          <button class="btn-secondary" id="cancelRescheduleModalBtn">Cancel</button>
+          <button class="btn-primary" id="saveRescheduleBtn">📅 Reschedule &amp; Notify</button>
+        </div>
+      </div>
+    </div>
+
   </main>
+
+  </div><!-- /#appShell -->
 
   <script>
     /* ─────────────────────────────────────────────────────
        Helpers
     ───────────────────────────────────────────────────── */
-    const params = new URLSearchParams(location.search);
-    const dashboardKey = params.get("key");
-
-    function withKey(url) {
-      if (!dashboardKey) return url;
-      const u = new URL(url, location.origin);
-      u.searchParams.set("key", dashboardKey);
-      return u.toString();
-    }
-
+// Session identity lives in an HttpOnly cookie, never in JS-reachable
+    // storage or the URL — every request just needs credentials: "include".
     async function api(path, options) {
-      const resp = await fetch(withKey(path), {
+      const resp = await fetch(path, {
         ...options,
+        credentials: "include",
         headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
       });
+      if (resp.status === 401) {
+        showLogin();
+        throw new Error("Your session expired. Please log in again.");
+      }
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         throw new Error(body.error || `Request failed (${resp.status})`);
@@ -1098,9 +1367,22 @@
       el.style.display = msg ? "block" : "none";
     }
 
+    // Booking fields (customer name, reason) are free text typed by
+    // whoever messages the WhatsApp bot — completely untrusted. Every one
+    // of them gets rendered into innerHTML below, so anything that isn't
+    // run through this first is a stored-XSS hole reachable by texting the
+    // bot a name like `<img src=x onerror=...>`. Escape at render time,
+    // not at storage time, so the raw value is still what's shown in
+    // WhatsApp confirmations / STATUS replies.
+    const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return "";
+      return String(value).replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
+    }
+
     function statusBadge(status) {
-      const icon = { booked: "🔵", arrived: "✅", cancelled: "❌" }[status] || "";
-      return `<span class="status-badge status-${status}">${icon} ${status}</span>`;
+      const icon = { booked: "🔵", arrived: "✅", cancelled: "❌", rescheduled: "📅" }[status] || "";
+      return `<span class="status-badge status-${escapeHtml(status)}">${icon} ${escapeHtml(status)}</span>`;
     }
 
     function formatIST(ms) {
@@ -1134,14 +1416,14 @@
       medical: {
         icon: "🩺", theme: "#0891b2",
         columns: [
-          { label: "Booking ID", render: (b) => b.bookingId },
-          { label: "Patient", render: (b) => b.customerName || "—" },
-          { label: "Age", render: (b) => b.age || "—" },
-          { label: "Gender", render: (b) => b.gender || "—" },
-          { label: "Reason", render: (b) => b.reason || "—" },
-          { label: "Doctor", render: (b) => b.providerName || "—" },
-          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Booking ID", render: (b) => escapeHtml(b.bookingId) },
+          { label: "Patient", render: (b) => escapeHtml(b.customerName) || "—" },
+          { label: "Age", render: (b) => escapeHtml(b.age) || "—" },
+          { label: "Gender", render: (b) => escapeHtml(b.gender) || "—" },
+          { label: "Reason", render: (b) => escapeHtml(b.reason) || "—" },
+          { label: "Doctor", render: (b) => escapeHtml(b.providerName) || "—" },
+          { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
+          { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1149,11 +1431,11 @@
       hair: {
         icon: "💇", theme: "#a855f7",
         columns: [
-          { label: "Booking ID", render: (b) => b.bookingId },
-          { label: "Customer", render: (b) => b.customerName || "—" },
-          { label: "Stylist", render: (b) => b.providerName || "—" },
-          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Booking ID", render: (b) => escapeHtml(b.bookingId) },
+          { label: "Customer", render: (b) => escapeHtml(b.customerName) || "—" },
+          { label: "Stylist", render: (b) => escapeHtml(b.providerName) || "—" },
+          { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
+          { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1161,11 +1443,11 @@
       makeup: {
         icon: "💄", theme: "#ec4899",
         columns: [
-          { label: "Booking ID", render: (b) => b.bookingId },
-          { label: "Customer", render: (b) => b.customerName || "—" },
-          { label: "Artist", render: (b) => b.providerName || "—" },
-          { label: "Date", render: (b) => b.visitDateLabel || b.visitDate || "—" },
-          { label: "Time", render: (b) => b.visitTime || "—" },
+          { label: "Booking ID", render: (b) => escapeHtml(b.bookingId) },
+          { label: "Customer", render: (b) => escapeHtml(b.customerName) || "—" },
+          { label: "Artist", render: (b) => escapeHtml(b.providerName) || "—" },
+          { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
+          { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1173,13 +1455,13 @@
       hotel: {
         icon: "🏨", theme: "#f59e0b",
         columns: [
-          { label: "Booking ID", render: (b) => b.bookingId },
-          { label: "Guest", render: (b) => b.customerName || "—" },
-          { label: "Hotel", render: (b) => b.hotelName || "—" },
-          { label: "Room", render: (b) => b.providerName || "—" },
-          { label: "Check-in", render: (b) => b.checkInIso || "—" },
-          { label: "Check-out", render: (b) => addDaysToIso(b.checkInIso, Number(b.nights) || 0) || "—" },
-          { label: "Nights", render: (b) => b.nights ?? "—" },
+          { label: "Booking ID", render: (b) => escapeHtml(b.bookingId) },
+          { label: "Guest", render: (b) => escapeHtml(b.customerName) || "—" },
+          { label: "Hotel", render: (b) => escapeHtml(b.hotelName) || "—" },
+          { label: "Room", render: (b) => escapeHtml(b.providerName) || "—" },
+          { label: "Check-in", render: (b) => escapeHtml(b.checkInIso) || "—" },
+          { label: "Check-out", render: (b) => escapeHtml(addDaysToIso(b.checkInIso, Number(b.nights) || 0)) || "—" },
+          { label: "Nights", render: (b) => escapeHtml(b.nights) || "—" },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1189,10 +1471,10 @@
     const DEFAULT_PROFILE = {
       icon: "📋", theme: "#4f46e5",
       columns: [
-        { label: "Booking ID", render: (b) => b.bookingId },
-        { label: "Customer", render: (b) => b.customerName || "—" },
-        { label: "Provider", render: (b) => b.providerName || "—" },
-        { label: "When", render: whenGeneric },
+        { label: "Booking ID", render: (b) => escapeHtml(b.bookingId) },
+        { label: "Customer", render: (b) => escapeHtml(b.customerName) || "—" },
+        { label: "Provider", render: (b) => escapeHtml(b.providerName) || "—" },
+        { label: "When", render: (b) => escapeHtml(whenGeneric(b)) },
         { label: "Status", render: (b) => statusBadge(b.status) },
         { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
       ],
@@ -1341,7 +1623,7 @@
       const container = document.getElementById("activeFilters");
       container.innerHTML = chips.map((c, i) => `
       <span class="filter-chip">
-        ${c.label}
+        ${escapeHtml(c.label)}
         <button class="chip-x" data-chip="${i}" title="Remove filter">×</button>
       </span>
     `).join("");
@@ -1362,6 +1644,9 @@
       document.getElementById("providerSelectWrap").style.display = isAdmin ? "none" : "";
       document.getElementById("adminFiltersCard").style.display = isAdmin ? "" : "none";
       document.getElementById("adminWorkflowsCard").style.display = isAdmin ? "" : "none";
+      document.getElementById("adminUsersCard").style.display = isAdmin ? "" : "none";
+      document.getElementById("adminTemplatesCard").style.display = isAdmin ? "" : "none";
+      document.getElementById("adminAuditCard").style.display = isAdmin ? "" : "none";
       document.getElementById("providerBookingsCard").style.display = isAdmin ? "none" : "";
       document.getElementById("availabilityCard").style.display = isAdmin ? "none" : "";
       requestAnimationFrame(updateSlider);
@@ -1387,13 +1672,42 @@
       if (filtered.length === 0) {
         container.innerHTML = `<div class="empty">No bookings match the current filters.</div>`;
       } else {
-        const rows = filtered
-          .map((b) => `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}</tr>`)
-          .join("");
+        const rows = filtered.map((b) => {
+          const actionable = b.status !== "cancelled";
+          const actions = actionable
+            ? `<button class="btn-danger btn-cancel-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Cancel & notify customer">❌ Cancel</button>
+               <button class="btn-secondary btn-reschedule-booking" data-id="${b.id}" data-name="${escapeHtml(b.customerName||'')}" data-bid="${escapeHtml(b.bookingId)}" style="padding:3px 8px;font-size:12px;" title="Reschedule & notify customer">📅 Reschedule</button>`
+            : `<span style="font-size:12px;color:var(--muted);">—</span>`;
+          return `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}<td style="white-space:nowrap;">${actions}</td></tr>`;
+        }).join("");
         container.innerHTML = `<table>
-        <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}</tr></thead>
+        <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}<th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
+
+        // Wire cancel buttons
+        container.querySelectorAll(".btn-cancel-booking").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const note = prompt("Optional: reason for cancellation (sent to customer)") ?? "";
+            if (note === null) return; // user pressed Cancel on the prompt
+            btn.disabled = true;
+            try {
+              await api(`/api/dashboard/bookings/${btn.dataset.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ action: "cancel", note: note.trim() || undefined }),
+              });
+              await loadBookings();
+            } catch (err) {
+              showError(err.message);
+              btn.disabled = false;
+            }
+          });
+        });
+
+        // Wire reschedule buttons
+        container.querySelectorAll(".btn-reschedule-booking").forEach((btn) => {
+          btn.addEventListener("click", () => openRescheduleModal(btn.dataset.id, btn.dataset.bid, btn.dataset.name));
+        });
       }
       renderStatBar(currentBookings, false);
     }
@@ -1429,11 +1743,11 @@
       } else {
         const pIcon = (wid) => (PROFILES[wid] || DEFAULT_PROFILE).icon;
         const rows = filtered.map((b) => `<tr>
-        <td><span class="biz-tag">${pIcon(b.workflowId)} ${workflowLabel(b.workflowId)}</span></td>
-        <td>${b.bookingId}</td>
-        <td>${b.customerName || "—"}</td>
-        <td>${providerLabel(b.workflowId, b.providerId)}</td>
-        <td>${whenGeneric(b)}</td>
+        <td><span class="biz-tag">${pIcon(b.workflowId)} ${escapeHtml(workflowLabel(b.workflowId))}</span></td>
+        <td>${escapeHtml(b.bookingId)}</td>
+        <td>${escapeHtml(b.customerName) || "—"}</td>
+        <td>${escapeHtml(providerLabel(b.workflowId, b.providerId))}</td>
+        <td>${escapeHtml(whenGeneric(b))}</td>
         <td>${statusBadge(b.status)}</td>
         <td>${formatIST(b.createdAt)}</td>
       </tr>`).join("");
@@ -1485,7 +1799,7 @@
       }
       list.innerHTML = blocks.map((b) => `
       <div class="block-item">
-        <span>${b.date}${b.time ? " at " + b.time : " (whole day)"}${b.reason ? " — " + b.reason : ""}</span>
+        <span>${escapeHtml(b.date)}${b.time ? " at " + escapeHtml(b.time) : " (whole day)"}${b.reason ? " — " + escapeHtml(b.reason) : ""}</span>
         <button class="btn-danger" data-block-id="${b.id}">Remove</button>
       </div>`).join("");
 
@@ -1503,7 +1817,7 @@
       providers = await api("/api/dashboard/providers");
       const select = document.getElementById("providerSelect");
       select.innerHTML = providers
-        .map((p) => `<option value="${p.workflowId}::${p.providerId}">${p.workflowLabel} — ${p.providerName}</option>`)
+        .map((p) => `<option value="${escapeHtml(p.workflowId)}::${escapeHtml(p.providerId)}">${escapeHtml(p.workflowLabel)} — ${escapeHtml(p.providerName)}</option>`)
         .join("");
 
       // Populate business filter with icons
@@ -1514,11 +1828,396 @@
         if (seen.has(p.workflowId)) continue;
         seen.add(p.workflowId);
         const icon = (PROFILES[p.workflowId] || DEFAULT_PROFILE).icon;
-        opts += `<option value="${p.workflowId}">${icon} ${p.workflowLabel}</option>`;
+        opts += `<option value="${escapeHtml(p.workflowId)}">${icon} ${escapeHtml(p.workflowLabel)}</option>`;
       }
       bizFilter.innerHTML = `<option value="">All businesses</option>${opts}`;
 
       if (providers.length > 0) await loadAll();
+    }
+
+    async function loadAuditLog() {
+      const entries = await api("/api/dashboard/audit-log");
+      document.getElementById("auditCountBadge").textContent = entries.length;
+      const container = document.getElementById("auditLogContainer");
+      if (entries.length === 0) {
+        container.innerHTML = `<div class="empty">No audit entries yet.</div>`;
+        return;
+      }
+      const rows = entries.map((e) => `<tr>
+        <td>${formatIST(e.createdAt)}</td>
+        <td>${escapeHtml(e.actorEmail)}</td>
+        <td>${escapeHtml(e.actorRole)}</td>
+        <td>${escapeHtml(e.action)}</td>
+        <td style="white-space:normal; max-width:420px;">${e.detail ? escapeHtml(JSON.stringify(e.detail)) : "—"}</td>
+      </tr>`).join("");
+      container.innerHTML = `<table>
+        <thead><tr><th>When (IST)</th><th>Who</th><th>Role</th><th>Action</th><th>Detail</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Manage Team (Admin only) — self-serve provider logins
+    ───────────────────────────────────────────────────── */
+    let teamUsers = [];
+
+    async function loadUsers() {
+      teamUsers = await api("/api/dashboard/users");
+      renderUsers();
+    }
+
+    function renderUsers() {
+      document.getElementById("usersCountBadge").textContent = teamUsers.length;
+      const tbody = document.getElementById("usersList");
+      if (teamUsers.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">No logins yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = teamUsers.map((u) => {
+        const businessLabel = u.role === "admin" ? "—" : escapeHtml(providerLabel(u.workflowId, u.providerId));
+        const isSelf = currentUser && u.email === currentUser.email;
+        return `<tr>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${escapeHtml(u.name) || "—"}</td>
+          <td>${u.role === "admin" ? "👑 Admin" : "🏢 Provider"}</td>
+          <td>${businessLabel}</td>
+          <td>${u.active ? '<span class="status-badge status-arrived">Active</span>' : '<span class="status-badge status-cancelled">Deactivated</span>'}</td>
+          <td>${isSelf ? "" : `<button class="btn-secondary btn-toggle-user" data-id="${u.id}" data-active="${u.active}" style="padding:4px 8px; font-size:12px;">${u.active ? "Deactivate" : "Reactivate"}</button>`}</td>
+        </tr>`;
+      }).join("");
+
+      tbody.querySelectorAll(".btn-toggle-user").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const makeActive = btn.dataset.active !== "true";
+          try {
+            await api(`/api/dashboard/users/${btn.dataset.id}`, { method: "PATCH", body: JSON.stringify({ active: makeActive }) });
+            await loadUsers();
+          } catch (err) { showError(err.message); }
+        });
+      });
+    }
+
+    function populateUserProviderSelect() {
+      // `providers` holds the FULL roster here because this modal only ever
+      // opens for an admin session — a provider session's /api/dashboard/
+      // providers response is filtered to just their own entry server-side.
+      const sel = document.getElementById("userProviderInput");
+      sel.innerHTML = providers
+        .map((p) => `<option value="${escapeHtml(p.workflowId)}::${escapeHtml(p.providerId)}">${escapeHtml(p.workflowLabel)} — ${escapeHtml(p.providerName)}</option>`)
+        .join("");
+    }
+
+    function openUserModal() {
+      document.getElementById("userModalError").style.display = "none";
+      document.getElementById("userRoleInput").value = "provider";
+      document.getElementById("userNameInput").value = "";
+      document.getElementById("userEmailInput").value = "";
+      document.getElementById("userPasswordInput").value = "";
+      populateUserProviderSelect();
+      document.getElementById("userProviderWrap").style.display = "";
+      document.getElementById("userModal").style.display = "flex";
+    }
+
+    function closeUserModal() {
+      document.getElementById("userModal").style.display = "none";
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Analytics — inline SVG/CSS bars, no chart library
+       (a CDN script would be blocked by this page's CSP anyway)
+    ───────────────────────────────────────────────────── */
+    const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    async function loadAnalytics() {
+      const days = document.getElementById("analyticsRangeSelect").value;
+      // A provider's scope is forced server-side; sending the selected
+      // provider only affects an admin session.
+      const provider = role === "provider" ? selectedProvider() : null;
+      const params = new URLSearchParams({ days });
+      if (provider) {
+        params.set("workflowId", provider.workflowId);
+        params.set("providerId", provider.providerId);
+      }
+      const a = await api(`/api/dashboard/analytics?${params}`);
+      renderAnalytics(a);
+    }
+
+    function barRow(label, count, max, color) {
+      const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+      return `<div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
+        <div style="width:74px; font-size:12px; color:var(--muted); text-align:right; flex-shrink:0;">${escapeHtml(label)}</div>
+        <div style="flex:1; background:#f0f0f4; border-radius:4px; height:18px; overflow:hidden;">
+          <div style="width:${pct}%; height:100%; background:${color}; border-radius:4px; transition:width .3s;"></div>
+        </div>
+        <div style="width:34px; font-size:12px; font-weight:600; flex-shrink:0;">${count}</div>
+      </div>`;
+    }
+
+    function renderAnalytics(a) {
+      const body = document.getElementById("analyticsBody");
+      if (a.total === 0) {
+        body.innerHTML = `<div class="empty">No bookings yet — analytics appear here as bookings come in.</div>`;
+        return;
+      }
+
+      const maxDay = Math.max(...a.perDay.map((d) => d.count), 1);
+      // Sparkline-style column chart for the trend.
+      const trend = a.perDay.map((d) => {
+        const h = Math.round((d.count / maxDay) * 100);
+        return `<div title="${d.date}: ${d.count}" style="flex:1; min-width:3px; display:flex; align-items:flex-end; height:70px;">
+          <div style="width:100%; height:${Math.max(h, 2)}%; background:var(--profile); opacity:${d.count ? 1 : 0.18}; border-radius:2px 2px 0 0;"></div>
+        </div>`;
+      }).join("");
+
+      const maxSlot = Math.max(...a.popularSlots.map((s) => s.count), 1);
+      const slots = a.popularSlots.length
+        ? a.popularSlots.map((s) => barRow(s.time, s.count, maxSlot, "#0891b2")).join("")
+        : `<div class="empty" style="padding:12px 0;">No time-slot data (hotel stays don't use slots).</div>`;
+
+      const maxWeekday = Math.max(...a.weekdayCounts, 1);
+      const weekdays = a.weekdayCounts.map((c, i) => barRow(WEEKDAY_NAMES[i], c, maxWeekday, "#a855f7")).join("");
+
+      const providerRows = a.providers.length > 1
+        ? `<div style="margin-top:18px;">
+             <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Provider performance</div>
+             <div class="table-scroll"><table>
+               <thead><tr><th>Provider</th><th>Total</th><th>Arrived</th><th>Cancelled</th></tr></thead>
+               <tbody>${a.providers.map((p) => `<tr>
+                 <td>${escapeHtml(p.providerName)}</td><td>${p.total}</td><td>${p.arrived}</td><td>${p.cancelled}</td>
+               </tr>`).join("")}</tbody>
+             </table></div>
+           </div>`
+        : "";
+
+      // No-show rate is only meaningful once some appointments are
+      // actually in the past — say so rather than showing a fake 0%.
+      const noShow = a.noShowRate === null
+        ? `<span style="font-size:12px; color:var(--muted);">No past appointments yet</span>`
+        : `<span style="font-size:22px; font-weight:700; color:${a.noShowRate > 25 ? "var(--danger)" : "#16a34a"};">${a.noShowRate}%</span>
+           <span style="font-size:11px; color:var(--muted);"> of ${a.noShowSampleSize} past</span>`;
+
+      body.innerHTML = `
+        <div style="margin-bottom:18px;">
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Bookings received</div>
+          <div style="display:flex; gap:2px; align-items:flex-end;">${trend}</div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--subtle); margin-top:4px;">
+            <span>${escapeHtml(a.perDay[0]?.date || "")}</span><span>${escapeHtml(a.perDay[a.perDay.length - 1]?.date || "")}</span>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:22px;">
+          <div>
+            <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Most-booked slots</div>
+            ${slots}
+          </div>
+          <div>
+            <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Busiest weekdays</div>
+            ${weekdays}
+          </div>
+          <div>
+            <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">No-show rate</div>
+            <div>${noShow}</div>
+            <div style="font-size:11px; color:var(--subtle); margin-top:6px; line-height:1.4;">
+              A past booking never marked "arrived". The bot only learns attendance when a customer texts HERE, so treat this as a floor, not an exact figure.
+            </div>
+          </div>
+        </div>
+        ${providerRows}`;
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Marketplace — publish/install workflow templates
+    ───────────────────────────────────────────────────── */
+    let workflowTemplates = [];
+    let installingTemplateId = null;
+
+    async function loadTemplates() {
+      workflowTemplates = await api("/api/dashboard/templates");
+      renderTemplates();
+    }
+
+    function renderTemplates() {
+      document.getElementById("templatesCountBadge").textContent = workflowTemplates.length;
+      const tbody = document.getElementById("templatesList");
+      if (workflowTemplates.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">No templates yet — publish a business to reuse its setup.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = workflowTemplates.map((t) => `<tr>
+        <td style="font-weight:600;">${escapeHtml(t.name)}</td>
+        <td>${escapeHtml(t.industry) || "—"}</td>
+        <td style="white-space:normal; max-width:280px;">${escapeHtml(t.description) || "—"}</td>
+        <td><span class="count-badge">${t.stepCount} steps · ${t.providerCount} providers</span></td>
+        <td>${escapeHtml(t.createdBy) || "—"}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn-primary btn-install-template" data-id="${t.id}" data-name="${escapeHtml(t.name)}" style="padding:4px 8px; font-size:12px; margin-right:4px;">Install</button>
+          <button class="btn-danger btn-delete-template" data-id="${t.id}" style="padding:4px 8px; font-size:12px;">Delete</button>
+        </td>
+      </tr>`).join("");
+
+      tbody.querySelectorAll(".btn-install-template").forEach((btn) => {
+        btn.addEventListener("click", () => openInstallModal(Number(btn.dataset.id), btn.dataset.name));
+      });
+      tbody.querySelectorAll(".btn-delete-template").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Delete this template? Businesses already installed from it are unaffected.")) return;
+          try {
+            await api(`/api/dashboard/templates/${btn.dataset.id}`, { method: "DELETE" });
+            await loadTemplates();
+          } catch (err) { showError(err.message); }
+        });
+      });
+    }
+
+    function openPublishModal() {
+      document.getElementById("publishModalError").style.display = "none";
+      const sel = document.getElementById("publishWorkflowInput");
+      sel.innerHTML = Object.values(allWorkflows)
+        .map((w) => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.label)}</option>`)
+        .join("");
+      document.getElementById("publishNameInput").value = "";
+      document.getElementById("publishIndustryInput").value = "";
+      document.getElementById("publishDescInput").value = "";
+      document.getElementById("publishTemplateModal").style.display = "flex";
+    }
+
+    function openInstallModal(id, name) {
+      installingTemplateId = id;
+      document.getElementById("installModalError").style.display = "none";
+      document.getElementById("installModalTitle").textContent = `Install: ${name}`;
+      document.getElementById("installIdInput").value = "";
+      document.getElementById("installLabelInput").value = "";
+      document.getElementById("installTemplateModal").style.display = "flex";
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Reschedule modal — provider cancel/reschedule with
+       instant WhatsApp notification to the customer.
+    ───────────────────────────────────────────────────── */
+    let reschedulingBookingId = null;
+
+    function openRescheduleModal(bookingRowId, bookingId, customerName) {
+      reschedulingBookingId = bookingRowId;
+      document.getElementById("rescheduleModalError").style.display = "none";
+      document.getElementById("rescheduleModalSubtitle").textContent =
+        `Booking ${bookingId}${customerName ? " — " + customerName : ""}`;
+      document.getElementById("rescheduleDate").value = "";
+      document.getElementById("rescheduleTime").value = "";
+      document.getElementById("rescheduleNote").value = "";
+      document.getElementById("rescheduleModal").style.display = "flex";
+    }
+
+    function closeRescheduleModal() {
+      reschedulingBookingId = null;
+      document.getElementById("rescheduleModal").style.display = "none";
+    }
+
+    document.getElementById("closeRescheduleModalBtn").addEventListener("click", closeRescheduleModal);
+    document.getElementById("cancelRescheduleModalBtn").addEventListener("click", closeRescheduleModal);
+    document.getElementById("rescheduleModal").addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) closeRescheduleModal();
+    });
+
+    document.getElementById("saveRescheduleBtn").addEventListener("click", async () => {
+      if (!reschedulingBookingId) return;
+      const date = document.getElementById("rescheduleDate").value;
+      const time = document.getElementById("rescheduleTime").value;
+      const note = document.getElementById("rescheduleNote").value.trim();
+      const errEl = document.getElementById("rescheduleModalError");
+
+      if (!date) {
+        errEl.textContent = "Please pick a new date.";
+        errEl.style.display = "block";
+        return;
+      }
+      errEl.style.display = "none";
+
+      const btn = document.getElementById("saveRescheduleBtn");
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+      try {
+        await api(`/api/dashboard/bookings/${reschedulingBookingId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            action: "reschedule",
+            rescheduleDate: date,
+            rescheduleTime: time || undefined,
+            note: note || undefined,
+          }),
+        });
+        closeRescheduleModal();
+        await loadBookings();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "📅 Reschedule & Notify";
+      }
+    });
+
+
+    let knowledgeDocs = [];
+    let editingKnowledgeId = null;
+
+    async function loadKnowledge() {
+      knowledgeDocs = await api("/api/dashboard/knowledge");
+      renderKnowledge();
+    }
+
+    function renderKnowledge() {
+      document.getElementById("knowledgeCountBadge").textContent = knowledgeDocs.length;
+      const tbody = document.getElementById("knowledgeList");
+      if (knowledgeDocs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty">No entries yet — add FAQs, policies, or pricing the bot should know.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = knowledgeDocs.map((d) => `<tr>
+        <td><span class="biz-tag">${(PROFILES[d.workflowId] || DEFAULT_PROFILE).icon} ${escapeHtml(workflowLabel(d.workflowId))}</span></td>
+        <td>${escapeHtml(d.title)}</td>
+        <td style="white-space:normal; max-width:420px;">${escapeHtml(d.content.length > 160 ? d.content.slice(0, 160) + "…" : d.content)}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn-secondary btn-edit-knowledge" data-id="${d.id}" style="padding:4px 8px; font-size:12px; margin-right:4px;">Edit</button>
+          <button class="btn-danger btn-delete-knowledge" data-id="${d.id}" style="padding:4px 8px; font-size:12px;">Delete</button>
+        </td>
+      </tr>`).join("");
+
+      tbody.querySelectorAll(".btn-edit-knowledge").forEach((btn) => {
+        btn.addEventListener("click", () => openKnowledgeModal(Number(btn.dataset.id)));
+      });
+      tbody.querySelectorAll(".btn-delete-knowledge").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Delete this knowledge entry? The bot will stop answering from it.")) return;
+          try {
+            await api(`/api/dashboard/knowledge/${btn.dataset.id}`, { method: "DELETE" });
+            await loadKnowledge();
+          } catch (err) { showError(err.message); }
+        });
+      });
+    }
+
+    function openKnowledgeModal(id = null) {
+      editingKnowledgeId = id;
+      document.getElementById("knowledgeModalError").style.display = "none";
+      document.getElementById("knowledgeModalTitle").textContent = id ? "Edit Knowledge Entry" : "Add Knowledge Entry";
+
+      // A provider has exactly one business, so there's nothing to pick.
+      const isProvider = currentUser?.role === "provider";
+      document.getElementById("knowledgeWorkflowWrap").style.display = isProvider ? "none" : "";
+      const sel = document.getElementById("knowledgeWorkflowInput");
+      const seen = new Set();
+      sel.innerHTML = providers
+        .filter((p) => !seen.has(p.workflowId) && seen.add(p.workflowId))
+        .map((p) => `<option value="${escapeHtml(p.workflowId)}">${escapeHtml(p.workflowLabel)}</option>`)
+        .join("");
+
+      const doc = id ? knowledgeDocs.find((d) => d.id === id) : null;
+      document.getElementById("knowledgeTitleInput").value = doc ? doc.title : "";
+      document.getElementById("knowledgeContentInput").value = doc ? doc.content : "";
+      if (doc) sel.value = doc.workflowId;
+      document.getElementById("knowledgeModal").style.display = "flex";
+    }
+
+    function closeKnowledgeModal() {
+      document.getElementById("knowledgeModal").style.display = "none";
     }
 
     async function loadAll() {
@@ -1526,9 +2225,9 @@
       applyProfileTheme(selectedProvider());
       try {
         if (role === "admin") {
-          await Promise.all([loadAllBookings(), loadWorkflows()]);
+          await Promise.all([loadAllBookings(), loadWorkflows(), loadAuditLog(), loadUsers(), loadKnowledge(), loadTemplates(), loadAnalytics()]);
         } else {
-          await Promise.all([loadBookings(), loadAvailability()]);
+          await Promise.all([loadBookings(), loadAvailability(), loadKnowledge(), loadAnalytics()]);
         }
       } catch (err) {
         showError(err.message);
@@ -1659,13 +2358,13 @@
         const icon = (PROFILES[key] || DEFAULT_PROFILE).icon;
         return `
         <tr>
-          <td style="font-weight:600;">${icon} ${w.id}</td>
-          <td>${w.label}</td>
-          <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${w.description || "—"}</td>
+          <td style="font-weight:600;">${icon} ${escapeHtml(w.id)}</td>
+          <td>${escapeHtml(w.label)}</td>
+          <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(w.description) || "—"}</td>
           <td><span class="count-badge">${providerCount} ${bizType}</span></td>
           <td>
-            <button class="btn-secondary btn-edit-workflow" data-id="${w.id}" style="padding: 4px 8px; font-size:12px; margin-right:4px;">Edit</button>
-            <button class="btn-danger btn-delete-workflow" data-id="${w.id}" style="padding: 4px 8px; font-size:12px;">Delete</button>
+            <button class="btn-secondary btn-edit-workflow" data-id="${escapeHtml(w.id)}" style="padding: 4px 8px; font-size:12px; margin-right:4px;">Edit</button>
+            <button class="btn-danger btn-delete-workflow" data-id="${escapeHtml(w.id)}" style="padding: 4px 8px; font-size:12px;">Delete</button>
           </td>
         </tr>
       `;
@@ -1696,6 +2395,8 @@
       const errorEl = document.getElementById("workflowModalError");
       errorEl.style.display = "none";
       errorEl.textContent = "";
+      document.getElementById("aiGenDescription").value = "";
+      document.getElementById("aiGenStatus").textContent = "";
 
       const templateSelect = document.getElementById("workflowTemplateSelect");
       const idInput = document.getElementById("workflowIdInput");
@@ -1829,10 +2530,173 @@
       } catch (err) { showError(err.message); }
     });
 
+    // Manage Team actions
+    document.getElementById("addUserBtn").addEventListener("click", openUserModal);
+    document.getElementById("closeUserModalBtn").addEventListener("click", closeUserModal);
+    document.getElementById("cancelUserModalBtn").addEventListener("click", closeUserModal);
+    document.getElementById("userRoleInput").addEventListener("change", (e) => {
+      document.getElementById("userProviderWrap").style.display = e.target.value === "provider" ? "" : "none";
+    });
+    document.getElementById("saveUserBtn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("userModalError");
+      errorEl.style.display = "none";
+
+      const role = document.getElementById("userRoleInput").value;
+      const name = document.getElementById("userNameInput").value.trim();
+      const email = document.getElementById("userEmailInput").value.trim();
+      const password = document.getElementById("userPasswordInput").value;
+      const payload = { role, name, email, password };
+
+      if (role === "provider") {
+        const [workflowId, providerId] = document.getElementById("userProviderInput").value.split("::");
+        payload.workflowId = workflowId;
+        payload.providerId = providerId;
+      }
+
+      try {
+        await api("/api/dashboard/users", { method: "POST", body: JSON.stringify(payload) });
+        closeUserModal();
+        await loadUsers();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+
+    document.getElementById("analyticsRangeSelect").addEventListener("change", () => {
+      loadAnalytics().catch((err) => showError(err.message));
+    });
+
+    // Marketplace actions
+    document.getElementById("publishTemplateBtn").addEventListener("click", openPublishModal);
+    document.getElementById("closePublishModalBtn").addEventListener("click", () => { document.getElementById("publishTemplateModal").style.display = "none"; });
+    document.getElementById("cancelPublishModalBtn").addEventListener("click", () => { document.getElementById("publishTemplateModal").style.display = "none"; });
+    document.getElementById("savePublishBtn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("publishModalError");
+      errorEl.style.display = "none";
+      const payload = {
+        workflowId: document.getElementById("publishWorkflowInput").value,
+        name: document.getElementById("publishNameInput").value.trim(),
+        industry: document.getElementById("publishIndustryInput").value.trim(),
+        description: document.getElementById("publishDescInput").value.trim(),
+      };
+      if (!payload.name) {
+        errorEl.textContent = "A template name is required.";
+        errorEl.style.display = "block";
+        return;
+      }
+      try {
+        await api("/api/dashboard/templates", { method: "POST", body: JSON.stringify(payload) });
+        document.getElementById("publishTemplateModal").style.display = "none";
+        await loadTemplates();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+
+    document.getElementById("closeInstallModalBtn").addEventListener("click", () => { document.getElementById("installTemplateModal").style.display = "none"; });
+    document.getElementById("cancelInstallModalBtn").addEventListener("click", () => { document.getElementById("installTemplateModal").style.display = "none"; });
+    document.getElementById("saveInstallBtn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("installModalError");
+      errorEl.style.display = "none";
+      const newId = document.getElementById("installIdInput").value.trim();
+      const newLabel = document.getElementById("installLabelInput").value.trim();
+      if (!newId) {
+        errorEl.textContent = "A new business ID is required.";
+        errorEl.style.display = "block";
+        return;
+      }
+      try {
+        await api(`/api/dashboard/templates/${installingTemplateId}/install`, {
+          method: "POST",
+          body: JSON.stringify({ newId, newLabel }),
+        });
+        document.getElementById("installTemplateModal").style.display = "none";
+        await Promise.all([loadWorkflows(), loadProviders()]);
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+
+    // Knowledge Base actions
+    document.getElementById("addKnowledgeBtn").addEventListener("click", () => openKnowledgeModal());
+    document.getElementById("closeKnowledgeModalBtn").addEventListener("click", closeKnowledgeModal);
+    document.getElementById("cancelKnowledgeModalBtn").addEventListener("click", closeKnowledgeModal);
+    document.getElementById("saveKnowledgeBtn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("knowledgeModalError");
+      errorEl.style.display = "none";
+      const title = document.getElementById("knowledgeTitleInput").value.trim();
+      const content = document.getElementById("knowledgeContentInput").value.trim();
+      if (!title || !content) {
+        errorEl.textContent = "Both a title and content are required.";
+        errorEl.style.display = "block";
+        return;
+      }
+      const payload = { title, content };
+      // Providers don't send a workflowId at all — the server pins it to
+      // their own business regardless of what the client claims.
+      if (currentUser?.role !== "provider") payload.workflowId = document.getElementById("knowledgeWorkflowInput").value;
+
+      try {
+        if (editingKnowledgeId) {
+          await api(`/api/dashboard/knowledge/${editingKnowledgeId}`, { method: "PUT", body: JSON.stringify(payload) });
+        } else {
+          await api("/api/dashboard/knowledge", { method: "POST", body: JSON.stringify(payload) });
+        }
+        closeKnowledgeModal();
+        await loadKnowledge();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+
     // Workflow CRUD button actions
     document.getElementById("addWorkflowBtn").addEventListener("click", () => openWorkflowModal());
     document.getElementById("closeWorkflowModalBtn").addEventListener("click", closeWorkflowModal);
     document.getElementById("cancelWorkflowModalBtn").addEventListener("click", closeWorkflowModal);
+
+    // AI Workflow Generator — drafts into the SAME fields the template
+    // dropdown fills, so it's just another way to seed the JSON textarea.
+    // Nothing is saved until the admin reviews it and clicks Save Business,
+    // which still runs the server's own schema validation.
+    document.getElementById("aiGenBtn").addEventListener("click", async () => {
+      const description = document.getElementById("aiGenDescription").value.trim();
+      const statusEl = document.getElementById("aiGenStatus");
+      const btn = document.getElementById("aiGenBtn");
+      if (!description) {
+        statusEl.textContent = "Describe the business first.";
+        statusEl.style.color = "var(--danger)";
+        return;
+      }
+      btn.disabled = true;
+      statusEl.style.color = "var(--muted)";
+      statusEl.textContent = "Generating…";
+      try {
+        const result = await api("/api/dashboard/workflows/generate", {
+          method: "POST",
+          body: JSON.stringify({ description }),
+        });
+        const w = result.workflow;
+        document.getElementById("workflowIdInput").value = w.id || "";
+        document.getElementById("workflowLabelInput").value = w.label || "";
+        document.getElementById("workflowPrefixInput").value = w.bookingIdPrefix || "";
+        document.getElementById("workflowDescInput").value = w.description || "";
+        document.getElementById("workflowJsonInput").value = JSON.stringify(w, null, 2);
+        document.getElementById("workflowTemplateSelect").value = "custom";
+        statusEl.style.color = result.validationWarning ? "var(--danger)" : "var(--success, #16a34a)";
+        statusEl.textContent = result.validationWarning
+          ? `Drafted, but check it over: ${result.validationWarning}`
+          : "Drafted below — review before saving.";
+      } catch (err) {
+        statusEl.style.color = "var(--danger)";
+        statusEl.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     // Sync inputs to textarea JSON
     document.getElementById("workflowIdInput").addEventListener("input", updateJsonFromInputs);
@@ -1919,12 +2783,90 @@
     });
 
     /* ─────────────────────────────────────────────────────
-       Init
+       Auth — login screen gates the whole app; nothing under
+       #appShell fetches anything until /api/auth/me succeeds.
     ───────────────────────────────────────────────────── */
+    let currentUser = null;
+
+    function showLogin() {
+      document.getElementById("appShell").style.display = "none";
+      document.getElementById("loginScreen").style.display = "flex";
+    }
+
+    function showApp() {
+      document.getElementById("loginScreen").style.display = "none";
+      document.getElementById("appShell").style.display = "block";
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById("loginError");
+      errorEl.style.display = "none";
+      const email = document.getElementById("loginEmail").value.trim();
+      const password = document.getElementById("loginPassword").value;
+      const btn = document.getElementById("loginSubmitBtn");
+      btn.disabled = true;
+      try {
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.error || "Login failed.");
+        document.getElementById("loginPassword").value = "";
+        await bootApp(body.user);
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      try { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); } catch {}
+      currentUser = null;
+      showLogin();
+    });
+
+    // A provider must never even see that an Admin mode exists — hiding
+    // the toggle is on top of (not instead of) the server rejecting
+    // requireAuth("admin") for that role; this is belt-and-suspenders,
+    // not the actual security boundary.
+    function applyRoleVisibility() {
+      const isAdminUser = currentUser?.role === "admin";
+      document.getElementById("roleToggle").style.display = isAdminUser ? "" : "none";
+      document.getElementById("currentUserLabel").textContent = currentUser
+        ? `${currentUser.name || currentUser.email} · ${currentUser.role}`
+        : "";
+    }
+
+    async function bootApp(user) {
+      currentUser = user;
+      showApp();
+      applyRoleVisibility();
+      setRole("provider"); // always land on the caller's own data first
+      await loadProviders().catch((err) => showError(err.message));
+    }
+
+    (async function initAuth() {
+      try {
+        const resp = await fetch("/api/auth/me", { credentials: "include" });
+        if (!resp.ok) return showLogin();
+        const user = await resp.json();
+        await bootApp(user);
+      } catch {
+        showLogin();
+      }
+    })();
+
     document.getElementById("adminFiltersCard").style.display = "none";
+    document.getElementById("adminUsersCard").style.display = "none";
+    document.getElementById("adminAuditCard").style.display = "none";
     requestAnimationFrame(updateSlider);
     window.addEventListener("resize", updateSlider);
-    loadProviders().catch((err) => showError(err.message));
   </script>
 </body>
 

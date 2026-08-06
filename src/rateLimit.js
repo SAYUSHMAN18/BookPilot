@@ -15,4 +15,19 @@ function isRateLimited(waId) {
   return recent.length > MAX_PER_WINDOW;
 }
 
-module.exports = { isRateLimited };
+// Separate, much stricter window for login attempts — this one guards
+// against password guessing, not chat spam, so it's keyed by IP+email
+// rather than WhatsApp id and trips at a much lower count.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const loginHits = new Map(); // key (ip:email) -> timestamps[]
+
+function isLoginRateLimited(key) {
+  const now = Date.now();
+  const recent = (loginHits.get(key) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
+  recent.push(now);
+  loginHits.set(key, recent);
+  return recent.length > LOGIN_MAX_ATTEMPTS;
+}
+
+module.exports = { isRateLimited, isLoginRateLimited };

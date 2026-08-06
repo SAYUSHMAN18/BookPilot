@@ -92,6 +92,14 @@ function ensureColumn(table, column, type) {
 ensureColumn("bookings", "age", "TEXT");
 ensureColumn("bookings", "gender", "TEXT");
 ensureColumn("bookings", "reason", "TEXT");
+// Provider-action columns: track who cancelled/rescheduled and why,
+// so the dashboard can show an audit trail and the WhatsApp notification
+// can include the new date/time when a provider reschedules.
+ensureColumn("bookings", "cancelled_by", "TEXT");
+ensureColumn("bookings", "rescheduled_date", "TEXT");
+ensureColumn("bookings", "rescheduled_time", "TEXT");
+ensureColumn("bookings", "reschedule_note", "TEXT");
+
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_bookings_wa_id ON bookings(wa_id);`);
 
@@ -132,6 +140,78 @@ db.exec(`
 `);
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_blocked_provider_date ON blocked_slots(workflow_id, provider_id, date);
+`);
+
+// Dashboard accounts. Replaces the old single shared DASHBOARD_ACCESS_KEY
+// (one secret, no identity, no way to scope who could see what) — every
+// login is now a real person with a role. Providers are pinned to exactly
+// one workflow_id+provider_id so the API layer can enforce "you only ever
+// see your own bookings" against this row, not a client-supplied claim.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'provider')),
+    name TEXT,
+    workflow_id TEXT, -- providers only; NULL for admins
+    provider_id TEXT, -- providers only; NULL for admins
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+`);
+
+// "Especially admin actions" — who did what, when. Append-only by
+// convention (nothing in this codebase updates or deletes a row here).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_email TEXT NOT NULL,
+    actor_role TEXT NOT NULL,
+    action TEXT NOT NULL,
+    detail TEXT, -- JSON-stringified context, free-form per action
+    created_at INTEGER NOT NULL
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at);`);
+
+// RAG-lite knowledge base — free-text FAQ/policy/pricing entries an admin
+// or a provider adds per business, folded into the same context-stuffed
+// prompt factualQA.js already builds from workflow config (businessHours,
+// providers, fees). At this scale (a handful of businesses, each with a
+// modest FAQ list) the whole knowledge base comfortably fits in a single
+// prompt — true vector retrieval would add a dependency and a
+// retrieval-miss failure mode this doesn't need yet. Scoped by workflow_id
+// only, not provider_id: a clinic's "do you take insurance?" answer is
+// shared by every doctor in it, the same way businessHours already is.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS knowledge_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_workflow ON knowledge_documents(workflow_id);`);
+
+// Workflow template marketplace. A template is a frozen copy of a
+// workflow's JSON config — installing one writes a NEW workflows/*.json
+// under a fresh id, so editing the installed business never mutates the
+// template it came from (and vice versa). Deliberately a copy, not a
+// reference: a business that silently changed because someone edited a
+// shared upstream template would be a nasty surprise mid-booking-season.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workflow_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    industry TEXT,
+    description TEXT,
+    definition TEXT NOT NULL, -- JSON-stringified workflow config
+    created_by TEXT,
+    created_at INTEGER NOT NULL
+  );
 `);
 
 module.exports = { db };

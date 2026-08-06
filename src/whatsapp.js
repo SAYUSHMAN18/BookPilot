@@ -4,6 +4,31 @@ function credentials() {
   return { token: process.env.WHATSAPP_TOKEN, phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID };
 }
 
+// Voice-reply capture. When a customer sends a voice note we want to speak
+// the reply back — but the reply text is produced deep inside
+// workflowEngine, across a dozen send call sites. Rather than thread a
+// "speak this" flag through all of them (and risk touching booking logic
+// for a presentation concern), the webhook switches capture on for that
+// one waId, lets the engine run completely unchanged, then synthesizes
+// whatever text was sent. Keyed by waId so two concurrent conversations
+// can't collect each other's replies.
+const replyCaptures = new Map(); // waId -> string[]
+
+function beginReplyCapture(waId) {
+  replyCaptures.set(waId, []);
+}
+
+function endReplyCapture(waId) {
+  const captured = replyCaptures.get(waId) || [];
+  replyCaptures.delete(waId);
+  return captured.join("\n\n");
+}
+
+function captureReply(to, body) {
+  const bucket = replyCaptures.get(to);
+  if (bucket) bucket.push(body);
+}
+
 async function postToGraphApi(phoneNumberId, token, payload, to, describeSuccess) {
   const resp = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
     method: "POST",
@@ -27,6 +52,7 @@ async function postToGraphApi(phoneNumberId, token, payload, to, describeSuccess
 // configured yet, so the bot can be exercised locally without a live number.
 async function sendWhatsAppText(to, body) {
   const { token, phoneNumberId } = credentials();
+  captureReply(to, body);
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED REPLY -> ${to}]\n${body}`);
@@ -47,6 +73,9 @@ async function sendWhatsAppText(to, body) {
 async function sendWhatsAppButtons(to, bodyText, buttons) {
   const { token, phoneNumberId } = credentials();
   const rendered = buttons.map((b, i) => `${i + 1}. ${b.title} [reply with: ${b.id}]`).join("\n");
+  // Speak the prompt and the option titles, but not the machine-readable
+  // reply ids — those are for tapping, not for listening to.
+  captureReply(to, `${bodyText}\n${buttons.map((b) => b.title).join(", ")}`);
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED BUTTONS -> ${to}]\n${bodyText}\n${rendered}`);
@@ -80,6 +109,7 @@ async function sendWhatsAppList(to, bodyText, buttonLabel, sections) {
     .flatMap((s) => s.rows)
     .map((r, i) => `${i + 1}. ${r.title}${r.description ? " — " + r.description : ""} [reply with: ${r.id}]`)
     .join("\n");
+  captureReply(to, `${bodyText}\n${sections.flatMap((s) => s.rows).map((r) => r.title).join(", ")}`);
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED LIST -> ${to}]\n${bodyText}\n${rendered}`);
@@ -114,4 +144,52 @@ async function sendWhatsAppList(to, bodyText, buttonLabel, sections) {
   );
 }
 
-module.exports = { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppList };
+// Sends a spoken reply. WhatsApp needs the audio uploaded to its own
+// media endpoint first (two hops), then referenced by the returned id.
+// Best-effort by design: every caller ALSO sends the text version, so a
+// failure here degrades to text rather than losing the reply entirely.
+async function sendWhatsAppAudio(to, audioBuffer, mimeType = "audio/ogg") {
+  const { token, phoneNumberId } = credentials();
+
+  if (!token || !phoneNumberId) {
+    log("INFO", `[SIMULATED AUDIO -> ${to}] ${audioBuffer.length} bytes of ${mimeType}`);
+    return;
+  }
+
+  try {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mimeType);
+    form.append("file", new Blob([audioBuffer], { type: mimeType }), "reply.ogg");
+
+    const uploadResp = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!uploadResp.ok) {
+      log("ERROR", `Audio upload failed for ${to}: ${uploadResp.status} ${(await uploadResp.text()).slice(0, 200)}`);
+      return;
+    }
+    const { id } = await uploadResp.json();
+
+    await postToGraphApi(
+      phoneNumberId,
+      token,
+      { messaging_product: "whatsapp", to, type: "audio", audio: { id } },
+      to,
+      () => `[SENT AUDIO -> ${to}] ${audioBuffer.length} bytes`
+    );
+  } catch (err) {
+    log("ERROR", `Failed to send audio to ${to}: ${err.message}`);
+  }
+}
+
+module.exports = {
+  sendWhatsAppText,
+  sendWhatsAppButtons,
+  sendWhatsAppList,
+  sendWhatsAppAudio,
+  beginReplyCapture,
+  endReplyCapture,
+};
