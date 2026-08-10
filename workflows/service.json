@@ -3,24 +3,62 @@
   "label": "Automobile",
   "description": "all automobile servicing and spare parts",
   "matchLabel": "our services",
-  "bookingIdPrefix": "automobile services",
+  "keywords": ["car", "bike", "vehicle", "automobile", "service", "servicing", "oil change", "tyre", "tire", "puncture", "engine", "brake", "battery", "spare part", "spare parts"],
+  "businessName": "QuickFix Auto Care",
+  "businessAddress": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
+  "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
+  "businessHours": { "start": "09:00", "end": "19:00" },
+  "slotMinutes": 60,
+  "bookingIdPrefix": "SVC",
   "providers": [
     {
       "id": "p1",
-      "name": "Provider 1",
-      "attribute": "Staff",
-      "fee": 100
+      "name": "QuickFix Auto Care",
+      "attribute": "General Servicing & Repairs",
+      "fee": 500,
+      "address": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
+      "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
+      "photo": "https://images.unsplash.com/photo-1580273916550-e323be2ae537?w=800&q=80"
     }
   ],
+  "providerListItem": "{provider.name} — {provider.attribute} (from ₹{provider.fee})",
+  "providerRowDescription": "{provider.attribute} (from ₹{provider.fee})",
   "steps": [
     {
       "type": "select_provider",
-      "prompt": "Choose options:"
+      "prompt": "Choose a service center:"
     },
     {
       "type": "select_date",
       "field": "visitDate",
-      "prompt": "Choose date:"
+      "prompt": "Please select your preferred date."
+    },
+    {
+      "type": "select_time_slot",
+      "field": "visitTime",
+      "dateField": "visitDate",
+      "prompt": "Please choose a time slot."
+    },
+    {
+      "type": "text_input",
+      "field": "customerName",
+      "prompt": "What name should I book this under?",
+      "validate": "required",
+      "validationError": "Please share a name.",
+      "editTarget": true
+    },
+    {
+      "type": "text_input",
+      "field": "reason",
+      "prompt": "What service does your vehicle need? (e.g. oil change, tyre replacement, general checkup)",
+      "validate": "required",
+      "validationError": "Please describe what service you need."
+    },
+    {
+      "type": "review_confirm",
+      "prompt": "Please review your booking.",
+      "template": "🔧 {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n📝 Service needed: {reason}\n💰 Starting from: ₹{provider.fee}"
     }
-  ]
+  ],
+  "confirmationTemplate": "✅ Booking confirmed!\n\n🆔 Booking ID: {bookingId}\n🔧 {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n📝 Service: {reason}\n💰 Starting from: ₹{provider.fee}\n📍 {businessName}, {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply STATUS anytime to check your booking."
 }

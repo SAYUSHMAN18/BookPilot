@@ -4,10 +4,15 @@
   "description": "AI-powered WhatsApp booking bot driven by a config-based dynamic workflow engine. Add a new industry by dropping a JSON file in workflows/ — no code changes required.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit -p jsconfig.json"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

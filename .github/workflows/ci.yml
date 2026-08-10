@@ -1,0 +1,46 @@
+name: CI
+
+# Section 15 — the honest minimum a project this size needs: does the
+# backend test suite still pass, are there any known-vulnerable
+# dependencies, does the frontend still build. No lint/format step
+# enforced here (none is configured in the repo — adding one as a CI gate
+# without first agreeing on the actual rules would just be a wall nobody
+# asked for), no deploy step (this project has no hosting target defined
+# yet). Runs on every push and PR against main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm install
+      - run: npm test
+      - name: Type-check JSDoc-annotated files
+        run: npm run typecheck
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+      - run: npm run build

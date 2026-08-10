@@ -58,5 +58,5 @@
       "template": "🏨 Hotel: {hotel.name} — {hotel.location}\n🛏️ Room: {provider.name} ({provider.attribute})\n📅 Check-in: {checkInDateLabel}\n🌙 Nights: {nights}\n👤 For: {customerName}\n💰 Rate: ₹{provider.fee}/night"
     }
   ],
-  "confirmationTemplate": "✅ Reservation confirmed!\n\nID: {bookingId}\nHotel: {hotel.name} — {hotel.location}\nRoom: {provider.name} ({provider.attribute})\nCheck-in: {checkInDateLabel}\nNights: {nights}\nFor: {customerName}\nRate: ₹{provider.fee}/night\n\nReply STATUS anytime to check your reservation."
+  "confirmationTemplate": "✅ Reservation confirmed!\n\nID: {bookingId}\nHotel: {hotel.name} — {hotel.location}\nRoom: {provider.name} ({provider.attribute})\nCheck-in: {checkInDateLabel}\nNights: {nights}\nFor: {customerName}\nRate: ₹{provider.fee}/night\n🗺️ https://www.google.com/maps/search/?api=1&query={hotel.mapQuery}\n\nReply STATUS anytime to check your reservation."
 }

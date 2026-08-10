@@ -24,25 +24,115 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
-const { log } = require("./src/logger");
-const { loadWorkflows } = require("./src/loadWorkflows");
-const { handleIncomingMessage } = require("./src/workflowEngine");
-const { isValidSignature } = require("./src/verifySignature");
-const { isDuplicate } = require("./src/dedupe");
-const bookings = require("./src/bookingStore");
-const { blockSlot, unblockSlot, getBlockById, listBlocksForProvider } = require("./src/availabilityStore");
-const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/auth");
-const users = require("./src/userStore");
-const { recordAudit, listAudit } = require("./src/auditLog");
-const { isLoginRateLimited } = require("./src/rateLimit");
-const { generateWorkflowFromDescription } = require("./src/workflowGenerator");
-const knowledge = require("./src/knowledgeStore");
-const templates = require("./src/templateStore");
-const { computeAnalytics } = require("./src/analytics");
-const { isVoiceEnabled, downloadWhatsAppMedia, transcribeAudio, synthesizeSpeech } = require("./src/voice");
-const { sendWhatsAppText, sendWhatsAppAudio, beginReplyCapture, endReplyCapture } = require("./src/whatsapp");
+const { log } = require("./src/infra/logger");
+
+// Section 15 — process-level crash safety, registered before anything
+// else runs. Two genuinely different failure modes, handled differently
+// on purpose:
+//
+// unhandledRejection: an async operation somewhere failed and nothing
+// awaited/caught it. Every route handler in this app already goes
+// through asyncHandler (see below) specifically so a rejected promise
+// inside a REQUEST becomes a normal caught error, not this — so a
+// rejection reaching here means it happened outside any request (a
+// fire-and-forget call, a background job) or in code this pass missed.
+// Logged loudly; the process keeps running, since Express's own
+// per-request isolation means one such rejection didn't corrupt shared
+// state the way a synchronous crash could.
+//
+// uncaughtException: a synchronous throw escaped every try/catch on the
+// call stack. Node's own guidance is explicit here — the process is now
+// in an undefined state, and continuing to serve requests from it risks
+// silent corruption or a worse crash later. Logged with full detail, then
+// the process exits (code 1) so a process manager (systemd, pm2, a
+// container orchestrator's restart policy) can bring up a clean instance,
+// which is a real, working recovery path this app already assumes exists
+// (documented in README's production-readiness section).
+process.on("unhandledRejection", (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  log("ERROR", `Unhandled promise rejection: ${err.stack || err.message}`);
+});
+process.on("uncaughtException", (err) => {
+  log("ERROR", `Uncaught exception — exiting so a process manager can restart cleanly: ${err.stack || err.message}`);
+  process.exit(1);
+});
+const { loadWorkflows } = require("./src/engine/loadWorkflows");
+const { handleIncomingMessage } = require("./src/engine/workflowEngine");
+const { isValidSignature } = require("./src/infra/verifySignature");
+const { isDuplicate } = require("./src/infra/dedupe");
+const bookings = require("./src/store/bookingStore");
+const { blockSlot, unblockSlot, getBlockById, listBlocksForProvider, timeToMinutes } = require("./src/store/availabilityStore");
+const { labelToMinutes, formatLongDate, parseIsoDate } = require("./src/engine/dateSlots");
+const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/infra/auth");
+const users = require("./src/store/userStore");
+const { recordAudit, listAudit } = require("./src/store/auditLog");
+const { isLoginRateLimited, isApiRateLimited } = require("./src/infra/rateLimit");
+const { generateWorkflowFromDescription } = require("./src/ai/workflowGenerator");
+const knowledge = require("./src/store/knowledgeStore");
+const templates = require("./src/store/templateStore");
+const { computeAnalytics } = require("./src/engine/analytics");
+const supportRequests = require("./src/store/supportRequestStore");
+const feedbackStore = require("./src/store/feedbackStore");
+const { runBackup, listBackups, scheduleBackups } = require("./src/infra/backupStore");
+const { getErrorRate } = require("./src/infra/alerting");
+const { MAX_DOC_CHARS } = require("./src/ai/factualQA");
+const { createResetToken, consumeResetToken } = require("./src/store/passwordResetStore");
+const { sendEmail } = require("./src/infra/emailSender");
+const { isVoiceEnabled, downloadWhatsAppMedia, transcribeAudio, synthesizeSpeech } = require("./src/infra/voice");
+const { sendWhatsAppText, sendWhatsAppAudio, sendTypingIndicator, sendWithRetry, beginReplyCapture, endReplyCapture, startOutboundQueueWorker } = require("./src/infra/whatsapp");
+const outboundQueueStore = require("./src/store/outboundQueueStore");
+const { computeQueuePosition, sameQueueBookings, markAlerted, wasAlerted, isOptedOutOfAlerts } = require("./src/store/queueStore");
+const tenantStore = require("./src/store/tenantStore");
+const paymentStore = require("./src/store/paymentStore");
+const razorpay = require("./src/infra/paymentProviders/razorpayProvider");
+const { resolvePaymentRequirement, getAvailableSlots } = require("./src/engine/workflowEngine");
+const { refundIfPaid } = require("./src/engine/paymentRefunds");
+const apiKeys = require("./src/store/apiKeyStore");
+const { syncBookingCreated, syncBookingRescheduled, syncBookingCancelled } = require("./src/engine/calendarSync");
+const { calendarConnections } = require("./src/store/calendarStore");
+const googleCalendar = require("./src/infra/calendarProviders/googleCalendarProvider");
+const { signOAuthState, verifyOAuthState } = require("./src/infra/oauthState");
+const dashboardEvents = require("./src/infra/dashboardEvents");
+const { runWithRequestId, newRequestId } = require("./src/infra/tracing");
+
+// Section 11 — every dashboard route that mutates a booking publishes
+// through this one helper so the payload shape (always workflowId +
+// providerId alongside the booking, whatever the event type) stays
+// consistent for the SSE route below to filter a provider session's
+// events from everyone else's — same helper workflowEngine.js's own
+// publishBookingEvent() exists for, just server.js's side of it.
+function publishBookingEvent(tenantId, type, booking) {
+  dashboardEvents.publish(tenantId, type, { workflowId: booking.workflowId, providerId: booking.providerId, booking });
+}
 
 const app = express();
+
+// Section 15 — the very first middleware, ahead of even the security
+// headers below: every log() call anywhere in this request's lifecycle
+// (including ones several async hops deep — a Groq call, a DB write, a
+// WhatsApp send) needs the same requestId in scope for src/infra/logger.js
+// to pick up automatically (see src/infra/tracing.js). X-Request-Id is
+// also returned to the caller — genuinely useful for a tenant's own
+// Public API integration (Section 14) to reference in a support request.
+app.use((req, res, next) => {
+  const requestId = newRequestId();
+  res.setHeader("X-Request-Id", requestId);
+  runWithRequestId(next, requestId);
+});
+
+// Express 4 (what this project uses) has no built-in awareness of
+// async/await — a rejected promise inside an `async (req, res) => {...}`
+// handler does NOT reach the error-handling middleware below the way a
+// synchronous throw does; it becomes an unhandled rejection instead, and
+// the client is left waiting on a response that will never come. Found
+// live: a ReferenceError inside the bookings PATCH route hung a curl
+// call for the full 2-minute timeout with nothing ever sent back. Every
+// async route handler needs this wrapper (or its own complete try/catch)
+// or it's vulnerable to the exact same silent hang.
+function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
 // Capture the raw body alongside the parsed one — signature verification
 // needs to HMAC the exact bytes Meta sent, not a re-serialized version.
 // Explicit size cap (Express defaults to 100kb anyway, but stating it here
@@ -66,6 +156,15 @@ app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "same-origin");
+  // Section 12 — only sent once this actually runs behind HTTPS (same
+  // NODE_ENV==='production' signal setSessionCookie() already uses for
+  // the cookie's own Secure flag) — sending it over plain HTTP would be
+  // a no-op at best, and asserting HTTPS-only on a host that doesn't
+  // serve it would be actively wrong. 1 year + preload-eligible, the
+  // standard conservative choice once a domain is HTTPS-only for good.
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
   // script-src needs 'unsafe-inline' because the dashboard's whole app is
   // one inline <script> block, not an external .js file — so this CSP
   // isn't the thing stopping an injected <script> from running (escapeHtml()
@@ -106,6 +205,38 @@ function validateEnv() {
     log("WARN", "Running with NODE_ENV=production but WHATSAPP_APP_SECRET is not set — webhook signature verification is disabled. Anyone who finds your webhook URL can inject fake messages.");
   }
 }
+
+// Section 6 — Meta's default test token expires every 24 hours (README's
+// "Get a permanent WhatsApp token" section explains the System User
+// alternative). Before this check existed, an expired token was only ever
+// discovered when a real customer's message silently got no reply — the
+// send fails, logs a 401, and that's it; nothing surfaces it anywhere an
+// operator would actually see it in time. This pings the Graph API once at
+// startup with the configured token and logs one loud, unmissable warning
+// if it's already invalid, instead of waiting for a customer to notice.
+// Best-effort and non-blocking — startup must never hang or fail because
+// Meta's API is briefly unreachable.
+async function checkWhatsAppTokenValidity() {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneNumberId) return; // simulated/dev mode — nothing to check
+
+  try {
+    const resp = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}?fields=id`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      log(
+        "ERROR",
+        `WHATSAPP_TOKEN appears to be invalid or expired (Graph API returned ${resp.status}): ${body.slice(0, 200)}. ` +
+          "Outbound WhatsApp sends will silently fail until this is fixed. See README's \"Get a permanent WhatsApp token\" section for how to set up a System User token that doesn't expire every 24h."
+      );
+    }
+  } catch (err) {
+    log("WARN", `Could not verify WHATSAPP_TOKEN at startup (${err.message}) — Meta's API may be temporarily unreachable. Will retry naturally on the next real send.`);
+  }
+}
 validateEnv();
 log("INFO", `Loaded workflows: ${Object.keys(workflows).join(", ")}`);
 
@@ -114,6 +245,11 @@ if (bootstrap?.bootstrapped) {
   log("INFO", `Bootstrapped admin account for ${bootstrap.email} from ADMIN_BOOTSTRAP_EMAIL/PASSWORD. You can unset those env vars now — they only matter when the users table is empty.`);
 } else if (users.count() === 0) {
   log("WARN", "No dashboard users exist yet and ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD are not set — nobody can log into /dashboard. Set both env vars and restart once to create the first admin account.");
+}
+
+const platformBootstrap = users.bootstrapPlatformAdminIfNeeded();
+if (platformBootstrap?.bootstrapped) {
+  log("INFO", `Bootstrapped platform_admin account for ${platformBootstrap.email} from PLATFORM_ADMIN_BOOTSTRAP_EMAIL/PASSWORD.`);
 }
 
 // Crash instead of continuing in an unknown state; run under a process
@@ -161,6 +297,8 @@ app.post("/webhook", async (req, res) => {
   }
 
   res.sendStatus(200); // Meta requires a fast ack; do the work after responding.
+  let waId;
+  let tenantId;
   try {
     const value = req.body?.entry?.[0]?.changes?.[0]?.value;
     const message = value?.messages?.[0];
@@ -171,13 +309,54 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    const waId = message.from;
+    waId = message.from;
+
+    // Section 8.3 — each tenant has their own WhatsApp Business number;
+    // Meta's payload always carries which one actually received this
+    // message (value.metadata.phone_number_id), so that's the ONLY
+    // signal this route uses to attribute an incoming message to a
+    // tenant. Falls back to the default tenant (id 1) if no tenant has
+    // registered that phone_number_id yet — true for every existing
+    // install upgrading into Section 8, where the default tenant's
+    // WhatsApp number still only lives in the global .env vars (see
+    // src/infra/whatsapp.js's credentials()). A genuinely unrecognized
+    // number (not the default tenant's own) should NOT silently fall
+    // through to tenant 1's data — that would leak one tenant's
+    // conversation into another's — so the fallback only applies when no
+    // tenant in the system has claimed any phone_number_id at all yet.
+    const incomingPhoneNumberId = value?.metadata?.phone_number_id;
+    const matchedTenant = tenantStore.getByPhoneNumberId(incomingPhoneNumberId);
+    if (matchedTenant) {
+      tenantId = matchedTenant.id;
+    } else if (!tenantStore.getById(1)?.whatsappPhoneNumberId) {
+      tenantId = 1; // upgrade-continuity fallback — see comment above
+    } else {
+      log("WARN", `Webhook message for unrecognized phone_number_id "${incomingPhoneNumberId}" — no tenant claims it. Dropping.`);
+      return;
+    }
+
+    // Section 8.6 — a suspended/cancelled tenant's number should not keep
+    // quietly booking real appointments no one is running (or, at the
+    // other extreme, go completely silent with zero explanation, which
+    // this codebase's own "no silent failures" principle already treats
+    // as a bug elsewhere — Section 6's async-handler-hang fix exists for
+    // exactly that reason). One clear, non-alarming reply, then stop.
+    const currentTenant = tenantStore.getById(tenantId);
+    if (currentTenant && currentTenant.status !== "active") {
+      log("WARN", `Webhook message for tenant ${tenantId} whose status is "${currentTenant.status}" — not processing.`);
+      await sendWhatsAppText(tenantId, waId, "This business isn't currently accepting bookings. Please check back later.");
+      return;
+    }
+
+    // Instant feedback before any AI call starts — Section 0.5. Fire and
+    // forget: never await/block the actual processing on this.
+    sendTypingIndicator(tenantId, message.id);
 
     // Voice note — transcribe it, then run the EXACT same text pipeline so
     // a spoken booking gets identical validation and slot locking, and
     // speak the reply back in whatever language they spoke.
     if (message.type === "audio" || message.type === "voice") {
-      await handleVoiceMessage(waId, message);
+      await handleVoiceMessage(tenantId, waId, message);
       return;
     }
 
@@ -189,20 +368,98 @@ app.post("/webhook", async (req, res) => {
       message.button?.text ||
       "";
 
-    if (text) await handleIncomingMessage(waId, text, workflows);
+    if (text) await handleIncomingMessage(tenantId, waId, text, workflows);
   } catch (err) {
-    log("ERROR", `Webhook processing error: ${err.message}`);
+    // The safety net, not the fix (Section 0's timeouts are the fix — a
+    // hung call used to be the actual cause of this path firing at all).
+    // Found live via transcript review: this catch block used to only
+    // log, so a thrown error meant the customer got silently nothing —
+    // five consecutive messages including a real symptom report vanished
+    // with no reply at all. An error here must never mean total silence.
+    log("ERROR", `Webhook processing error: ${err.stack || err.message}`);
+    if (waId && tenantId) {
+      try {
+        await sendWhatsAppText(tenantId, waId, "Sorry, something went wrong on my end — could you try that again?");
+      } catch (sendErr) {
+        log("ERROR", `Also failed to send the error fallback reply to ${waId}: ${sendErr.message}`);
+      }
+    }
   }
 });
+
+// Section 9.5 — Razorpay's webhook. Same discipline as the WhatsApp
+// webhook above: verify the signature over the RAW body before trusting
+// anything in it (src/infra/paymentProviders/razorpayProvider.js's
+// verifyWebhookSignature, reusing the exact HMAC-over-raw-bytes pattern
+// src/infra/verifySignature.js already established for Meta — not a
+// second, different verification scheme). This is also the ONLY thing
+// that ever flips a payment_pending booking to booked — never a client
+// redirect/callback, which could be spoofed or simply never fire if the
+// customer closes the browser tab.
+app.post("/api/payments/webhook", asyncHandler(async (req, res) => {
+  const signature = req.get("X-Razorpay-Signature");
+  if (!razorpay.verifyWebhookSignature(req.rawBody, signature)) {
+    log("WARN", "Rejected Razorpay webhook: invalid or missing signature.");
+    return res.sendStatus(403);
+  }
+  res.sendStatus(200); // ack fast, same reasoning as the WhatsApp webhook
+
+  const event = razorpay.parseWebhookEvent(req.body);
+  if (!event) return; // an event type this integration has no opinion about
+
+  const payment = event.orderId ? paymentStore.getByOrderId(event.orderId) : null;
+  if (!payment) {
+    log("WARN", `Razorpay webhook "${event.type}" for order ${event.orderId} matches no known payment row — ignoring.`);
+    return;
+  }
+  const booking = bookings.getById(payment.tenantId, payment.bookingId);
+  if (!booking) {
+    log("ERROR", `Razorpay webhook "${event.type}" for payment ${payment.id} references booking ${payment.bookingId}, which no longer exists.`);
+    return;
+  }
+
+  if (event.type === "payment.captured") {
+    paymentStore.markPaid(payment.id, event.paymentId);
+    bookings.updateStatus(payment.tenantId, booking.id, "booked");
+    bookings.updatePaymentStatus(payment.tenantId, booking.id, "paid");
+    recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.captured", { bookingId: booking.bookingId, paymentId: event.paymentId, amount: event.amount });
+    log("INFO", `Payment captured for booking ${booking.bookingId} (₹${event.amount / 100}) — booking confirmed.`);
+    try {
+      await sendWhatsAppText(payment.tenantId, booking.waId, `✅ Payment received! Your booking (${booking.bookingId}) is now confirmed. Reply STATUS anytime to check it.`);
+    } catch (err) {
+      log("WARN", `Payment-confirmed WhatsApp notification failed for ${booking.bookingId}: ${err.message}`);
+    }
+    await syncBookingCreated(payment.tenantId, booking, workflows[booking.workflowId]);
+    publishBookingEvent(payment.tenantId, "booking.updated", { ...booking, status: "booked", paymentStatus: "paid" });
+  } else if (event.type === "payment.failed") {
+    paymentStore.markFailed(payment.id, event.failureReason);
+    bookings.updatePaymentStatus(payment.tenantId, booking.id, "failed");
+    // Booking stays payment_pending (NOT auto-cancelled) — Razorpay
+    // payment links allow a retry on the same link, so cancelling the
+    // slot here would yank it out from under a customer mid-retry. The
+    // slot is released explicitly if/when the customer or provider
+    // actually cancels, same as any other booking.
+    recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.failed", { bookingId: booking.bookingId, reason: event.failureReason });
+    log("WARN", `Payment failed for booking ${booking.bookingId}: ${event.failureReason}`);
+    publishBookingEvent(payment.tenantId, "booking.updated", { ...booking, paymentStatus: "failed" });
+  } else if (event.type === "refund.processed") {
+    log("INFO", `Refund processed for payment ${event.paymentId}, refund ${event.refundId} (₹${event.amount / 100}).`);
+    // The refund itself was already recorded in `payments` at the point
+    // it was INITIATED (server.js's manual-refund route / the
+    // cancellation-triggered refund below) — this webhook confirms it
+    // actually completed on Razorpay's side, which is worth logging but
+    // doesn't need a second DB write for what this app already tracks.
+  }
+}));
 
 // Voice notes: Sarvam transcribes -> normal text pipeline -> Sarvam speaks
 // the reply back. Every failure mode here degrades to text rather than
 // dropping the customer's message: no Sarvam key, an unsupported TTS
 // language, or a synthesis error all still produce the full text reply.
-async function handleVoiceMessage(waId, message) {
+async function handleVoiceMessage(tenantId, waId, message) {
   if (!isVoiceEnabled()) {
     log("WARN", `Voice note from ${waId} but SARVAM_API_KEY is not set — asking them to type instead.`);
-    await sendWhatsAppText(waId, "Sorry, I can't listen to voice notes right now — could you type your message instead?");
+    await sendWhatsAppText(tenantId, waId, "Sorry, I can't listen to voice notes right now — could you type your message instead?");
     return;
   }
 
@@ -212,16 +469,16 @@ async function handleVoiceMessage(waId, message) {
   let transcript;
   let languageCode;
   try {
-    const media = await downloadWhatsAppMedia(mediaId);
+    const media = await downloadWhatsAppMedia(tenantId, mediaId);
     ({ transcript, languageCode } = await transcribeAudio(media.buffer, media.mimeType));
   } catch (err) {
     log("ERROR", `Voice transcription failed for ${waId}: ${err.message}`);
-    await sendWhatsAppText(waId, "Sorry, I couldn't make out that voice note. Could you try again, or type your message?");
+    await sendWhatsAppText(tenantId, waId, "Sorry, I couldn't make out that voice note. Could you try again, or type your message?");
     return;
   }
 
   if (!transcript) {
-    await sendWhatsAppText(waId, "I couldn't hear anything in that voice note — could you try again?");
+    await sendWhatsAppText(tenantId, waId, "I couldn't hear anything in that voice note — could you try again?");
     return;
   }
   log("INFO", `Voice note from ${waId} [${languageCode || "unknown"}]: "${transcript}"`);
@@ -230,13 +487,13 @@ async function handleVoiceMessage(waId, message) {
   // engine itself is untouched and unaware this is a voice conversation.
   beginReplyCapture(waId);
   try {
-    await handleIncomingMessage(waId, transcript, workflows);
+    await handleIncomingMessage(tenantId, waId, transcript, workflows);
   } finally {
     const replyText = endReplyCapture(waId);
     if (replyText && languageCode) {
       try {
         const audio = await synthesizeSpeech(replyText, languageCode);
-        if (audio) await sendWhatsAppAudio(waId, audio, "audio/wav");
+        if (audio) await sendWhatsAppAudio(tenantId, waId, audio, "audio/mpeg");
       } catch (err) {
         log("ERROR", `Voice synthesis failed for ${waId}: ${err.message}`);
       }
@@ -264,15 +521,27 @@ if (!simulateEndpointEnabled) {
 app.post("/api/simulate-whatsapp", async (req, res) => {
   if (!simulateEndpointEnabled) return res.sendStatus(404);
 
-  const { from, text } = req.body || {};
+  const { from, text, tenantId } = req.body || {};
   if (typeof from !== "string" || !from.trim() || typeof text !== "string" || !text.trim()) {
     return res.status(400).json({ error: "from and text are required and must be non-empty strings" });
   }
+  // Defaults to the default tenant (id 1) — optional so every existing
+  // curl/test call site from before Section 8 keeps working unchanged.
+  const effectiveTenantId = Number.isInteger(tenantId) ? tenantId : 1;
   try {
-    await handleIncomingMessage(from, text, workflows);
+    await handleIncomingMessage(effectiveTenantId, from, text, workflows);
     res.json({ ok: true, note: "Check the console / logs/app.log for the bot's reply." });
   } catch (err) {
     log("ERROR", `Simulate endpoint error: ${err.stack || err.message}`);
+    // Same guarantee as the real webhook: an internal error still gets a
+    // reply to the "customer" (waId), not just an API-level 500 to
+    // whoever's testing — this endpoint exists specifically to exercise
+    // the same pipeline the real webhook uses, so it should fail the same way too.
+    try {
+      await sendWhatsAppText(effectiveTenantId, from, "Sorry, something went wrong on my end — could you try that again?");
+    } catch {
+      // best-effort
+    }
     res.status(500).json({ error: "Internal error — see logs/app.log for details." });
   }
 });
@@ -348,12 +617,62 @@ function requireAuth(...allowedRoles) {
     if (!liveUser || !liveUser.active) {
       return res.status(401).json({ error: "This account is no longer active." });
     }
+    // Section 8.6 — a tenant-scoped user (everyone except platform_admin,
+    // whose tenantId is always null) is re-checked against their tenant's
+    // current lifecycle status on every request, same reasoning as the
+    // `active` check just above: a tenant getting suspended must take
+    // effect on the user's very next request, not linger until their
+    // session naturally expires (up to 12h).
+    if (liveUser.tenantId) {
+      const tenant = tenantStore.getById(liveUser.tenantId);
+      if (!tenant || tenant.status === "suspended" || tenant.status === "cancelled") {
+        return res.status(403).json({ error: `This account's business is ${tenant?.status || "no longer available"}. Contact support if this seems wrong.` });
+      }
+    }
     if (allowedRoles.length && !allowedRoles.includes(liveUser.role)) {
       return res.status(403).json({ error: "You don't have permission to do that." });
     }
-    req.user = { uid: liveUser.id, email: liveUser.email, role: liveUser.role, name: liveUser.name, workflowId: liveUser.workflowId, providerId: liveUser.providerId };
+    req.user = { uid: liveUser.id, email: liveUser.email, role: liveUser.role, name: liveUser.name, workflowId: liveUser.workflowId, providerId: liveUser.providerId, tenantId: liveUser.tenantId };
     next();
   };
+}
+
+// Section 14 — the Public API's own auth: `Authorization: Bearer bpk_...`,
+// not a session cookie. A valid key resolves straight to a tenantId (the
+// key itself proves which tenant, the way a session cookie proves which
+// user) — no separate account/role concept on this path, since a Public
+// API caller is a tenant's own backend system, not a human choosing
+// between admin/provider views. Rate-limited per key (not per route) so
+// a single misbehaving integration can't be worked around by hitting a
+// different /api/v1/* endpoint.
+function requireApiKey(req, res, next) {
+  const header = req.get("Authorization") || "";
+  const rawKey = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
+  if (!rawKey) return res.status(401).json({ error: "Missing Authorization: Bearer <api key> header." });
+  if (isApiRateLimited(rawKey)) return res.status(429).json({ error: "Rate limit exceeded — too many requests with this API key." });
+  const tenantId = apiKeys.verify(rawKey);
+  if (!tenantId) return res.status(401).json({ error: "Invalid or revoked API key." });
+  const tenant = tenantStore.getById(tenantId);
+  if (!tenant || tenant.status !== "active") {
+    return res.status(403).json({ error: "This business's account is not currently active." });
+  }
+  req.apiTenantId = tenantId;
+  next();
+}
+
+// Section 8.5 — platform_admin manages every tenant, so req.user.tenantId
+// is always null for that role (see src/store/userStore.js). Every
+// tenant-scoped store call in this file needs a real tenantId, so any
+// route reachable by a platform_admin that ALSO does tenant-scoped work
+// must resolve which tenant it's acting on some other way (a route param,
+// a request body field) — never by silently falling back to a default.
+// This helper just makes that requirement explicit and fails loudly
+// rather than letting `undefined` silently reach a SQL query.
+function requireTenantId(req) {
+  if (!req.user.tenantId) {
+    throw new Error(`requireTenantId() called for a request with no tenant context (role=${req.user.role}) — this route needs to resolve one explicitly instead of assuming req.user.tenantId.`);
+  }
+  return req.user.tenantId;
 }
 
 app.post("/api/auth/login", (req, res) => {
@@ -385,13 +704,71 @@ app.post("/api/auth/login", (req, res) => {
     providerId: user.providerId,
   });
   setSessionCookie(res, token);
-  recordAudit(user, "login", null);
-  res.json({ ok: true, user: { email: user.email, role: user.role, name: user.name, workflowId: user.workflowId, providerId: user.providerId } });
+  recordAudit(user.tenantId, user, "login", null);
+  res.json({ ok: true, user: { email: user.email, role: user.role, name: user.name, workflowId: user.workflowId, providerId: user.providerId, tenantId: user.tenantId } });
+});
+
+// Section 6 — self-serve password reset. Before this, a lost password
+// meant an admin had to re-create the account (`users.create()`), which
+// doesn't even work for the ONE admin account on a single-admin install.
+// Deliberately returns the identical response whether or not the email
+// exists — a different response ("no account found" vs "email sent")
+// would let anyone probe which emails have accounts on this system, a
+// real (if minor) information leak the login endpoint doesn't have
+// (login already fails identically for "wrong password" and "no such
+// user"). Rate-limited the same way login attempts are, keyed separately
+// so exhausting one doesn't exhaust the other.
+app.post("/api/auth/forgot-password", asyncHandler(async (req, res) => {
+  const { email } = req.body || {};
+  if (typeof email !== "string" || !email.trim()) {
+    return res.status(400).json({ error: "email is required" });
+  }
+  const rateLimitKey = `reset:${req.ip}:${email.trim().toLowerCase()}`;
+  if (isLoginRateLimited(rateLimitKey)) {
+    log("WARN", `Password reset rate-limited for ${rateLimitKey}`);
+    return res.status(429).json({ error: "Too many reset requests. Try again in a few minutes." });
+  }
+
+  const user = users.findByEmail(email.trim());
+  if (user && user.active) {
+    const rawToken = createResetToken(user.id);
+    const resetLink = `${req.protocol}://${req.get("host")}/dashboard?resetToken=${rawToken}`;
+    await sendEmail(
+      user.email,
+      "Reset your BookPilot AI password",
+      `Someone requested a password reset for this account. If this was you, set a new password here (valid for 1 hour, works once):\n\n${resetLink}\n\nIf you didn't request this, you can ignore this email.`
+    );
+    recordAudit(user.tenantId, user, "password_reset.requested", null);
+  } else {
+    log("INFO", `Password reset requested for unknown/inactive email: ${email.trim()}`);
+  }
+
+  // Same message either way — see comment above.
+  res.json({ ok: true, message: "If an account exists for that email, a reset link has been sent." });
+}));
+
+app.post("/api/auth/reset-password", (req, res) => {
+  const { token, newPassword } = req.body || {};
+  if (typeof token !== "string" || !token) return res.status(400).json({ error: "token is required" });
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters." });
+  }
+
+  const userId = consumeResetToken(token);
+  if (!userId) return res.status(400).json({ error: "That reset link is invalid, expired, or already used. Request a new one." });
+
+  const user = users.setPassword(userId, newPassword);
+  recordAudit(user.tenantId, user, "password_reset.completed", null);
+  log("INFO", `Password reset completed for ${user.email}`);
+  res.json({ ok: true, message: "Password updated. You can log in with your new password now." });
 });
 
 app.post("/api/auth/logout", (req, res) => {
   const session = getSessionUser(req);
-  if (session) recordAudit(session, "logout", null);
+  // The token payload itself has no tenantId (deliberately — see
+  // requireAuth()'s comment on always re-reading the live row); a quick
+  // lookup here is cheap and keeps this audit entry correctly attributed.
+  if (session) recordAudit(users.getById(session.uid)?.tenantId ?? null, session, "logout", null);
   clearSessionCookie(res);
   res.json({ ok: true });
 });
@@ -446,7 +823,20 @@ app.get("/dashboard", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-app.get("/api/dashboard/providers", requireAuth(), (req, res) => {
+// Section 13 — the React/Vite rewrite (frontend/, built via `npm run
+// build` there into public/app/), served at a SEPARATE path from the
+// classic /dashboard above. Deliberately additive, not a replacement:
+// the hand-rolled dashboard keeps working exactly as it does today for
+// anyone using it, while /app gets a real shakeout before it's ever
+// considered the default. All the same /api/dashboard/* and /api/auth/*
+// routes back both — no server-side duplication, just two different UIs
+// on the same API. No client-side router in the React app (it's a
+// single view that switches between Provider/Admin in-place, same as
+// the classic dashboard's own role toggle), so no SPA-fallback wildcard
+// is needed beyond serving the built directory statically.
+app.use("/app", express.static(path.join(__dirname, "public", "app")));
+
+app.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
   const all = listAllProviders();
   if (req.user.role === "provider") {
     // Not the roster — only the caller's own entry, so a provider session
@@ -462,11 +852,63 @@ app.get("/api/dashboard/providers", requireAuth(), (req, res) => {
 // this endpoint duplicating that lookup server-side. Admin-only: this is
 // exactly the cross-business visibility a provider must never get.
 app.get("/api/dashboard/all-bookings", requireAuth("admin"), (req, res) => {
-  res.json(bookings.values());
+  res.json(bookings.values(req.user.tenantId));
 });
 
 app.get("/api/dashboard/audit-log", requireAuth("admin"), (req, res) => {
-  res.json(listAudit());
+  res.json(listAudit(req.user.tenantId));
+});
+
+// Backups (Section 5.1) — automated on a schedule (see scheduleBackups()
+// near app.listen below), plus a manual trigger and a list so an operator
+// can actually see backups are happening rather than trusting they are.
+// Section 8 — platform_admin only, not a tenant admin: a backup captures
+// the ENTIRE database file, every tenant's data at once. Letting a
+// tenant's own admin trigger or even see backup timestamps/filenames for
+// the whole platform is a real (if narrow) cross-tenant information leak
+// this file used to have from before multi-tenancy existed — closed here,
+// not carried forward silently.
+app.get("/api/dashboard/backups", requireAuth("platform_admin"), (req, res) => {
+  res.json(listBackups());
+});
+
+app.post("/api/dashboard/backups", requireAuth("platform_admin"), asyncHandler(async (req, res) => {
+  const result = await runBackup();
+  recordAudit(null, req.user, "backup.manual", result);
+  if (!result.ok) return res.status(500).json(result);
+  res.status(201).json(result);
+}));
+
+// Durable outbound queue (Section 5.3) — visibility into proactive sends
+// (arrival alerts, feedback requests) that failed their immediate retries
+// and are now waiting on the background worker (see startOutboundQueueWorker()
+// near app.listen below).
+app.get("/api/dashboard/outbound-queue", requireAuth("admin"), (req, res) => {
+  res.json({ counts: outboundQueueStore.statusCounts(req.user.tenantId), recent: outboundQueueStore.listRecent(req.user.tenantId) });
+});
+
+// Section 5.4 — the two rates worth an admin's attention at a glance: how
+// often the app is erroring (webhook handling, Groq calls, DB writes —
+// anything logged at ERROR), and how often proactive WhatsApp sends are
+// failing even after retries. Both are already tracked durably/in-memory
+// elsewhere (src/alerting.js, src/outboundQueueStore.js) — this just
+// surfaces them together in one place instead of an operator having to
+// know to check two different things.
+app.get("/api/dashboard/alerts", requireAuth("admin"), (req, res) => {
+  // errorRate is deliberately global, not tenant-scoped — it's a signal
+  // about this one Node process's overall health (Groq/DB/webhook
+  // errors), not about any tenant's business data, so a tenant admin
+  // seeing "the platform had N errors recently" isn't a meaningful leak
+  // the way seeing another tenant's bookings/backups would be.
+  const outboundCounts = outboundQueueStore.statusCounts(req.user.tenantId);
+  const outboundTotal = outboundCounts.pending + outboundCounts.sent + outboundCounts.failed;
+  res.json({
+    errorRate: getErrorRate(),
+    outboundQueue: {
+      ...outboundCounts,
+      failureRate: outboundTotal > 0 ? outboundCounts.failed / outboundTotal : 0,
+    },
+  });
 });
 
 // Business/workflow management — admin only. Mutates the SAME `workflows`
@@ -505,7 +947,7 @@ app.post("/api/dashboard/workflows/generate", requireAuth("admin"), async (req, 
   try {
     const workflow = await generateWorkflowFromDescription(description.trim());
     const validationWarning = validateWorkflowShape(workflow);
-    recordAudit(req.user, "workflow.generate", { description: description.trim().slice(0, 200), valid: !validationWarning });
+    recordAudit(req.user.tenantId, req.user, "workflow.generate", { description: description.trim().slice(0, 200), valid: !validationWarning });
     res.json({ workflow, validationWarning: validationWarning || null });
   } catch (err) {
     log("ERROR", `Workflow generation failed: ${err.message}`);
@@ -526,7 +968,7 @@ app.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
     return res.status(500).json({ error: "Failed to save workflow file." });
   }
   workflows[workflow.id] = workflow;
-  recordAudit(req.user, isUpdate ? "workflow.update" : "workflow.create", { workflowId: workflow.id });
+  recordAudit(req.user.tenantId, req.user, isUpdate ? "workflow.update" : "workflow.create", { workflowId: workflow.id });
   log("INFO", `${req.user.email} ${isUpdate ? "updated" : "created"} workflow "${workflow.id}"`);
   res.status(isUpdate ? 200 : 201).json({ ok: true });
 });
@@ -541,7 +983,7 @@ app.delete("/api/dashboard/workflows/:id", requireAuth("admin"), (req, res) => {
     return res.status(500).json({ error: "Failed to delete workflow file." });
   }
   delete workflows[id];
-  recordAudit(req.user, "workflow.delete", { workflowId: id });
+  recordAudit(req.user.tenantId, req.user, "workflow.delete", { workflowId: id });
   log("INFO", `${req.user.email} deleted workflow "${id}"`);
   res.json({ ok: true });
 });
@@ -551,8 +993,36 @@ app.delete("/api/dashboard/workflows/:id", requireAuth("admin"), (req, res) => {
 // step: an admin creates one account per doctor/stylist/room here, each
 // pinned to exactly one workflowId+providerId, and requireAuth() + the
 // per-route ownership checks above do the actual isolation.
+// Section 14 — API key management for the Public API above. Admin-only,
+// same as Manage Team: issuing a credential another system can act with
+// is exactly the kind of action a provider account shouldn't have.
+app.get("/api/dashboard/api-keys", requireAuth("admin"), (req, res) => {
+  res.json(apiKeys.listForTenant(req.user.tenantId));
+});
+
+app.post("/api/dashboard/api-keys", requireAuth("admin"), (req, res) => {
+  const { name } = req.body || {};
+  if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "A name for this key is required (e.g. \"Website integration\")." });
+  const { key, record } = apiKeys.create(req.user.tenantId, name.trim().slice(0, 100));
+  recordAudit(req.user.tenantId, req.user, "api_key.create", { id: record.id, name: record.name });
+  log("INFO", `${req.user.email} created API key "${record.name}" (${record.keyPrefix}...).`);
+  // The only response that will ever carry the full raw key — shown to
+  // the admin exactly once, matching the create/record split in
+  // src/store/apiKeyStore.js's own doc comment.
+  res.status(201).json({ key, record });
+});
+
+app.delete("/api/dashboard/api-keys/:id", requireAuth("admin"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  apiKeys.revoke(req.user.tenantId, id);
+  recordAudit(req.user.tenantId, req.user, "api_key.revoke", { id });
+  log("INFO", `${req.user.email} revoked API key ${id}.`);
+  res.json({ ok: true });
+});
+
 app.get("/api/dashboard/users", requireAuth("admin"), (req, res) => {
-  res.json(users.list());
+  res.json(users.list(req.user.tenantId));
 });
 
 app.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
@@ -582,8 +1052,9 @@ app.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
       name: typeof name === "string" && name.trim() ? name.trim() : null,
       workflowId: role === "provider" ? workflowId : null,
       providerId: role === "provider" ? providerId : null,
+      tenantId: req.user.tenantId,
     });
-    recordAudit(req.user, "user.create", { email: user.email, role: user.role, workflowId: user.workflowId, providerId: user.providerId });
+    recordAudit(req.user.tenantId, req.user, "user.create", { email: user.email, role: user.role, workflowId: user.workflowId, providerId: user.providerId });
     log("INFO", `${req.user.email} created a ${role} account for ${user.email}`);
     res.status(201).json(user);
   } catch (err) {
@@ -600,20 +1071,20 @@ app.patch("/api/dashboard/users/:id", requireAuth("admin"), (req, res) => {
   if (id === req.user.uid && !req.body.active) {
     return res.status(400).json({ error: "You can't deactivate your own account." });
   }
-  const user = users.setActive(id, req.body.active);
+  const user = users.setActive(req.user.tenantId, id, req.body.active);
   if (!user) return res.status(404).json({ error: "Not found" });
-  recordAudit(req.user, user.active ? "user.activate" : "user.deactivate", { email: user.email });
+  recordAudit(req.user.tenantId, req.user, user.active ? "user.activate" : "user.deactivate", { email: user.email });
   res.json(user);
 });
 
-app.get("/api/dashboard/bookings", requireAuth(), (req, res) => {
+app.get("/api/dashboard/bookings", requireAuth("admin", "provider"), (req, res) => {
   // A provider session is pinned to exactly one workflowId+providerId —
   // for that role the query params are ignored outright (not merely
   // validated), so there's no way to read someone else's bookings by
   // editing the URL.
   const { workflowId, providerId } = req.user.role === "provider" ? req.user : req.query;
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId query params are required" });
-  const rows = bookings.values().filter((b) => b.workflowId === workflowId && b.providerId === providerId);
+  const rows = bookings.values(req.user.tenantId).filter((b) => b.workflowId === workflowId && b.providerId === providerId);
   rows.sort((a, b) => b.createdAt - a.createdAt);
   res.json(rows);
 });
@@ -623,11 +1094,11 @@ app.get("/api/dashboard/bookings", requireAuth(), (req, res) => {
 // message immediately so they aren't left waiting for an appointment that
 // no longer exists.  Providers can only act on their OWN bookings (enforced
 // by checking workflowId+providerId against the authenticated session).
-app.patch("/api/dashboard/bookings/:id", requireAuth(), async (req, res) => {
+app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid booking id" });
 
-  const booking = bookings.getById(id);
+  const booking = bookings.getById(req.user.tenantId, id);
   if (!booking) return res.status(404).json({ error: "Booking not found" });
 
   // Provider role: scope check — they cannot touch another provider's booking.
@@ -640,36 +1111,60 @@ app.patch("/api/dashboard/bookings/:id", requireAuth(), async (req, res) => {
 
   if (action === "cancel") {
     if (booking.status === "cancelled") return res.status(400).json({ error: "Booking is already cancelled." });
+    // Real bug, found live during an exhaustive endpoint-testing pass: this
+    // check previously only excluded "cancelled", so a "done" (or
+    // "no_show") booking — a finished, historical record — could be
+    // silently flipped to "cancelled" and even trigger a refund via
+    // refundIfPaid() below for a service that had already been rendered.
+    // A terminal state should stay terminal; if a completed booking
+    // genuinely needs undoing, that's a manual DB/support action, not a
+    // one-click dashboard button with no confirmation of what it implies.
+    if (booking.status === "done" || booking.status === "no_show") {
+      return res.status(400).json({ error: `Cannot cancel a booking that's already marked ${booking.status.replace("_", "-")} — it's a completed record, not an active one.` });
+    }
 
-    const updated = bookings.updateWithMeta(id, {
+    const updated = bookings.updateWithMeta(req.user.tenantId, id, {
       status: "cancelled",
       cancelledBy: req.user.email,
       rescheduleNote: note || null,
     });
 
-    recordAudit(req.user, "booking.cancel", {
+    recordAudit(req.user.tenantId, req.user, "booking.cancel", {
       bookingId: booking.bookingId, waId: booking.waId, workflowId: booking.workflowId, note: note || null,
     });
     log("INFO", `${req.user.email} cancelled booking ${booking.bookingId} for ${booking.waId}`);
+
+    // Section 9.7 — a provider-initiated cancellation refunds automatically
+    // (workflow.refundPolicy.providerCancellation can still say "none").
+    // Never blocks the cancellation itself on a refund failure — see
+    // src/engine/paymentRefunds.js's own comment for why.
+    const refundResult = await refundIfPaid(req.user.tenantId, booking, {
+      initiatedBy: "provider",
+      refundPolicy: workflows[booking.workflowId]?.refundPolicy,
+    });
 
     // Notify the customer on WhatsApp.
     const providerLabel = booking.providerName || "your provider";
     const whenLabel = booking.visitDateLabel || booking.visitDate || booking.checkInIso || "";
     const timeLabel = booking.visitTime ? ` at ${booking.visitTime}` : "";
     const noteText = note ? `\n\nNote from provider: "${note}"` : "";
+    const refundText = refundResult.refunded ? `\n\n💳 A refund of ₹${refundResult.amount / 100} has been issued.` : "";
     const msg =
       `❌ Your booking (${booking.bookingId}) with ${providerLabel}` +
       `${whenLabel ? " on " + whenLabel : ""}${timeLabel} has been cancelled by the provider.` +
-      noteText +
+      noteText + refundText +
       `\n\nIf you'd like to rebook, simply message us and we'll find you a new slot.`;
 
     try {
-      await sendWhatsAppText(booking.waId, msg);
+      await sendWhatsAppText(booking.tenantId, booking.waId, msg);
     } catch (err) {
       log("WARN", `WhatsApp notification failed for cancel of ${booking.bookingId}: ${err.message}`);
     }
 
-    return res.json({ ok: true, booking: updated });
+    await syncBookingCancelled(req.user.tenantId, booking);
+    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
+
+    return res.json({ ok: true, booking: updated, refund: refundResult });
   }
 
   if (action === "reschedule") {
@@ -680,24 +1175,66 @@ app.patch("/api/dashboard/bookings/:id", requireAuth(), async (req, res) => {
       return res.status(400).json({ error: "rescheduleDate must be in YYYY-MM-DD format." });
     }
     if (booking.status === "cancelled") return res.status(400).json({ error: "Cannot reschedule a cancelled booking." });
+    // Same real bug as the cancel branch above, same fix: this only
+    // excluded "cancelled" — a "done"/"no_show" booking (a finished,
+    // historical record) or one currently "serving" (the customer is
+    // being served RIGHT NOW) could be silently rewritten back to
+    // "booked" with a new date/time, which is exactly the "un-complete a
+    // finished appointment" bug found live in this same pass. Live-verified
+    // before this fix: completing a booking, then rescheduling it, flipped
+    // its status straight back to "booked" with no warning.
+    if (booking.status === "done" || booking.status === "no_show" || booking.status === "serving") {
+      return res.status(400).json({ error: `Cannot reschedule a booking that's ${booking.status === "serving" ? "currently being served" : `already marked ${booking.status.replace("_", "-")}`} — cancel and create a new booking instead.` });
+    }
+    // Reschedule moves a single time-slot booking to a new date/time — a
+    // hotel stay is a date RANGE (checkInIso + nights), a fundamentally
+    // different shape this single-date/single-time modal can't represent.
+    // Rather than silently write a half-correct visit_date onto a booking
+    // that doesn't actually use it, refuse outright (same call the
+    // dashboard already makes for hotel availability blocking — see
+    // README's Availability section).
+    if (!booking.visitTime || !booking.visitDate) {
+      return res.status(400).json({ error: "Reschedule only supports time-slot bookings, not hotel stays. Cancel and create a new booking for a date-range change." });
+    }
 
-    const updated = bookings.updateWithMeta(id, {
-      status: "rescheduled",
-      cancelledBy: req.user.email,
-      rescheduledDate: rescheduleDate,
-      rescheduledTime: rescheduleTime || null,
-      rescheduleNote: note || null,
-    });
+    const oldWhen = (booking.visitDateLabel || booking.visitDate || "") + (booking.visitTime ? ` at ${booking.visitTime}` : "");
 
-    recordAudit(req.user, "booking.reschedule", {
+    let updated;
+    try {
+      updated = bookings.updateWithMeta(req.user.tenantId, id, {
+        // Back to "booked" — the appointment simply has a new date/time
+        // now. Not a distinct state anything else in the system (STATUS,
+        // queue position, arrival alerts) needs to know how to handle.
+        status: "booked",
+        cancelledBy: req.user.email,
+        rescheduledDate: rescheduleDate,
+        rescheduledTime: rescheduleTime || null,
+        rescheduleNote: note || null,
+        // The actual fix: visit_date/visit_time are what STATUS, the
+        // queue, the dashboard, and the UNIQUE slot index all read — they
+        // used to stay frozen at the ORIGINAL booking time forever, so a
+        // "rescheduled" booking silently reported stale info everywhere
+        // and its old slot stayed permanently blocked for other customers.
+        visitDate: rescheduleDate,
+        visitTime: rescheduleTime || null,
+        visitDateLabel: formatLongDate(parseIsoDate(rescheduleDate)),
+      });
+    } catch (err) {
+      if (err instanceof bookings.SlotTakenError) {
+        return res.status(409).json({ error: "That slot is already booked. Choose a different date/time." });
+      }
+      throw err;
+    }
+
+    recordAudit(req.user.tenantId, req.user, "booking.reschedule", {
       bookingId: booking.bookingId, waId: booking.waId,
+      oldDate: booking.visitDate, oldTime: booking.visitTime,
       newDate: rescheduleDate, newTime: rescheduleTime || null, note: note || null,
     });
     log("INFO", `${req.user.email} rescheduled booking ${booking.bookingId} for ${booking.waId} → ${rescheduleDate} ${rescheduleTime || ""}`);
 
     // Notify the customer.
     const providerLabel = booking.providerName || "your provider";
-    const oldWhen = (booking.visitDateLabel || booking.visitDate || "") + (booking.visitTime ? ` at ${booking.visitTime}` : "");
     const newWhen = rescheduleDate + (rescheduleTime ? ` at ${rescheduleTime}` : "");
     const noteText = note ? `\n\nMessage from provider: "${note}"` : "";
     const msg =
@@ -708,30 +1245,158 @@ app.patch("/api/dashboard/bookings/:id", requireAuth(), async (req, res) => {
       `\n\nReply STATUS to see your updated booking details.`;
 
     try {
-      await sendWhatsAppText(booking.waId, msg);
+      await sendWhatsAppText(booking.tenantId, booking.waId, msg);
     } catch (err) {
       log("WARN", `WhatsApp notification failed for reschedule of ${booking.bookingId}: ${err.message}`);
     }
 
+    await syncBookingRescheduled(req.user.tenantId, updated, workflows[updated.workflowId]);
+    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
+
     return res.json({ ok: true, booking: updated });
   }
 
-  return res.status(400).json({ error: 'action must be "cancel" or "reschedule".' });
-});
+  if (action === "serve" || action === "complete") {
+    // "serve" (currently-being-seen, Section 3's queue) only makes sense
+    // for a time-slot booking. "complete" (Section 4's post-appointment
+    // notes/feedback) applies to a hotel stay too — a checkout is a
+    // completion worth asking about, it just doesn't participate in
+    // queue-position math the way a same-day appointment does.
+    if (action === "serve" && (!booking.visitTime || !booking.visitDate)) {
+      return res.status(400).json({ error: "Serve only applies to a time-slot booking." });
+    }
+    if (booking.status === "cancelled") return res.status(400).json({ error: "Cannot update a cancelled booking." });
+    if (booking.status === "done") return res.status(400).json({ error: "Booking is already marked complete." });
+
+    // `note` already destructured from req.body above, alongside action/
+    // rescheduleDate/rescheduleTime — no separate `body` variable exists
+    // in this route (unlike the availability route, which does use one).
+    const cappedNote = typeof note === "string" ? note.slice(0, 500) : null;
+
+    // Handoff: only one booking is "being served" at a time per provider —
+    // starting a new one implicitly finishes whatever was previously in
+    // that state, rather than leaving two bookings simultaneously marked
+    // "serving" (which would double-count in the queue position math).
+    if (action === "serve") {
+      for (const other of bookings.values(req.user.tenantId)) {
+        if (other.id !== booking.id && other.workflowId === booking.workflowId && other.providerId === booking.providerId &&
+            other.visitDate === booking.visitDate && other.status === "serving") {
+          bookings.updateWithMeta(req.user.tenantId, other.id, { status: "done" });
+        }
+      }
+    }
+
+    const newStatus = action === "serve" ? "serving" : "done";
+    const updated = bookings.updateWithMeta(req.user.tenantId, id, {
+      status: newStatus,
+      providerNote: cappedNote,
+      feedbackRequestedAt: action === "complete" ? Date.now() : null,
+    });
+    recordAudit(req.user.tenantId, req.user, `booking.${action}`, { bookingId: booking.bookingId, waId: booking.waId, note: cappedNote });
+    log("INFO", `${req.user.email} marked booking ${booking.bookingId} as ${newStatus}`);
+
+    if (action === "serve" && booking.visitTime) {
+      // Section 3.4 — everyone else in today's queue may have just moved
+      // up a position; find anyone who newly crossed into "you're next"
+      // and ping them, at most once each (tracked via alerted_next).
+      await notifyQueueShifts(req.user.tenantId, booking.workflowId, booking.providerId, booking.visitDate, id);
+    }
+
+    if (action === "complete") {
+      // Section 4.2 — the provider's note (if any) plus a feedback ask.
+      // The customer's NEXT free-text reply gets captured as feedback by
+      // workflowEngine.js checking feedback_requested_at before running
+      // normal intent detection, not by anything tracked here.
+      const providerLabel = booking.providerName || "your provider";
+      const noteText = cappedNote ? `\n\n📝 Note from ${providerLabel}: "${cappedNote}"` : "";
+      const msg =
+        `✅ Your visit with ${providerLabel} is complete.${noteText}\n\n` +
+        "How was it? Reply with a quick rating (1-5) or a few words — it helps us improve.";
+      const sent = await sendWithRetry(booking.tenantId, booking.waId, msg);
+      if (!sent) log("WARN", `Completion/feedback-request message to ${booking.waId} for booking ${booking.bookingId} queued for durable retry after immediate attempts failed.`);
+    }
+
+    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
+    return res.json({ ok: true, booking: updated });
+  }
+
+  // Section 9.6 — no-show fee handling. Only makes sense for a time-slot
+  // booking (a hotel no-show is a different problem — a stay simply not
+  // checked into — not modeled here). Default policy is to RETAIN any
+  // deposit already collected, since that's the entire point of a
+  // no-show deterrent deposit; a workflow can explicitly opt back into
+  // refunding no-shows anyway via `refundPolicy.noShow: "refund"`.
+  //
+  // The plan's other no-show model — charging a SAVED payment method only
+  // when a no-show actually happens, for a workflow that doesn't want to
+  // collect anything upfront — is deliberately NOT implemented here: it
+  // needs Razorpay's card tokenization API and a real customer consent
+  // flow for storing a card on file, which is a materially different (and
+  // materially larger) feature than everything else in this section, not
+  // a same-shape extension of it. Flagged here rather than half-built.
+  if (action === "no_show") {
+    if (!booking.visitTime || !booking.visitDate) {
+      return res.status(400).json({ error: "no_show only applies to a time-slot booking." });
+    }
+    if (booking.status === "cancelled" || booking.status === "done" || booking.status === "no_show") {
+      return res.status(400).json({ error: `Cannot mark a ${booking.status} booking as no-show.` });
+    }
+
+    const updated = bookings.updateWithMeta(req.user.tenantId, id, { status: "no_show", providerNote: typeof note === "string" ? note.slice(0, 500) : null });
+    const policy = workflows[booking.workflowId]?.refundPolicy?.noShow;
+    let refundResult = { refunded: false };
+    if (policy === "refund") {
+      refundResult = await refundIfPaid(req.user.tenantId, booking, { initiatedBy: "provider", refundPolicy: { providerCancellation: "full" } });
+    } else {
+      const hadPaidDeposit = paymentStore.listForBooking(req.user.tenantId, booking.id).some((p) => p.status === "paid");
+      if (hadPaidDeposit) log("INFO", `Deposit retained for no-show booking ${booking.bookingId} (policy: retain, the default).`);
+    }
+    recordAudit(req.user.tenantId, req.user, "booking.no_show", { bookingId: booking.bookingId, waId: booking.waId, refunded: refundResult.refunded });
+    log("INFO", `${req.user.email} marked booking ${booking.bookingId} as no-show.`);
+    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
+    return res.json({ ok: true, booking: updated, refund: refundResult });
+  }
+
+  return res.status(400).json({ error: 'action must be "cancel", "reschedule", "serve", "complete", or "no_show".' });
+}));
+
+// Recomputes live queue position for everyone else still active in this
+// provider's queue for this date and sends a one-time "you're next" alert
+// to anyone who just crossed into position 0 — called after any action
+// that could shift the queue (serve/complete). Best-effort: uses
+// sendWithRetry (Section 3.6's stopgap retry) so a transient WhatsApp API
+// failure doesn't just silently drop the alert, but a failure here never
+// blocks or fails the triggering request itself.
+async function notifyQueueShifts(tenantId, workflowId, providerId, date, excludeId) {
+  for (const other of sameQueueBookings(tenantId, workflowId, providerId, date, excludeId)) {
+    const position = computeQueuePosition(other);
+    if (position !== 0) continue;
+    if (wasAlerted(tenantId, other.id)) continue;
+    if (isOptedOutOfAlerts(other.waId)) continue;
+
+    markAlerted(tenantId, other.id); // mark first — never re-attempt-storm the same alert if the send itself throws
+    const sent = await sendWithRetry(
+      tenantId,
+      other.waId,
+      `🔔 You're next! ${other.providerName} will see you shortly for your ${other.visitTime} appointment.\n\n(Reply STOP ALERTS to turn these off.)`
+    );
+    if (!sent) log("WARN", `"You're next" alert to ${other.waId} for booking ${other.bookingId} queued for durable retry after immediate attempts failed.`);
+  }
+}
 
 
 
-app.get("/api/dashboard/availability", requireAuth(), (req, res) => {
+app.get("/api/dashboard/availability", requireAuth("admin", "provider"), (req, res) => {
   const { workflowId, providerId } = req.user.role === "provider" ? req.user : req.query;
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId query params are required" });
-  res.json(listBlocksForProvider(workflowId, providerId));
+  res.json(listBlocksForProvider(req.user.tenantId, workflowId, providerId));
 });
 
-app.post("/api/dashboard/availability", requireAuth(), (req, res) => {
+app.post("/api/dashboard/availability", requireAuth("admin", "provider"), (req, res) => {
   const body = req.body || {};
   const workflowId = req.user.role === "provider" ? req.user.workflowId : body.workflowId;
   const providerId = req.user.role === "provider" ? req.user.providerId : body.providerId;
-  const { date, time, reason } = body;
+  const { date, time, endTime, reason } = body;
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
     return res.status(400).json({ error: "workflowId, providerId, and date are required strings" });
   }
@@ -740,34 +1405,310 @@ app.post("/api/dashboard/availability", requireAuth(), (req, res) => {
   if (time !== undefined && time !== null && typeof time !== "string") {
     return res.status(400).json({ error: "time must be a string (or omitted to block the whole day)" });
   }
+  if (endTime !== undefined && endTime !== null && typeof endTime !== "string") {
+    return res.status(400).json({ error: "endTime must be a string, or omitted" });
+  }
+  if (endTime && !time) {
+    return res.status(400).json({ error: "endTime needs a time (the range's start) too." });
+  }
+  // 2.4: start < end, checked server-side regardless of what the <input
+  // type="time"> pair in the dashboard already enforces client-side.
+  if (time && endTime && timeToMinutes(endTime) <= timeToMinutes(time)) {
+    return res.status(400).json({ error: "endTime must be after time." });
+  }
+
   const cappedReason = typeof reason === "string" ? reason.slice(0, 200) : null;
-  blockSlot(workflowId, providerId, date, time || null, cappedReason);
-  recordAudit(req.user, "availability.block", { workflowId, providerId, date, time: time || null, reason: cappedReason });
-  res.status(201).json({ ok: true });
+  blockSlot(req.user.tenantId, workflowId, providerId, date, time || null, endTime || null, cappedReason);
+  recordAudit(req.user.tenantId, req.user, "availability.block", { workflowId, providerId, date, time: time || null, endTime: endTime || null, reason: cappedReason });
+
+  // Advisory, not a hard reject — surface which existing bookings fall
+  // inside the new block so the provider can decide whether to also
+  // cancel/reschedule them, rather than the block silently coexisting
+  // with confirmed bookings it now conflicts with (Section 2.4).
+  let conflictingBookings = [];
+  if (time) {
+    const startMin = timeToMinutes(time);
+    const endMin = endTime ? timeToMinutes(endTime) : startMin + 1;
+    conflictingBookings = bookings
+      .values(req.user.tenantId)
+      .filter((b) => {
+        if (b.workflowId !== workflowId || b.providerId !== providerId || b.visitDate !== date || b.status === "cancelled" || !b.visitTime) {
+          return false;
+        }
+        const bookedMin = labelToMinutes(b.visitTime);
+        return bookedMin !== null && bookedMin >= startMin && bookedMin < endMin;
+      })
+      .map((b) => ({ bookingId: b.bookingId, customerName: b.customerName, visitTime: b.visitTime }));
+  }
+
+  res.status(201).json({ ok: true, conflictingBookings });
 });
 
-app.delete("/api/dashboard/availability/:id", requireAuth(), (req, res) => {
+app.delete("/api/dashboard/availability/:id", requireAuth("admin", "provider"), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const block = getBlockById(id);
+  const block = getBlockById(req.user.tenantId, id);
   if (!block) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && (block.workflowId !== req.user.workflowId || block.providerId !== req.user.providerId)) {
     return res.status(403).json({ error: "You can only remove your own availability blocks." });
   }
-  unblockSlot(id);
-  recordAudit(req.user, "availability.unblock", { id, workflowId: block.workflowId, providerId: block.providerId, date: block.date, time: block.time });
+  unblockSlot(req.user.tenantId, id);
+  recordAudit(req.user.tenantId, req.user, "availability.unblock", { id, workflowId: block.workflowId, providerId: block.providerId, date: block.date, time: block.time, endTime: block.endTime });
   res.json({ ok: true });
+});
+
+// Support requests — what makes human escalation (Section 1.4) land
+// somewhere real instead of a dead end. Same role scoping as every other
+// resource: a provider sees only requests tied to their own workflow (or
+// with no workflow yet resolved — a fresh complaint before the customer
+// named a business — which nobody can scope, so only admin sees those).
+app.get("/api/dashboard/support-requests", requireAuth("admin", "provider"), (req, res) => {
+  const list = req.user.role === "provider"
+    ? supportRequests.listForWorkflow(req.user.tenantId, req.user.workflowId)
+    : supportRequests.listAll(req.user.tenantId);
+  res.json(list);
+});
+
+app.patch("/api/dashboard/support-requests/:id", requireAuth("admin", "provider"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  if (typeof req.body?.resolved !== "boolean") return res.status(400).json({ error: "resolved (boolean) is required." });
+  const existing = supportRequests.getById(req.user.tenantId, id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
+    return res.status(403).json({ error: "You can only manage support requests for your own business." });
+  }
+  const updated = supportRequests.setResolved(req.user.tenantId, id, req.body.resolved);
+  recordAudit(req.user.tenantId, req.user, updated.resolved ? "support_request.resolve" : "support_request.reopen", { id, waId: updated.waId });
+  res.json(updated);
+});
+
+// Feedback (Section 4) — same role scoping as everything else.
+app.get("/api/dashboard/feedback", requireAuth("admin", "provider"), (req, res) => {
+  const list = req.user.role === "provider" ? feedbackStore.listForWorkflow(req.user.tenantId, req.user.workflowId) : feedbackStore.listAll(req.user.tenantId);
+  // Joined with the booking's own label fields client-side needs (booking
+  // id, customer name) so the dashboard doesn't have to make a second
+  // round trip per row to make sense of who left what.
+  const withBookingInfo = list.map((f) => {
+    const b = bookings.getById(req.user.tenantId, f.bookingId);
+    return { ...f, bookingLabel: b?.bookingId || null, customerName: b?.customerName || null, workflowId: b?.workflowId || null };
+  });
+  res.json(withBookingInfo);
 });
 
 // Analytics — same role scoping as every other dashboard route: a
 // provider only ever gets their own numbers (the query params are ignored
 // for that role, not merely validated), an admin gets platform-wide.
-app.get("/api/dashboard/analytics", requireAuth(), (req, res) => {
+app.get("/api/dashboard/analytics", requireAuth("admin", "provider"), (req, res) => {
   const scope = req.user.role === "provider"
     ? { workflowId: req.user.workflowId, providerId: req.user.providerId }
     : { workflowId: req.query.workflowId || null, providerId: req.query.providerId || null };
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 90);
-  res.json(computeAnalytics({ ...scope, days }));
+  res.json(computeAnalytics({ tenantId: req.user.tenantId, ...scope, days }));
+});
+
+// Section 9.8 — payment visibility + the manual "issue refund" escape
+// hatch for whatever the automatic cancellation-triggered flow doesn't
+// cover (a partial goodwill refund outside the stated policy, a payment
+// stuck in a state the webhook never resolved, etc.).
+app.get("/api/dashboard/payments", requireAuth("admin", "provider"), (req, res) => {
+  const list = paymentStore.listForTenant(req.user.tenantId);
+  // Provider role sees only payments for their own bookings — same
+  // ownership-check style as GET /api/dashboard/feedback above (a join
+  // back to bookings, since payments itself doesn't carry workflow/
+  // provider id — it only ever needs tenant_id + booking_id).
+  const scoped = req.user.role === "provider"
+    ? list.filter((p) => {
+        const b = bookings.getById(req.user.tenantId, p.bookingId);
+        return b && b.workflowId === req.user.workflowId && b.providerId === req.user.providerId;
+      })
+    : list;
+  const withBookingInfo = scoped.map((p) => {
+    const b = bookings.getById(req.user.tenantId, p.bookingId);
+    return { ...p, bookingLabel: b?.bookingId || null, customerName: b?.customerName || null, workflowId: b?.workflowId || null };
+  });
+  res.json(withBookingInfo);
+});
+
+app.post("/api/dashboard/payments/:id/refund", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const payment = paymentStore.getById(req.user.tenantId, id);
+  if (!payment) return res.status(404).json({ error: "Not found" });
+  if (payment.status !== "paid") return res.status(400).json({ error: `Cannot refund a payment with status "${payment.status}" — only a paid payment can be refunded.` });
+
+  const booking = bookings.getById(req.user.tenantId, payment.bookingId);
+  if (req.user.role === "provider" && booking && (booking.workflowId !== req.user.workflowId || booking.providerId !== req.user.providerId)) {
+    return res.status(403).json({ error: "You can only refund payments for your own bookings." });
+  }
+
+  const { amount } = req.body || {}; // optional partial-refund amount in rupees; omitted = full refund
+  const refundAmountPaise = typeof amount === "number" && amount > 0 ? Math.round(amount * 100) : undefined;
+  if (refundAmountPaise !== undefined && refundAmountPaise > payment.amount) {
+    return res.status(400).json({ error: "Refund amount cannot exceed the original payment amount." });
+  }
+
+  try {
+    const refund = await razorpay.createRefund({ providerPaymentId: payment.providerPaymentId, amount: refundAmountPaise });
+    const finalAmount = refundAmountPaise ?? payment.amount;
+    const status = finalAmount >= payment.amount ? "refunded" : "partially_refunded";
+    paymentStore.markRefunded(payment.id, status, refund.status, finalAmount);
+    if (booking) {
+      bookings.updatePaymentStatus(req.user.tenantId, booking.id, status);
+      publishBookingEvent(req.user.tenantId, "booking.updated", { ...booking, paymentStatus: status });
+    }
+    recordAudit(req.user.tenantId, req.user, "payment.manual_refund", { paymentId: payment.id, bookingId: payment.bookingId, amount: finalAmount });
+    log("INFO", `${req.user.email} manually refunded ₹${finalAmount / 100} for payment ${payment.id} (booking ${payment.bookingId}).`);
+    res.json({ ok: true, refundAmount: finalAmount, status });
+  } catch (err) {
+    log("ERROR", `Manual refund failed for payment ${payment.id}: ${err.message}`);
+    res.status(502).json({ error: `Refund failed: ${err.message}` });
+  }
+}));
+
+// Section 10.2 — Google Calendar OAuth. A provider session is pinned to
+// exactly one workflowId+providerId (same pattern as GET
+// /api/dashboard/bookings above); an admin acting on a specific
+// provider's behalf must pass both as query params/body fields.
+function resolveWorkflowProvider(req) {
+  return req.user.role === "provider" ? { workflowId: req.user.workflowId, providerId: req.user.providerId } : { workflowId: req.query.workflowId || req.body?.workflowId, providerId: req.query.providerId || req.body?.providerId };
+}
+
+app.get("/api/dashboard/calendar/status", requireAuth("admin", "provider"), (req, res) => {
+  const { workflowId, providerId } = resolveWorkflowProvider(req);
+  if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId are required" });
+  const connection = calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
+  res.json({ configured: googleCalendar.isConfigured(), connection: calendarConnections.toPublicView(connection) });
+});
+
+// A real browser top-level navigation (the "Connect Calendar" button is a
+// plain link, not a fetch call) — redirects to Google's own consent
+// screen rather than returning JSON, since there's no XHR caller to hand
+// JSON back to.
+app.get("/api/dashboard/calendar/connect", requireAuth("admin", "provider"), (req, res) => {
+  const { workflowId, providerId } = resolveWorkflowProvider(req);
+  if (!workflowId || !providerId) return res.status(400).send("workflowId and providerId are required.");
+  if (!googleCalendar.isConfigured()) {
+    return res.status(503).send("Google Calendar isn't configured on this server yet (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URI). Ask an admin to set it up.");
+  }
+  const state = signOAuthState({ tenantId: req.user.tenantId, workflowId, providerId });
+  res.redirect(googleCalendar.getAuthUrl(state));
+});
+
+// Google redirects the browser here after consent. Not JSON — this is a
+// top-level navigation, so it redirects back into the dashboard UI with a
+// query flag the frontend reads to show a toast, same shape as any
+// OAuth-callback page.
+app.get("/api/dashboard/calendar/callback", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error) return res.redirect(`/dashboard?calendar=error&message=${encodeURIComponent(String(error))}`);
+
+  const statePayload = verifyOAuthState(state);
+  if (!statePayload || statePayload.tenantId !== req.user.tenantId) {
+    return res.redirect(`/dashboard?calendar=error&message=${encodeURIComponent("Invalid or expired connection request — please try again.")}`);
+  }
+  if (!code || typeof code !== "string") {
+    return res.redirect(`/dashboard?calendar=error&message=${encodeURIComponent("Google did not return an authorization code.")}`);
+  }
+
+  try {
+    const tokens = await googleCalendar.exchangeCodeForTokens(code);
+    calendarConnections.create(req.user.tenantId, statePayload.workflowId, statePayload.providerId, {
+      calendarType: "google",
+      refreshToken: tokens.refreshToken,
+      accessToken: tokens.accessToken,
+      accessTokenExpiresAt: tokens.expiresAt,
+    });
+    recordAudit(req.user.tenantId, req.user, "calendar.connect", { workflowId: statePayload.workflowId, providerId: statePayload.providerId });
+    log("INFO", `${req.user.email} connected Google Calendar for ${statePayload.workflowId}/${statePayload.providerId}.`);
+    res.redirect("/dashboard?calendar=connected");
+  } catch (err) {
+    log("ERROR", `Google Calendar connection failed for tenant ${req.user.tenantId}: ${err.message}`);
+    res.redirect(`/dashboard?calendar=error&message=${encodeURIComponent(err.message)}`);
+  }
+}));
+
+app.post("/api/dashboard/calendar/disconnect", requireAuth("admin", "provider"), (req, res) => {
+  const { workflowId, providerId } = resolveWorkflowProvider(req);
+  if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId are required" });
+  const connection = calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
+  if (!connection) return res.status(404).json({ error: "No active calendar connection to disconnect." });
+  calendarConnections.disconnect(req.user.tenantId, connection.id);
+  recordAudit(req.user.tenantId, req.user, "calendar.disconnect", { workflowId, providerId });
+  log("INFO", `${req.user.email} disconnected Google Calendar for ${workflowId}/${providerId}.`);
+  res.json({ ok: true });
+});
+
+// Section 11 — Server-Sent Events. A dashboard tab open on GET
+// /api/dashboard/bookings-shaped data used to only ever learn about a new
+// booking, cancellation, or support escalation by the user clicking
+// "Refresh" (or the periodic poll a few other dashboards resort to) —
+// this makes it push instead. Plain SSE (EventSource), not WebSockets:
+// one-directional (server -> browser) is all the dashboard ever needed,
+// SSE auto-reconnects on its own with zero client code, and it rides
+// over a normal HTTPS GET (no extra infra, no new dependency) — the same
+// "simplest thing that's actually correct" bias as everywhere else in
+// this codebase.
+//
+// A provider session only ever receives events for its own
+// workflowId+providerId, OR workflow-scoped events (support requests)
+// that don't carry a providerId at all — never another provider's
+// bookings, even within the same tenant. An admin session receives every
+// event for its own tenant, matching the same full-tenant visibility
+// GET /api/dashboard/all-bookings already grants.
+// Section 12 — each open SSE connection holds a socket + a heartbeat
+// timer for as long as it's open; nothing previously stopped one browser
+// tab (or a malicious/buggy client scripting `new EventSource(...)` in a
+// loop) from opening an unbounded number of them under the same account
+// and slowly exhausting the process's file descriptors. A small per-user
+// cap closes that gap without needing a general-purpose connection-limit
+// middleware — SSE is the only long-lived connection this app holds
+// open, so it's the only place this matters.
+const MAX_SSE_CONNECTIONS_PER_USER = 5;
+const sseConnectionsByUser = new Map(); // uid -> count
+
+app.get("/api/dashboard/events", requireAuth("admin", "provider"), (req, res) => {
+  const { uid, tenantId, role, workflowId, providerId } = req.user;
+
+  const openCount = sseConnectionsByUser.get(uid) || 0;
+  if (openCount >= MAX_SSE_CONNECTIONS_PER_USER) {
+    return res.status(429).json({ error: "Too many open live-update connections for this account. Close some other dashboard tabs and try again." });
+  }
+  sseConnectionsByUser.set(uid, openCount + 1);
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no", // disables proxy buffering if this ever runs behind nginx
+  });
+  res.write(":connected\n\n"); // opens the stream immediately rather than waiting for the first real event
+
+  const unsubscribe = dashboardEvents.subscribe((evt) => {
+    if (evt.tenantId !== tenantId) return;
+    if (role === "provider") {
+      if (evt.payload?.workflowId !== workflowId) return;
+      // Some event types (support_request.created) are workflow-scoped,
+      // not tied to one provider — only filter on providerId when the
+      // event actually carries one.
+      if (evt.payload?.providerId && evt.payload.providerId !== providerId) return;
+    }
+    res.write(`event: ${evt.type}\ndata: ${JSON.stringify(evt.payload)}\n\n`);
+  });
+
+  // Keeps the connection alive through any intermediary that would
+  // otherwise time out an idle HTTP connection (a load balancer, some
+  // browsers) — a comment line, not a real event, so it's invisible to
+  // EventSource's onmessage/addEventListener.
+  const heartbeat = setInterval(() => res.write(":heartbeat\n\n"), 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+    const remaining = (sseConnectionsByUser.get(uid) || 1) - 1;
+    if (remaining <= 0) sseConnectionsByUser.delete(uid);
+    else sseConnectionsByUser.set(uid, remaining);
+  });
 });
 
 // Marketplace — publish a working business as a reusable template, then
@@ -802,7 +1743,7 @@ app.post("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
     definition: source,
     createdBy: req.user.email,
   });
-  recordAudit(req.user, "template.publish", { templateId: template.id, name: template.name, fromWorkflowId: workflowId });
+  recordAudit(req.user.tenantId, req.user, "template.publish", { templateId: template.id, name: template.name, fromWorkflowId: workflowId });
   res.status(201).json({ id: template.id, name: template.name });
 });
 
@@ -832,7 +1773,7 @@ app.post("/api/dashboard/templates/:id/install", requireAuth("admin"), (req, res
     log("ERROR", `Failed to install template ${id} as ${newId}: ${err.message}`);
     return res.status(500).json({ error: "Failed to write the new workflow file." });
   }
-  recordAudit(req.user, "template.install", { templateId: id, newWorkflowId: newId });
+  recordAudit(req.user.tenantId, req.user, "template.install", { templateId: id, newWorkflowId: newId });
   log("INFO", `${req.user.email} installed template "${template.name}" as workflow "${newId}"`);
   res.status(201).json({ ok: true, workflowId: newId });
 });
@@ -843,7 +1784,7 @@ app.delete("/api/dashboard/templates/:id", requireAuth("admin"), (req, res) => {
   const template = templates.getById(id);
   if (!template) return res.status(404).json({ error: "Template not found" });
   templates.remove(id);
-  recordAudit(req.user, "template.delete", { templateId: id, name: template.name });
+  recordAudit(req.user.tenantId, req.user, "template.delete", { templateId: id, name: template.name });
   res.json({ ok: true });
 });
 
@@ -853,20 +1794,29 @@ app.delete("/api/dashboard/templates/:id", requireAuth("admin"), (req, res) => {
 // Providers CAN edit these (unlike workflow config, which is admin-only) —
 // answering "do you take insurance?" is the provider's own domain
 // knowledge, not a platform-level setting.
-const MAX_KNOWLEDGE_CONTENT = 5000;
+//
+// Reuses factualQA.js's own MAX_DOC_CHARS rather than a separate, larger
+// cap here — real gap, found while reconciling the two: this used to allow
+// saving up to 5000 chars per document, but buildKnowledgeBase() (the
+// thing that actually reads these back out at query time) only ever uses
+// the first 1500 of it. An admin could save a 4000-char policy doc, get no
+// error, and never learn that ~2500 chars of it were silently invisible to
+// every customer question the bot answers. One cap now, enforced at write
+// time with a clear error instead of a silent truncation.
+const MAX_KNOWLEDGE_CONTENT = MAX_DOC_CHARS;
 
 function resolveKnowledgeWorkflowId(req, requested) {
   if (req.user.role === "provider") return req.user.workflowId;
   return requested;
 }
 
-app.get("/api/dashboard/knowledge", requireAuth(), (req, res) => {
+app.get("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res) => {
   const workflowId = resolveKnowledgeWorkflowId(req, req.query.workflowId);
-  if (!workflowId) return res.json(knowledge.listAll()); // admin, no filter
-  res.json(knowledge.listForWorkflow(workflowId));
+  if (!workflowId) return res.json(knowledge.listAll(req.user.tenantId)); // admin, no workflow filter (still tenant-scoped)
+  res.json(knowledge.listForWorkflow(req.user.tenantId, workflowId));
 });
 
-app.post("/api/dashboard/knowledge", requireAuth(), (req, res) => {
+app.post("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res) => {
   const { title, content } = req.body || {};
   const workflowId = resolveKnowledgeWorkflowId(req, req.body?.workflowId);
   if (typeof workflowId !== "string" || !workflows[workflowId]) {
@@ -874,16 +1824,19 @@ app.post("/api/dashboard/knowledge", requireAuth(), (req, res) => {
   }
   if (typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "title is required." });
   if (typeof content !== "string" || !content.trim()) return res.status(400).json({ error: "content is required." });
+  if (content.trim().length > MAX_KNOWLEDGE_CONTENT) {
+    return res.status(400).json({ error: `content must be ${MAX_KNOWLEDGE_CONTENT} characters or fewer (got ${content.trim().length}).` });
+  }
 
-  const doc = knowledge.create(workflowId, title.trim().slice(0, 200), content.trim().slice(0, MAX_KNOWLEDGE_CONTENT));
-  recordAudit(req.user, "knowledge.create", { workflowId, id: doc.id, title: doc.title });
+  const doc = knowledge.create(req.user.tenantId, workflowId, title.trim().slice(0, 200), content.trim());
+  recordAudit(req.user.tenantId, req.user, "knowledge.create", { workflowId, id: doc.id, title: doc.title });
   res.status(201).json(doc);
 });
 
-app.put("/api/dashboard/knowledge/:id", requireAuth(), (req, res) => {
+app.put("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const existing = knowledge.getById(id);
+  const existing = knowledge.getById(req.user.tenantId, id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
     return res.status(403).json({ error: "You can only edit your own business's knowledge base." });
@@ -891,23 +1844,187 @@ app.put("/api/dashboard/knowledge/:id", requireAuth(), (req, res) => {
   const { title, content } = req.body || {};
   if (typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "title is required." });
   if (typeof content !== "string" || !content.trim()) return res.status(400).json({ error: "content is required." });
+  if (content.trim().length > MAX_KNOWLEDGE_CONTENT) {
+    return res.status(400).json({ error: `content must be ${MAX_KNOWLEDGE_CONTENT} characters or fewer (got ${content.trim().length}).` });
+  }
 
-  const doc = knowledge.update(id, title.trim().slice(0, 200), content.trim().slice(0, MAX_KNOWLEDGE_CONTENT));
-  recordAudit(req.user, "knowledge.update", { workflowId: existing.workflowId, id, title: doc.title });
+  const doc = knowledge.update(req.user.tenantId, id, title.trim().slice(0, 200), content.trim());
+  recordAudit(req.user.tenantId, req.user, "knowledge.update", { workflowId: existing.workflowId, id, title: doc.title });
   res.json(doc);
 });
 
-app.delete("/api/dashboard/knowledge/:id", requireAuth(), (req, res) => {
+app.delete("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const existing = knowledge.getById(id);
+  const existing = knowledge.getById(req.user.tenantId, id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
     return res.status(403).json({ error: "You can only delete your own business's knowledge base." });
   }
-  knowledge.remove(id);
-  recordAudit(req.user, "knowledge.delete", { workflowId: existing.workflowId, id, title: existing.title });
+  knowledge.remove(req.user.tenantId, id);
+  recordAudit(req.user.tenantId, req.user, "knowledge.delete", { workflowId: existing.workflowId, id, title: existing.title });
   res.json({ ok: true });
+});
+
+// Section 8.5 — platform-admin routes. Distinct from every /api/dashboard/*
+// route above: those are all scoped to the caller's OWN tenant (a real
+// tenant admin/provider can never see another tenant's data through them,
+// even by guessing ids — see every store module's tenant_id filtering).
+// These operate ACROSS tenants by design, which is exactly why they're
+// gated to the platform_admin role only, a role distinct from any
+// tenant's own admin (src/store/userStore.js).
+app.get("/api/platform/tenants", requireAuth("platform_admin"), (req, res) => {
+  // Section 8's own Definition of Done, verbatim: "a platform admin can
+  // see both tenants' summary stats from one view." One query per tenant
+  // here (not a JOIN) — the tenant count is expected to stay small enough
+  // that this is simpler and clearer than an aggregate query, and it
+  // reuses each store's own tenant-scoped counting rather than a
+  // one-off cross-tenant query living only here.
+  const allTenants = tenantStore.list();
+  const summaries = allTenants.map((t) => ({
+    id: t.id,
+    name: t.name,
+    slug: t.slug,
+    plan: t.plan,
+    status: t.status,
+    whatsappConnected: !!(t.whatsappAccessToken && t.whatsappPhoneNumberId),
+    bookingCount: bookings.values(t.id).length,
+    userCount: users.list(t.id).length,
+    createdAt: t.createdAt,
+  }));
+  res.json(summaries);
+});
+
+app.get("/api/platform/tenants/:id", requireAuth("platform_admin"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const tenant = tenantStore.getById(id);
+  if (!tenant) return res.status(404).json({ error: "Not found" });
+  // whatsappAccessToken is a real secret — never returned to any client,
+  // including the platform admin's own dashboard (same principle as
+  // password_hash never appearing in a users API response).
+  const { whatsappAccessToken, ...safeTenant } = tenant;
+  res.json(safeTenant);
+});
+
+app.post("/api/platform/tenants", requireAuth("platform_admin"), (req, res) => {
+  const { name, slug, plan, billingEmail } = req.body || {};
+  if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "name is required." });
+  if (typeof slug !== "string" || !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "slug is required and must contain only lowercase letters, numbers, and dashes." });
+  }
+  try {
+    const tenant = tenantStore.create({ name: name.trim(), slug, plan, billingEmail });
+    recordAudit(tenant.id, req.user, "tenant.create", { name: tenant.name, slug: tenant.slug });
+    log("INFO", `${req.user.email} created tenant "${tenant.name}" (${tenant.slug})`);
+    res.status(201).json(tenant);
+  } catch (err) {
+    if (err.code === "DUPLICATE_SLUG") return res.status(409).json({ error: err.message });
+    throw err;
+  }
+});
+
+// Section 8.6 — the tenant lifecycle itself: pending -> active -> suspended
+// -> cancelled. requireAuth()'s tenant-status check (above) is what
+// actually enforces "a suspended tenant's own users can't do anything" —
+// this route is just what moves a tenant between those states.
+const TENANT_STATUSES = new Set(["pending", "active", "suspended", "cancelled"]);
+app.patch("/api/platform/tenants/:id/status", requireAuth("platform_admin"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const { status } = req.body || {};
+  if (!TENANT_STATUSES.has(status)) {
+    return res.status(400).json({ error: `status must be one of: ${[...TENANT_STATUSES].join(", ")}` });
+  }
+  const existing = tenantStore.getById(id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const updated = tenantStore.setStatus(id, status);
+  recordAudit(id, req.user, "tenant.status_change", { from: existing.status, to: status });
+  log("INFO", `${req.user.email} changed tenant ${id} (${existing.slug}) status: ${existing.status} -> ${status}`);
+  const { whatsappAccessToken, ...safeTenant } = updated;
+  res.json(safeTenant);
+});
+
+// Section 8.4 — per-tenant config: branding shown in bot copy/dashboard
+// chrome, feature flags (payments/calendar sync on/off — groundwork for
+// Sections 9/10, not consulted anywhere yet), and an optional bring-your-
+// own Groq key for higher-plan tenants. Also where a tenant's own WhatsApp
+// number gets connected (Section 8.3's tenant-resolution depends on this
+// being set correctly).
+app.patch("/api/platform/tenants/:id/config", requireAuth("platform_admin"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const existing = tenantStore.getById(id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const { branding, featureFlags, groqApiKey, whatsappPhoneNumberId, whatsappBusinessAccountId, whatsappAccessToken } = req.body || {};
+  let updated = existing;
+  if (branding !== undefined || featureFlags !== undefined || groqApiKey !== undefined) {
+    updated = tenantStore.updateConfig(id, { branding, featureFlags, groqApiKey });
+  }
+  if (whatsappPhoneNumberId !== undefined || whatsappBusinessAccountId !== undefined || whatsappAccessToken !== undefined) {
+    // setWhatsAppCredentials encrypts the access token (secretsEncryption.js)
+    // and throws a specific, actionable error if APP_ENCRYPTION_KEY isn't
+    // set — found live hitting this endpoint before that env var was
+    // configured: without this catch it fell through to the generic global
+    // error handler as an opaque 500 "Internal server error", which told
+    // the platform_admin nothing about what to actually fix.
+    try {
+      updated = tenantStore.setWhatsAppCredentials(id, {
+        phoneNumberId: whatsappPhoneNumberId ?? existing.whatsappPhoneNumberId,
+        businessAccountId: whatsappBusinessAccountId ?? existing.whatsappBusinessAccountId,
+        accessToken: whatsappAccessToken !== undefined ? whatsappAccessToken : existing.whatsappAccessToken,
+      });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+  recordAudit(id, req.user, "tenant.config_update", { fields: Object.keys(req.body || {}) });
+  const { whatsappAccessToken: _omit, ...safeTenant } = updated;
+  res.json(safeTenant);
+});
+
+// ---------------------------------------------------------------------------
+// Section 14 — Public API (/api/v1/*). A tenant's own website/backend can
+// call these directly, authenticated with an API key (requireApiKey
+// above) rather than a dashboard session — e.g. a "Check availability"
+// widget embedded on the tenant's own site, or a confirmation page that
+// looks up a booking by id after a customer completes one elsewhere.
+//
+// Deliberately READ-ONLY for this pass — no POST /api/v1/bookings to
+// create or cancel a booking through this API yet. Every write this
+// project makes today goes through src/engine/workflowEngine.js's
+// recordBooking(), which is coupled to a conversational session (step
+// validation, provider/date/time selection state) in a way that isn't
+// yet factored into a reusable, session-independent "create one valid
+// booking" function. Building that safely — without either duplicating
+// workflowEngine's validation logic (a second copy that could drift) or
+// risking a booking that skips a check the WhatsApp flow enforces — is
+// real, separate design work, not something to rush through here.
+// Flagged explicitly rather than silently shipping a write path that
+// looks equivalent to the conversational one but isn't.
+app.get("/api/v1/availability", requireApiKey, (req, res) => {
+  const { workflowId, providerId, date } = req.query;
+  if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
+    return res.status(400).json({ error: "workflowId, providerId, and date (YYYY-MM-DD) are required query params." });
+  }
+  const workflow = workflows[workflowId];
+  if (!workflow) return res.status(404).json({ error: "Unknown workflowId." });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be in YYYY-MM-DD format." });
+
+  const slots = getAvailableSlots(req.apiTenantId, workflow, providerId, date);
+  res.json({ workflowId, providerId, date, slots });
+});
+
+app.get("/api/v1/bookings/:bookingId", requireApiKey, (req, res) => {
+  // The tenant-issued bookingId (e.g. "APT-20260101-XY12"), not this
+  // app's internal numeric row id — the same identifier a customer's own
+  // confirmation message already shows them, since this route exists for
+  // a tenant's own site to look up a booking a customer already has.
+  const booking = bookings.getByBookingId(req.apiTenantId, req.params.bookingId);
+  if (!booking) return res.status(404).json({ error: "Booking not found." });
+  const { waId: _omit, ...publicBooking } = booking; // the customer's phone number stays internal-only, even to the tenant's own integration
+  res.json(publicBooking);
 });
 
 app.get("/health", (req, res) => {
@@ -936,4 +2053,8 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   log("INFO", `BookPilot AI listening on port ${PORT}`);
+  scheduleBackups(); // every BACKUP_INTERVAL_HOURS (default 6h)
+  runBackup().catch((err) => log("ERROR", `Startup backup threw: ${err.message}`)); // one immediately, don't wait 6h for the first
+  startOutboundQueueWorker(); // polls the durable send queue every 60s
+  checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
 });

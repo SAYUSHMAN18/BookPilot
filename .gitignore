@@ -1,8 +1,15 @@
 node_modules
 .env
 logs/*.log
+logs/*.jsonl
 logs/sessions.json
 logs/sessions.json.tmp
 data/*.db
 data/*.db-wal
 data/*.db-shm
+backups/
+
+# Section 13 — the React/Vite rewrite's build output (frontend/ is the
+# source; `npm run build` there generates this). Not committed, same as
+# any other compiled artifact — rebuild it after a fresh clone.
+public/app/

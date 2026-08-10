@@ -8,8 +8,8 @@
   "slotMinutes": 60,
   "bookingIdPrefix": "MKP",
   "providers": [
-    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500, "address": "28 Nungambakkam High Road, Chennai, Tamil Nadu 600034", "mapQuery": "Priya+Studio+Bridal+Makeup+Nungambakkam+Chennai" },
-    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200, "address": "7 Kala Ghoda, Fort, Mumbai, Maharashtra 400001", "mapQuery": "Glow+Grace+Makeup+Studio+Kala+Ghoda+Mumbai" }
+    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500, "address": "28 Nungambakkam High Road, Chennai, Tamil Nadu 600034", "mapQuery": "Priya+Studio+Bridal+Makeup+Nungambakkam+Chennai", "photo": "https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=800&q=80" },
+    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200, "address": "7 Kala Ghoda, Fort, Mumbai, Maharashtra 400001", "mapQuery": "Glow+Grace+Makeup+Studio+Kala+Ghoda+Mumbai", "photo": "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&q=80" }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
@@ -24,5 +24,5 @@
       "template": "💄 Artist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
     }
   ],
-  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n📍 {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n\nReply STATUS anytime to check your appointment."
 }

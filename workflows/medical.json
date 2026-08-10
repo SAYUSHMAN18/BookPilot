@@ -3,7 +3,7 @@
   "description": "medical symptoms or wanting to see a doctor",
   "matchLabel": "a doctor",
   "label": "Doctor Appointment",
-  "keywords": ["pain", "fever", "headache", "cough", "cold", "stomach", "chest", "breathing", "doctor", "appointment", "checkup", "sick", "injury", "skin", "rash", "vomit"],
+  "keywords": ["pain", "fever", "headache", "cough", "cold", "stomach", "chest", "breathing", "doctor", "appointment", "checkup", "sick", "injury", "skin", "rash", "vomit", "bukhar", "khansi", "dard", "jukam", "zukam", "ulti", "chot", "bimar"],
   "businessName": "ABC Multispeciality Clinic",
   "businessAddress": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054",
   "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai",
@@ -11,12 +11,23 @@
   "slotMinutes": 30,
   "bookingIdPrefix": "APT",
   "providers": [
-    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" },
-    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" },
-    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai" }
+    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=800&q=80" },
+    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=800&q=80" },
+    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=800&q=80" }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
+  "requiresPayment": true,
+  "depositType": "percentage",
+  "depositAmount": 20,
+  "refundPolicy": {
+    "providerCancellation": "full",
+    "customerCancellation": [
+      { "hoursBefore": 24, "refundPercent": 100 },
+      { "hoursBefore": 2, "refundPercent": 50 }
+    ],
+    "noShow": "retain"
+  },
   "steps": [
     {
       "type": "select_provider",
@@ -36,5 +47,5 @@
       "template": "👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 Patient: {customerName}\n🎂 Age: {age}\n⚧️ Gender: {gender}\n📝 Reason: {reason}\n💰 Fee: ₹{provider.fee}"
     }
   ],
-  "confirmationTemplate": "✅ Your appointment has been confirmed!\n\n🆔 Appointment ID: {bookingId}\n👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n💰 Consultation Fee: ₹{provider.fee}\n📍 {businessName}\n🔑 Booking Code: {bookingCode}\n\nReply HERE when you arrive at the clinic.\nReply STATUS anytime to check your appointment."
+  "confirmationTemplate": "✅ Your appointment has been confirmed!\n\n🆔 Appointment ID: {bookingId}\n👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n💰 Consultation Fee: ₹{provider.fee}\n📍 {businessName}, {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply HERE when you arrive at the clinic.\nReply STATUS anytime to check your appointment."
 }

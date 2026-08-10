@@ -877,6 +877,35 @@
         <input type="password" id="loginPassword" class="form-input" autocomplete="current-password" required />
       </div>
       <button type="submit" class="btn-primary" id="loginSubmitBtn" style="padding:10px; text-align:center;">Sign in</button>
+      <button type="button" class="btn-link" id="showForgotPasswordBtn" style="font-size:12px; align-self:center;">Forgot password?</button>
+    </form>
+
+    <!-- Section 6: self-serve password reset — request step. -->
+    <form id="forgotPasswordForm" class="card" style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
+      <div>
+        <div style="font-size:20px; font-weight:700;">Reset your password</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:2px;">We'll send a reset link to your email if an account exists.</div>
+      </div>
+      <div id="forgotPasswordMessage" style="display:none; background:#dcfce7; color:#166534; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #bbf7d0;"></div>
+      <div>
+        <label class="form-label">Email</label>
+        <input type="email" id="forgotPasswordEmail" class="form-input" autocomplete="username" required />
+      </div>
+      <button type="submit" class="btn-primary" id="forgotPasswordSubmitBtn" style="padding:10px; text-align:center;">Send reset link</button>
+      <button type="button" class="btn-link" id="backToLoginBtn" style="font-size:12px; align-self:center;">Back to sign in</button>
+    </form>
+
+    <!-- Section 6: self-serve password reset — completion step, reached via the emailed link's ?resetToken=... -->
+    <form id="resetPasswordForm" class="card" style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
+      <div>
+        <div style="font-size:20px; font-weight:700;">Set a new password</div>
+      </div>
+      <div id="resetPasswordError" style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;"></div>
+      <div>
+        <label class="form-label">New password</label>
+        <input type="password" id="resetPasswordNew" class="form-input" autocomplete="new-password" minlength="8" required />
+      </div>
+      <button type="submit" class="btn-primary" id="resetPasswordSubmitBtn" style="padding:10px; text-align:center;">Set new password</button>
     </form>
   </div>
 
@@ -909,6 +938,9 @@
       </div>
 
       <button class="btn-secondary" id="refreshBtn">↻ Refresh</button>
+      <span id="liveIndicator" title="Live updates" style="font-size:11px; color:var(--muted); display:flex; align-items:center; gap:4px;">
+        <span id="liveDot" style="width:7px; height:7px; border-radius:50%; background:#9ca3af; display:inline-block;"></span> Live
+      </span>
       <span id="currentUserLabel" style="font-size:12px; color:var(--muted);"></span>
       <button class="btn-link" id="logoutBtn">Log out</button>
     </div>
@@ -1169,6 +1201,38 @@
       <div id="analyticsBody"><div class="empty">Loading…</div></div>
     </div>
 
+    <!-- ── Support Requests (both roles; provider sees only their own business) ── -->
+    <div class="card" id="supportRequestsCard">
+      <div class="card-header">
+        <span class="card-title">🆘 Support Requests <span class="count-badge" id="supportRequestsCountBadge">—</span></span>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        A customer asked for a human twice in the same conversation. The bot can't connect them directly, but every one of these lands here so someone real can follow up.
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>When (IST)</th><th>Customer</th><th>Business</th><th>Message</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="supportRequestsList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Feedback (both roles; provider sees only their own business) ── -->
+    <div class="card" id="feedbackCard">
+      <div class="card-header">
+        <span class="card-title">💬 Feedback <span class="count-badge" id="feedbackCountBadge">—</span></span>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Collected after a provider marks a booking complete — the bot asks once, no repeated nudging.
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>When (IST)</th><th>Customer</th><th>Booking</th><th>Business</th><th>Rating</th><th>Comment</th></tr></thead>
+          <tbody id="feedbackList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── Knowledge Base (both roles; provider sees only their own business) ── -->
     <div class="card" id="knowledgeCard">
       <div class="card-header">
@@ -1222,13 +1286,27 @@
       </div>
       <div class="avail-add">
         <input type="date" id="blockDate" />
-        <input type="time" id="blockTime" placeholder="Time (optional)" />
+        <input type="time" id="blockTime" placeholder="Start (optional)" title="Start time — leave blank to block the whole day" />
+        <span style="color:var(--muted); font-size:13px;">to</span>
+        <input type="time" id="blockEndTime" placeholder="End" title="End time — leave blank to block just the start time" />
         <input type="text" id="blockReason" placeholder="Reason (optional)" style="min-width:190px;" />
-        <button class="btn-primary" id="addBlockBtn">Block slot</button>
+        <button class="btn-primary" id="addBlockBtn">Block</button>
       </div>
-      <div class="note">Leave the time blank to block the entire day. Blocks apply immediately to the WhatsApp bot's
-        available slots.</div>
+      <div class="note">Leave both times blank to block the entire day. Set a start and end to block a range (e.g. 2:30–3:40 excludes every slot in between, not just one). Leave end blank with a start set to block just that one slot. Applies immediately to the WhatsApp bot's available slots.</div>
+      <div id="blockConflictWarning" style="display:none; background:#fff7ed; color:#9a3412; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid #fed7aa; font-size:13px; margin-bottom:10px;"></div>
       <div class="block-list" id="blockList"></div>
+    </div>
+
+    <!-- ── PROVIDER VIEW: Google Calendar sync (Section 10) ── -->
+    <div class="card" id="calendarCard">
+      <div class="card-header">
+        <span class="card-title">📆 Calendar Sync</span>
+      </div>
+      <div id="calendarStatusRow" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span id="calendarStatusText" style="font-size:13px; color:var(--muted);">Loading…</span>
+        <div id="calendarActions"></div>
+      </div>
+      <div class="note">Connecting syncs every confirmed booking to this provider's own Google Calendar automatically — a cancellation removes the event, a reschedule moves it. One-way only: an event added directly in Google Calendar doesn't yet block a slot here.</div>
     </div>
 
     <!-- Modal for Workflow Add/Edit -->
@@ -1381,8 +1459,24 @@
     }
 
     function statusBadge(status) {
-      const icon = { booked: "🔵", arrived: "✅", cancelled: "❌", rescheduled: "📅" }[status] || "";
+      const icon = { booked: "🔵", arrived: "✅", cancelled: "❌", rescheduled: "📅", serving: "▶️", done: "🏁" }[status] || "";
       return `<span class="status-badge status-${escapeHtml(status)}">${icon} ${escapeHtml(status)}</span>`;
+    }
+
+    // Section 9.8 — payment_status is only meaningful for a workflow that
+    // has requiresPayment set; "not_required" (the default for every other
+    // booking) renders as a plain dash rather than a badge, so payment-free
+    // businesses don't get a wall of identical "not required" chips.
+    function paymentStatusBadge(paymentStatus) {
+      if (!paymentStatus || paymentStatus === "not_required") return `<span style="color:var(--muted);">—</span>`;
+      const style = {
+        pending: { icon: "⏳", color: "#d97706" },
+        paid: { icon: "✅", color: "#16a34a" },
+        failed: { icon: "⚠️", color: "var(--danger)" },
+        refunded: { icon: "↩️", color: "#6366f1" },
+        partially_refunded: { icon: "↩️", color: "#6366f1" },
+      }[paymentStatus] || { icon: "", color: "var(--muted)" };
+      return `<span style="font-size:12px; font-weight:600; color:${style.color};">${style.icon} ${escapeHtml(paymentStatus.replace(/_/g, " "))}</span>`;
     }
 
     function formatIST(ms) {
@@ -1424,6 +1518,7 @@
           { label: "Doctor", render: (b) => escapeHtml(b.providerName) || "—" },
           { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
           { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
+          { label: "Payment", render: (b) => paymentStatusBadge(b.paymentStatus) },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1436,6 +1531,7 @@
           { label: "Stylist", render: (b) => escapeHtml(b.providerName) || "—" },
           { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
           { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
+          { label: "Payment", render: (b) => paymentStatusBadge(b.paymentStatus) },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1448,6 +1544,7 @@
           { label: "Artist", render: (b) => escapeHtml(b.providerName) || "—" },
           { label: "Date", render: (b) => escapeHtml(b.visitDateLabel || b.visitDate) || "—" },
           { label: "Time", render: (b) => escapeHtml(b.visitTime) || "—" },
+          { label: "Payment", render: (b) => paymentStatusBadge(b.paymentStatus) },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1462,6 +1559,7 @@
           { label: "Check-in", render: (b) => escapeHtml(b.checkInIso) || "—" },
           { label: "Check-out", render: (b) => escapeHtml(addDaysToIso(b.checkInIso, Number(b.nights) || 0)) || "—" },
           { label: "Nights", render: (b) => escapeHtml(b.nights) || "—" },
+          { label: "Payment", render: (b) => paymentStatusBadge(b.paymentStatus) },
           { label: "Status", render: (b) => statusBadge(b.status) },
           { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
         ],
@@ -1475,6 +1573,7 @@
         { label: "Customer", render: (b) => escapeHtml(b.customerName) || "—" },
         { label: "Provider", render: (b) => escapeHtml(b.providerName) || "—" },
         { label: "When", render: (b) => escapeHtml(whenGeneric(b)) },
+        { label: "Payment", render: (b) => paymentStatusBadge(b.paymentStatus) },
         { label: "Status", render: (b) => statusBadge(b.status) },
         { label: "Booked At (IST)", render: (b) => formatIST(b.createdAt) },
       ],
@@ -1649,8 +1748,44 @@
       document.getElementById("adminAuditCard").style.display = isAdmin ? "" : "none";
       document.getElementById("providerBookingsCard").style.display = isAdmin ? "none" : "";
       document.getElementById("availabilityCard").style.display = isAdmin ? "none" : "";
+      document.getElementById("calendarCard").style.display = isAdmin ? "none" : "";
       requestAnimationFrame(updateSlider);
       loadAll();
+    }
+
+    // Section 9.8 — resolves a booking's paid payment (payments isn't
+    // preloaded into every booking row, so this looks it up on demand
+    // rather than growing the bookings payload) then issues a manual
+    // refund through the escape-hatch route. Shared by both the
+    // provider and admin booking tables.
+    async function manualRefundBooking(bookingId, btn, refresh) {
+      btn.disabled = true;
+      try {
+        const allPayments = await api("/api/dashboard/payments");
+        const paid = allPayments.find((p) => p.bookingId === bookingId && p.status === "paid");
+        if (!paid) {
+          showError("No paid payment found for this booking — it may have already been refunded.");
+          return;
+        }
+        const rupees = paid.amount / 100;
+        const input = prompt(`Refund amount in ₹ (up to ₹${rupees}). Leave blank for a full refund.`, "");
+        if (input === null) return; // cancelled
+        const amount = input.trim() === "" ? undefined : Number(input.trim());
+        if (amount !== undefined && (!Number.isFinite(amount) || amount <= 0 || amount > rupees)) {
+          showError(`Refund amount must be a number between 0 and ₹${rupees}.`);
+          return;
+        }
+        if (!confirm(`Refund ₹${amount ?? rupees} to the customer?`)) return;
+        await api(`/api/dashboard/payments/${paid.id}/refund`, {
+          method: "POST",
+          body: JSON.stringify(amount !== undefined ? { amount } : {}),
+        });
+        await refresh();
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     /* ─────────────────────────────────────────────────────
@@ -1673,17 +1808,64 @@
         container.innerHTML = `<div class="empty">No bookings match the current filters.</div>`;
       } else {
         const rows = filtered.map((b) => {
-          const actionable = b.status !== "cancelled";
+          const actionable = b.status !== "cancelled" && b.status !== "done";
+          // Serve/Complete only make sense for a time-slot booking (not a
+          // hotel stay) that isn't already finished/cancelled — this is
+          // Section 3's queue: marking one "done" is what shifts everyone
+          // behind it down a position on their next STATUS check.
+          const queueActions = actionable && b.visitTime
+            ? (b.status === "serving"
+                ? `<button class="btn-secondary btn-complete-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Mark done">✅ Complete</button>`
+                : `<button class="btn-secondary btn-serve-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Start serving">▶️ Serve</button>`)
+            : "";
+          // Section 9.8 — the manual refund escape hatch: only offered
+          // when a payment actually cleared, for the cases the automatic
+          // cancellation-triggered refund doesn't cover (a goodwill refund
+          // outside the stated policy, a payment stuck in a state the
+          // webhook never resolved).
+          const refundAction = b.paymentStatus === "paid"
+            ? `<button class="btn-secondary btn-refund-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Manually issue a refund">💰 Refund</button>`
+            : "";
           const actions = actionable
-            ? `<button class="btn-danger btn-cancel-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Cancel & notify customer">❌ Cancel</button>
+            ? `${queueActions}${refundAction}<button class="btn-danger btn-cancel-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Cancel & notify customer">❌ Cancel</button>
                <button class="btn-secondary btn-reschedule-booking" data-id="${b.id}" data-name="${escapeHtml(b.customerName||'')}" data-bid="${escapeHtml(b.bookingId)}" style="padding:3px 8px;font-size:12px;" title="Reschedule & notify customer">📅 Reschedule</button>`
-            : `<span style="font-size:12px;color:var(--muted);">—</span>`;
+            : refundAction || `<span style="font-size:12px;color:var(--muted);">—</span>`;
           return `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}<td style="white-space:nowrap;">${actions}</td></tr>`;
         }).join("");
         container.innerHTML = `<table>
         <thead><tr>${profile.columns.map((col) => `<th>${col.label}</th>`).join("")}<th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
+
+        // Wire serve/complete buttons (Section 3's queue + Section 4's
+        // completion note). Completing prompts for an optional note —
+        // sent to the customer along with the feedback request.
+        container.querySelectorAll(".btn-serve-booking, .btn-complete-booking").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const action = btn.classList.contains("btn-serve-booking") ? "serve" : "complete";
+            let note;
+            if (action === "complete") {
+              note = prompt("Optional note for the customer (e.g. follow-up care, next-visit advice) — sent along with a feedback request:") ?? "";
+              if (note === null) return;
+            }
+            btn.disabled = true;
+            try {
+              await api(`/api/dashboard/bookings/${btn.dataset.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ action, note: note || undefined }),
+              });
+              await loadBookings();
+            } catch (err) {
+              showError(err.message);
+              btn.disabled = false;
+            }
+          });
+        });
+
+        // Wire refund buttons
+        container.querySelectorAll(".btn-refund-booking").forEach((btn) => {
+          btn.addEventListener("click", () => manualRefundBooking(Number(btn.dataset.id), btn, loadBookings));
+        });
 
         // Wire cancel buttons
         container.querySelectorAll(".btn-cancel-booking").forEach((btn) => {
@@ -1748,13 +1930,14 @@
         <td>${escapeHtml(b.customerName) || "—"}</td>
         <td>${escapeHtml(providerLabel(b.workflowId, b.providerId))}</td>
         <td>${escapeHtml(whenGeneric(b))}</td>
+        <td>${paymentStatusBadge(b.paymentStatus)}</td>
         <td>${statusBadge(b.status)}</td>
         <td>${formatIST(b.createdAt)}</td>
       </tr>`).join("");
         container.innerHTML = `<table>
         <thead><tr>
           <th>Business</th><th>Booking ID</th><th>Customer</th>
-          <th>Provider</th><th>When</th><th>Status</th><th>Booked At (IST)</th>
+          <th>Provider</th><th>When</th><th>Payment</th><th>Status</th><th>Booked At (IST)</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
@@ -1797,11 +1980,18 @@
         list.innerHTML = `<div class="empty">No availability blocks set.</div>`;
         return;
       }
-      list.innerHTML = blocks.map((b) => `
+      list.innerHTML = blocks.map((b) => {
+        const when = !b.time
+          ? " (whole day)"
+          : b.endTime
+          ? ` from ${escapeHtml(b.time)} to ${escapeHtml(b.endTime)}`
+          : ` at ${escapeHtml(b.time)}`;
+        return `
       <div class="block-item">
-        <span>${escapeHtml(b.date)}${b.time ? " at " + escapeHtml(b.time) : " (whole day)"}${b.reason ? " — " + escapeHtml(b.reason) : ""}</span>
+        <span>${escapeHtml(b.date)}${when}${b.reason ? " — " + escapeHtml(b.reason) : ""}</span>
         <button class="btn-danger" data-block-id="${b.id}">Remove</button>
-      </div>`).join("");
+      </div>`;
+      }).join("");
 
       list.querySelectorAll("[data-block-id]").forEach((btn) => {
         btn.addEventListener("click", async () => {
@@ -1811,6 +2001,85 @@
           } catch (err) { showError(err.message); }
         });
       });
+    }
+
+    // Section 10 — same scope boundary as Availability above: hotel rooms
+    // have no clean single-event shape yet (see calendarSync.js), so the
+    // card mirrors availabilityCard's own supportsAvailability gate.
+    async function loadCalendarStatus() {
+      const provider = selectedProvider();
+      const card = document.getElementById("calendarCard");
+      if (!provider) return;
+
+      if (!provider.supportsAvailability) { card.style.display = "none"; return; }
+      card.style.display = "";
+
+      const statusText = document.getElementById("calendarStatusText");
+      const actions = document.getElementById("calendarActions");
+      statusText.textContent = "Loading…";
+      actions.innerHTML = "";
+
+      let data;
+      try {
+        data = await api(`/api/dashboard/calendar/status?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`);
+      } catch (err) {
+        statusText.textContent = `Couldn't load calendar status: ${err.message}`;
+        return;
+      }
+
+      if (!data.configured) {
+        statusText.textContent = "Google Calendar isn't set up on this server yet — ask an admin to configure it.";
+        return;
+      }
+
+      const connectUrl = `/api/dashboard/calendar/connect?workflowId=${encodeURIComponent(provider.workflowId)}&providerId=${encodeURIComponent(provider.providerId)}`;
+      if (!data.connection || data.connection.status === "disconnected") {
+        statusText.textContent = "Not connected.";
+        actions.innerHTML = `<a class="btn-primary" href="${connectUrl}" style="padding:4px 10px; font-size:12px; text-decoration:none; display:inline-block;">Connect Google Calendar</a>`;
+        return;
+      }
+
+      if (data.connection.status === "needs_reconnect") {
+        statusText.innerHTML = `<span style="color:var(--danger); font-weight:600;">⚠️ Needs reconnecting</span> — Google Calendar access was revoked or expired.`;
+        actions.innerHTML = `<a class="btn-primary" href="${connectUrl}" style="padding:4px 10px; font-size:12px; text-decoration:none; display:inline-block;">Reconnect</a>`;
+        return;
+      }
+
+      statusText.innerHTML = `<span style="color:#16a34a; font-weight:600;">✅ Connected</span> since ${formatIST(data.connection.createdAt)}`;
+      actions.innerHTML = `<button class="btn-danger" id="disconnectCalendarBtn" style="padding:4px 10px; font-size:12px;">Disconnect</button>`;
+      document.getElementById("disconnectCalendarBtn").addEventListener("click", async (e) => {
+        if (!confirm("Disconnect Google Calendar? New/updated bookings will stop syncing until reconnected.")) return;
+        e.target.disabled = true;
+        try {
+          await api("/api/dashboard/calendar/disconnect", {
+            method: "POST",
+            body: JSON.stringify({ workflowId: provider.workflowId, providerId: provider.providerId }),
+          });
+          await loadCalendarStatus();
+        } catch (err) {
+          showError(err.message);
+          e.target.disabled = false;
+        }
+      });
+    }
+
+    // The OAuth callback (server.js) redirects the top-level browser back
+    // here with ?calendar=connected|error — a real page reload, so this
+    // has to be read once on initial load, not via the fetch-based `api()`
+    // helper. Strips the query params afterward so a refresh doesn't
+    // re-show the same toast.
+    function handleCalendarOAuthRedirect() {
+      const params = new URLSearchParams(location.search);
+      if (!params.has("calendar")) return;
+      if (params.get("calendar") === "connected") {
+        showError(""); // clear any stale error
+      } else if (params.get("calendar") === "error") {
+        showError(`Google Calendar connection failed: ${params.get("message") || "unknown error"}`);
+      }
+      const url = new URL(location.href);
+      url.searchParams.delete("calendar");
+      url.searchParams.delete("message");
+      history.replaceState({}, "", url.toString());
     }
 
     async function loadProviders() {
@@ -1953,10 +2222,25 @@
       </div>`;
     }
 
+    function responseTimeBadge(rt) {
+      if (!rt || rt.sampleSize === 0) return "";
+      // Green under ~2s (Section 0's target), amber to 4s, red beyond —
+      // this is what makes a latency regression visible on the dashboard
+      // instead of only felt by customers.
+      const color = (ms) => (ms == null ? "var(--muted)" : ms < 2000 ? "#16a34a" : ms < 4000 ? "#d97706" : "var(--danger)");
+      return `<div style="display:flex; gap:16px; align-items:center; margin-bottom:16px; padding:10px 14px; background:#f8f8fb; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:12px;">
+        <span style="font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);">Reply time</span>
+        <span>p50 <b style="color:${color(rt.p50)};">${rt.p50 ?? "—"}ms</b></span>
+        <span>p95 <b style="color:${color(rt.p95)};">${rt.p95 ?? "—"}ms</b></span>
+        <span style="color:var(--subtle);">max ${rt.max ?? "—"}ms · ${rt.sampleSize} samples (since last restart)</span>
+      </div>`;
+    }
+
     function renderAnalytics(a) {
       const body = document.getElementById("analyticsBody");
+      const rtBadge = responseTimeBadge(a.responseTime);
       if (a.total === 0) {
-        body.innerHTML = `<div class="empty">No bookings yet — analytics appear here as bookings come in.</div>`;
+        body.innerHTML = `${rtBadge}<div class="empty">No bookings yet — analytics appear here as bookings come in.</div>`;
         return;
       }
 
@@ -1996,7 +2280,15 @@
         : `<span style="font-size:22px; font-weight:700; color:${a.noShowRate > 25 ? "var(--danger)" : "#16a34a"};">${a.noShowRate}%</span>
            <span style="font-size:11px; color:var(--muted);"> of ${a.noShowSampleSize} past</span>`;
 
+      // Section 4.4 — rolled in next to no-show, same "only meaningful
+      // once there's real data" treatment rather than showing a fake 0.
+      const ratingDisplay = a.avgRating === null
+        ? `<span style="font-size:12px; color:var(--muted);">No feedback yet</span>`
+        : `<span style="font-size:22px; font-weight:700; color:#d97706;">⭐ ${a.avgRating}</span>
+           <span style="font-size:11px; color:var(--muted);"> from ${a.ratingSampleSize} rating${a.ratingSampleSize === 1 ? "" : "s"}</span>`;
+
       body.innerHTML = `
+        ${rtBadge}
         <div style="margin-bottom:18px;">
           <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Bookings received</div>
           <div style="display:flex; gap:2px; align-items:flex-end;">${trend}</div>
@@ -2019,6 +2311,17 @@
             <div style="font-size:11px; color:var(--subtle); margin-top:6px; line-height:1.4;">
               A past booking never marked "arrived". The bot only learns attendance when a customer texts HERE, so treat this as a floor, not an exact figure.
             </div>
+          </div>
+          <div>
+            <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Average rating</div>
+            <div>${ratingDisplay}</div>
+          </div>
+          <div>
+            <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Revenue collected</div>
+            ${a.paidBookingCount > 0
+              ? `<span style="font-size:22px; font-weight:700; color:#16a34a;">₹${a.revenue.toLocaleString("en-IN")}</span>
+                 <span style="font-size:11px; color:var(--muted);"> from ${a.paidBookingCount} paid booking${a.paidBookingCount === 1 ? "" : "s"}</span>`
+              : `<span style="font-size:12px; color:var(--muted);">No payments collected yet</span>`}
           </div>
         </div>
         ${providerRows}`;
@@ -2163,6 +2466,73 @@
       renderKnowledge();
     }
 
+    /* ─────────────────────────────────────────────────────
+       Feedback — Section 4
+    ───────────────────────────────────────────────────── */
+    let feedbackList = [];
+
+    async function loadFeedback() {
+      feedbackList = await api("/api/dashboard/feedback");
+      renderFeedback();
+    }
+
+    function renderFeedback() {
+      document.getElementById("feedbackCountBadge").textContent = feedbackList.length;
+      const tbody = document.getElementById("feedbackList");
+      if (feedbackList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">No feedback yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = feedbackList.map((f) => `<tr>
+        <td>${formatIST(f.createdAt)}</td>
+        <td>${escapeHtml(f.waId)}</td>
+        <td>${escapeHtml(f.bookingLabel) || "—"}</td>
+        <td>${escapeHtml(f.workflowId ? workflowLabel(f.workflowId) : "—")}</td>
+        <td>${f.rating ? "⭐".repeat(f.rating) : "—"}</td>
+        <td style="white-space:normal; max-width:320px;">${escapeHtml(f.comment) || "—"}</td>
+      </tr>`).join("");
+    }
+
+    /* ─────────────────────────────────────────────────────
+       Support Requests — human escalation lands here (1.4)
+    ───────────────────────────────────────────────────── */
+    let supportRequestsList = [];
+
+    async function loadSupportRequests() {
+      supportRequestsList = await api("/api/dashboard/support-requests");
+      renderSupportRequests();
+    }
+
+    function renderSupportRequests() {
+      const open = supportRequestsList.filter((r) => !r.resolved).length;
+      document.getElementById("supportRequestsCountBadge").textContent = open > 0 ? `${open} open` : "0 open";
+      const tbody = document.getElementById("supportRequestsList");
+      if (supportRequestsList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">No support requests — nothing escalated yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = supportRequestsList.map((r) => `<tr>
+        <td>${formatIST(r.createdAt)}</td>
+        <td>${escapeHtml(r.waId)}</td>
+        <td>${escapeHtml(r.workflowId ? workflowLabel(r.workflowId) : "—")}</td>
+        <td style="white-space:normal; max-width:320px;">${escapeHtml(r.message)}</td>
+        <td>${r.resolved ? '<span class="status-badge status-arrived">Resolved</span>' : '<span class="status-badge status-booked">Open</span>'}</td>
+        <td><button class="btn-secondary btn-toggle-support" data-id="${r.id}" data-resolved="${r.resolved}" style="padding:4px 8px; font-size:12px;">${r.resolved ? "Reopen" : "Mark resolved"}</button></td>
+      </tr>`).join("");
+
+      tbody.querySelectorAll(".btn-toggle-support").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await api(`/api/dashboard/support-requests/${btn.dataset.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ resolved: btn.dataset.resolved !== "true" }),
+            });
+            await loadSupportRequests();
+          } catch (err) { showError(err.message); }
+        });
+      });
+    }
+
     function renderKnowledge() {
       document.getElementById("knowledgeCountBadge").textContent = knowledgeDocs.length;
       const tbody = document.getElementById("knowledgeList");
@@ -2225,9 +2595,9 @@
       applyProfileTheme(selectedProvider());
       try {
         if (role === "admin") {
-          await Promise.all([loadAllBookings(), loadWorkflows(), loadAuditLog(), loadUsers(), loadKnowledge(), loadTemplates(), loadAnalytics()]);
+          await Promise.all([loadAllBookings(), loadWorkflows(), loadAuditLog(), loadUsers(), loadKnowledge(), loadTemplates(), loadAnalytics(), loadSupportRequests(), loadFeedback()]);
         } else {
-          await Promise.all([loadBookings(), loadAvailability(), loadKnowledge(), loadAnalytics()]);
+          await Promise.all([loadBookings(), loadAvailability(), loadCalendarStatus(), loadKnowledge(), loadAnalytics(), loadSupportRequests(), loadFeedback()]);
         }
       } catch (err) {
         showError(err.message);
@@ -2510,23 +2880,38 @@
       if (!provider) return;
       const date = document.getElementById("blockDate").value;
       const time = document.getElementById("blockTime").value;
+      const endTime = document.getElementById("blockEndTime").value;
       const reason = document.getElementById("blockReason").value;
+      const warningEl = document.getElementById("blockConflictWarning");
+      warningEl.style.display = "none";
       if (!date) { showError("Pick a date to block first."); return; }
+      if (endTime && !time) { showError("Set a start time too, or clear the end time to block the whole day."); return; }
       try {
-        await api("/api/dashboard/availability", {
+        const result = await api("/api/dashboard/availability", {
           method: "POST",
           body: JSON.stringify({
             workflowId: provider.workflowId,
             providerId: provider.providerId,
             date,
             time: time || null,
+            endTime: endTime || null,
             reason: reason || null,
           }),
         });
         document.getElementById("blockDate").value = "";
         document.getElementById("blockTime").value = "";
+        document.getElementById("blockEndTime").value = "";
         document.getElementById("blockReason").value = "";
         await loadAvailability();
+
+        // Advisory only — the block was already created. This just tells
+        // the provider what it now overlaps so they can decide whether to
+        // also cancel/reschedule those bookings themselves (Section 2.4).
+        if (result.conflictingBookings?.length > 0) {
+          const names = result.conflictingBookings.map((b) => `${escapeHtml(b.customerName || b.bookingId)} at ${escapeHtml(b.visitTime)}`).join(", ");
+          warningEl.textContent = `Heads up: this block overlaps ${result.conflictingBookings.length} existing booking(s) — ${names}. They were NOT automatically cancelled.`;
+          warningEl.style.display = "block";
+        }
       } catch (err) { showError(err.message); }
     });
 
@@ -2788,15 +3173,85 @@
     ───────────────────────────────────────────────────── */
     let currentUser = null;
 
-    function showLogin() {
+function showLogin() {
       document.getElementById("appShell").style.display = "none";
       document.getElementById("loginScreen").style.display = "flex";
+      document.getElementById("loginForm").style.display = "flex";
+      document.getElementById("forgotPasswordForm").style.display = "none";
+      document.getElementById("resetPasswordForm").style.display = "none";
+    }
+
+    function showForgotPassword() {
+      document.getElementById("loginForm").style.display = "none";
+      document.getElementById("resetPasswordForm").style.display = "none";
+      document.getElementById("forgotPasswordForm").style.display = "flex";
+    }
+
+    function showResetPassword() {
+      document.getElementById("loginForm").style.display = "none";
+      document.getElementById("forgotPasswordForm").style.display = "none";
+      document.getElementById("resetPasswordForm").style.display = "flex";
     }
 
     function showApp() {
       document.getElementById("loginScreen").style.display = "none";
       document.getElementById("appShell").style.display = "block";
     }
+
+    document.getElementById("showForgotPasswordBtn").addEventListener("click", showForgotPassword);
+    document.getElementById("backToLoginBtn").addEventListener("click", showLogin);
+
+    document.getElementById("forgotPasswordForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("forgotPasswordEmail").value.trim();
+      const btn = document.getElementById("forgotPasswordSubmitBtn");
+      const msgEl = document.getElementById("forgotPasswordMessage");
+      btn.disabled = true;
+      try {
+        const resp = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        msgEl.textContent = body.message || "If an account exists for that email, a reset link has been sent.";
+        msgEl.style.display = "block";
+      } catch (err) {
+        msgEl.textContent = "Something went wrong. Please try again.";
+        msgEl.style.display = "block";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("resetPasswordForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById("resetPasswordError");
+      errorEl.style.display = "none";
+      const newPassword = document.getElementById("resetPasswordNew").value;
+      const token = new URLSearchParams(window.location.search).get("resetToken");
+      const btn = document.getElementById("resetPasswordSubmitBtn");
+      btn.disabled = true;
+      try {
+        const resp = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, newPassword }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.error || "Could not reset password.");
+        // Drop the token from the URL so it can't be resubmitted/bookmarked, then let them sign in normally.
+        window.history.replaceState({}, "", window.location.pathname);
+        showLogin();
+        document.getElementById("loginError").textContent = "Password updated — sign in with your new password.";
+        document.getElementById("loginError").style.display = "block";
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     document.getElementById("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -2827,6 +3282,7 @@
 
     document.getElementById("logoutBtn").addEventListener("click", async () => {
       try { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); } catch {}
+      if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
       currentUser = null;
       showLogin();
     });
@@ -2847,11 +3303,50 @@
       currentUser = user;
       showApp();
       applyRoleVisibility();
+      handleCalendarOAuthRedirect();
       setRole("provider"); // always land on the caller's own data first
       await loadProviders().catch((err) => showError(err.message));
+      connectLiveEvents();
+    }
+
+    // Section 11 — a dashboard tab that's open no longer needs its own
+    // poll loop or a click on Refresh to learn about a new booking, a
+    // cancellation, or a support escalation. EventSource (not a
+    // hand-rolled WebSocket) — one-directional is all this needs, and it
+    // reconnects on its own with zero code here; `liveDot` just reflects
+    // that connection state so a provider staring at the dashboard has
+    // some confidence it's actually live, not silently stalled.
+    let liveEventSource = null;
+    function connectLiveEvents() {
+      if (liveEventSource) return; // never open a second stream on a re-login/redirect
+      liveEventSource = new EventSource("/api/dashboard/events");
+      const dot = document.getElementById("liveDot");
+
+      liveEventSource.onopen = () => { dot.style.background = "#16a34a"; };
+      liveEventSource.onerror = () => { dot.style.background = "#9ca3af"; }; // EventSource retries on its own; this only reflects the gap
+      const refreshRelevantViews = () => {
+        if (role === "admin") {
+          loadAllBookings().catch(() => {});
+          loadAnalytics().catch(() => {});
+        } else {
+          loadBookings().catch(() => {});
+          loadAnalytics().catch(() => {});
+        }
+      };
+      liveEventSource.addEventListener("booking.created", refreshRelevantViews);
+      liveEventSource.addEventListener("booking.updated", refreshRelevantViews);
+      liveEventSource.addEventListener("support_request.created", () => loadSupportRequests().catch(() => {}));
+      liveEventSource.addEventListener("feedback.created", () => loadFeedback().catch(() => {}));
     }
 
     (async function initAuth() {
+      // A password-reset email link lands here with ?resetToken=... —
+      // always show the reset form for that, regardless of whether this
+      // browser happens to already have a valid session cookie.
+      if (new URLSearchParams(window.location.search).get("resetToken")) {
+        showResetPassword();
+        return;
+      }
       try {
         const resp = await fetch("/api/auth/me", { credentials: "include" });
         if (!resp.ok) return showLogin();

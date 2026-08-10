@@ -1,0 +1,76 @@
+import { useEffect, useState, useCallback } from "react";
+import { useAuth } from "./lib/AuthContext";
+import { get } from "./lib/api";
+import { useLiveEvents } from "./lib/useLiveEvents";
+import LoginPage from "./pages/LoginPage";
+import ProviderView from "./pages/ProviderView";
+import AdminView from "./pages/AdminView";
+
+export default function App() {
+  const { user, logout } = useAuth();
+  const [providers, setProviders] = useState([]);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [mode, setMode] = useState("provider"); // view toggle — an admin ACCOUNT can still browse a single provider's own view, same as the vanilla dashboard
+  const [refreshKey, setRefreshKey] = useState(0);
+  const bump = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  useEffect(() => {
+    if (user === undefined || user === null) return;
+    get("/api/dashboard/providers").then((list) => {
+      setProviders(list);
+      if (list.length) setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
+    });
+  }, [user]);
+
+  const connected = useLiveEvents((type) => {
+    // Any booking/support/feedback event is relevant to at least one
+    // visible panel — a single shared refreshKey bump keeps this simple;
+    // each panel's own useEffect dependency on refreshKey re-fetches only
+    // itself, not a full-page reload.
+    if (type) bump();
+  });
+
+  if (user === undefined) return null; // still checking session
+  if (!user) return <LoginPage />;
+
+  const isAdminAccount = user.role === "admin";
+  const provider = providers.find((p) => `${p.workflowId}::${p.providerId}` === selectedKey);
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <span className="brand">BookPilot AI</span>
+
+        {isAdminAccount && (
+          <div className="role-toggle">
+            <button className={mode === "provider" ? "active" : ""} onClick={() => setMode("provider")}>🏢 Provider</button>
+            <button className={mode === "admin" ? "active" : ""} onClick={() => setMode("admin")}>👑 Admin</button>
+          </div>
+        )}
+
+        {mode === "provider" && (
+          <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ minWidth: 220 }}>
+            {providers.map((p) => (
+              <option key={`${p.workflowId}::${p.providerId}`} value={`${p.workflowId}::${p.providerId}`}>{p.workflowLabel} — {p.providerName}</option>
+            ))}
+          </select>
+        )}
+
+        <button className="btn-secondary" onClick={bump}>↻ Refresh</button>
+        <span className="live-indicator" title="Live updates">
+          <span className="live-dot" style={{ background: connected ? "var(--success)" : "var(--subtle)" }} /> Live
+        </span>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>{user.name || user.email} ({user.role})</span>
+        <button className="btn-link" onClick={logout}>Log out</button>
+      </header>
+
+      <main className="app-main">
+        {mode === "admin" && isAdminAccount ? (
+          <AdminView providers={providers} refreshKey={refreshKey} bump={bump} currentUserEmail={user.email} />
+        ) : (
+          <ProviderView provider={provider} providers={providers} refreshKey={refreshKey} bump={bump} />
+        )}
+      </main>
+    </div>
+  );
+}

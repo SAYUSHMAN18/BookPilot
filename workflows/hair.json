@@ -28,7 +28,8 @@
       "attribute": "Hair Stylist",
       "fee": 400,
       "address": "12 Brigade Road, Bangalore, Karnataka 560025",
-      "mapQuery": "Snip+and+Style+Salon+Brigade+Road+Bangalore"
+      "mapQuery": "Snip+and+Style+Salon+Brigade+Road+Bangalore",
+      "photo": "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&q=80"
     },
     {
       "id": "p2",
@@ -36,7 +37,8 @@
       "attribute": "Men's Grooming & Haircut",
       "fee": 300,
       "address": "45 Commercial Street, Bangalore, Karnataka 560001",
-      "mapQuery": "The+Barber+Co+Commercial+Street+Bangalore"
+      "mapQuery": "The+Barber+Co+Commercial+Street+Bangalore",
+      "photo": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=80"
     },
     {
       "id": "p3",
@@ -44,7 +46,8 @@
       "attribute": "UNISEX Haircut & Styling",
       "fee": 1000,
       "address": "UB City Mall, Vittal Mallya Road, Bangalore, Karnataka 560001",
-      "mapQuery": "TONI+GUY+UB+City+Mall+Bangalore"
+      "mapQuery": "TONI+GUY+UB+City+Mall+Bangalore",
+      "photo": "https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=800&q=80"
     }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
@@ -79,5 +82,5 @@
       "template": "💇 Stylist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
     }
   ],
-  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n\nReply STATUS anytime to check your appointment."
+  "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n📍 {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n\nReply STATUS anytime to check your appointment."
 }

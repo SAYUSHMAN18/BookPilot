@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    // Section 15 — deliberately NOT `checkJs: true` project-wide: this
+    // codebase is almost entirely un-annotated plain JS (no @types/express
+    // etc. installed either), and checking it wholesale would just produce
+    // noise from missing third-party type declarations, not real bugs.
+    // `// @ts-check` at the top of a file opts THAT file in — the standard
+    // incremental-adoption pattern for JSDoc typing — while leaving every
+    // other file exactly as untyped-but-working as it's always been.
+    // src/store/bookingStore.js is the current worked example.
+    "checkJs": false,
+    "target": "ES2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": ["src/**/*.js", "server.js", "tests/**/*.js"],
+  "exclude": ["node_modules", "frontend", "public/app", "data", "logs", "backups"]
+}
