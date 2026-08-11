@@ -1,12 +1,27 @@
 node_modules
 .env
+
+# Found live (production-readiness audit): these patterns were missing
+# their src/ prefix, so they silently never matched src/logs/ or
+# src/data/ — the app's ACTUAL log/DB paths (see src/infra/logger.js and
+# src/store/db.js) — while the repo's real database and logs sat
+# committed in git the entire time. Matching both the src/ paths this
+# project actually uses AND the bare paths, in case a future refactor
+# moves them back to the root.
 logs/*.log
 logs/*.jsonl
 logs/sessions.json
 logs/sessions.json.tmp
+src/logs/*.log
+src/logs/*.jsonl
+src/logs/sessions.json
+src/logs/sessions.json.tmp
 data/*.db
 data/*.db-wal
 data/*.db-shm
+src/data/*.db
+src/data/*.db-wal
+src/data/*.db-shm
 backups/
 
 # Section 13 — the React/Vite rewrite's build output (frontend/ is the
