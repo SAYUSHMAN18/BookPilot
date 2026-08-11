@@ -69,7 +69,7 @@ export default function AdminView({ providers, refreshKey, bump, currentUserEmai
       </div>
 
       <AnalyticsPanel refreshKey={refreshKey} />
-      <ManageBusinessesPanel refreshKey={refreshKey} />
+      <ManageBusinessesPanel refreshKey={refreshKey} bump={bump} />
       <ManageTeamPanel refreshKey={refreshKey} providers={providers} currentUserEmail={currentUserEmail} />
       <ApiKeysPanel refreshKey={refreshKey} />
       <SupportRequestsPanel refreshKey={refreshKey} workflowLabel={workflowLabel} />

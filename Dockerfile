@@ -39,7 +39,6 @@ RUN npm ci --omit=dev
 COPY server.js ./
 COPY src/ ./src/
 COPY workflows/ ./workflows/
-COPY public/dashboard.html ./public/dashboard.html
 COPY public/marketing/ ./public/marketing/
 COPY --from=frontend-builder /build/public/app ./public/app
 

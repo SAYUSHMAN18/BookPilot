@@ -165,17 +165,18 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === "production") {
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
-  // script-src needs 'unsafe-inline' because the dashboard's whole app is
-  // one inline <script> block, not an external .js file — so this CSP
-  // isn't the thing stopping an injected <script> from running (escapeHtml()
-  // in dashboard.html is what actually prevents that). What it still buys:
-  // no external script/iframe/object can be loaded from anywhere but this
-  // origin, and frame-ancestors blocks the whole page from being framed
-  // (clickjacking) elsewhere.
+  // style-src needs 'unsafe-inline' because the React app renders plenty of
+  // style={{...}} attributes (compiled to inline style="" on the DOM) — CSS
+  // can't inject executable script, so this is a much smaller concession
+  // than script-src would be. script-src itself has no 'unsafe-inline': the
+  // built app (public/app/) and marketing site both load JS from external
+  // files only (Item 4 removed the last inline <script> block, in the
+  // now-deleted public/dashboard.html), so an injected inline <script> is
+  // actually blocked here, not just discouraged.
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self' 'unsafe-inline'; " +
+      "font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; " +
       "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
   );
   next();
@@ -906,24 +907,16 @@ function listAllProviders() {
   return list;
 }
 
-// Public shell — the page itself carries no data; every fetch inside it
-// sends the session cookie and gets gated by requireAuth below. An
-// unauthenticated visitor sees only a login form.
+// Item 4 — /dashboard was the hand-rolled dashboard.html shell; that file
+// reached full feature parity in the React/Vite app (frontend/, built via
+// `npm run build` there into public/app/) and has been deleted, so old
+// links/bookmarks/the Google OAuth callback below just redirect to the
+// real thing now. No client-side router in the React app (it's a single
+// view that switches between Provider/Admin in-place), so no SPA-fallback
+// wildcard is needed beyond serving the built directory statically.
 app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+  res.redirect(302, "/app");
 });
-
-// Section 13 — the React/Vite rewrite (frontend/, built via `npm run
-// build` there into public/app/), served at a SEPARATE path from the
-// classic /dashboard above. Deliberately additive, not a replacement:
-// the hand-rolled dashboard keeps working exactly as it does today for
-// anyone using it, while /app gets a real shakeout before it's ever
-// considered the default. All the same /api/dashboard/* and /api/auth/*
-// routes back both — no server-side duplication, just two different UIs
-// on the same API. No client-side router in the React app (it's a
-// single view that switches between Provider/Admin in-place, same as
-// the classic dashboard's own role toggle), so no SPA-fallback wildcard
-// is needed beyond serving the built directory statically.
 app.use("/app", express.static(path.join(__dirname, "public", "app")));
 
 // Public marketing site (public/marketing/) — plain HTML/CSS/JS, same

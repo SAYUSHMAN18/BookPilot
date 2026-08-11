@@ -136,3 +136,25 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 .stat-tile .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 
 .filters-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+
+/* Item 4 — added for the workflow editor + marketplace modals ported from
+   the classic dashboard (public/dashboard.html never had these as
+   reusable classes either — inline-styled there); real shared classes
+   here since this rewrite has more than one modal that needs them. */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(17, 17, 27, 0.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto; z-index: 100;
+}
+.modal-card {
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-md);
+  padding: 22px 24px; width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 14px;
+}
+.form-label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 4px; }
+.form-input, .form-select, .form-textarea {
+  width: 100%; font-family: inherit; font-size: 13px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--card); color: var(--text);
+}
+.form-textarea { resize: vertical; }
+.form-group-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .form-group-row { grid-template-columns: 1fr; } }

@@ -1,49 +1,85 @@
 import { useEffect, useState } from "react";
-import { get } from "../lib/api";
+import { get, del } from "../lib/api";
+import WorkflowEditorModal from "./WorkflowEditorModal";
+import MarketplacePanel from "./MarketplacePanel";
 
-// Section 13 — deliberately read-only in this rewrite: the vanilla
-// dashboard's full add/edit workflow builder (hand-written JSON steps,
-// the AI-drafting modal, the templates marketplace) is a materially
-// larger, separate undertaking than porting the day-to-day
-// booking-management flows this rewrite prioritized. Editing a business's
-// configuration still works in the existing dashboard at /dashboard —
-// nothing was removed, just not yet duplicated here. Flagged explicitly,
-// not silently missing.
-export default function ManageBusinessesPanel({ refreshKey }) {
+// Item 4 — was deliberately read-only ("add/edit a business's steps and
+// providers from the classic dashboard for now" — see git history on this
+// file). Now has real parity with public/dashboard.html's Manage
+// Businesses + Marketplace sections: add/edit (with AI-generate) via
+// WorkflowEditorModal, delete here, and the template publish/install flow
+// via MarketplacePanel — the two features that panel's own comment named
+// as the actual gap.
+export default function ManageBusinessesPanel({ refreshKey, bump }) {
   const [workflows, setWorkflows] = useState({});
   const [error, setError] = useState("");
+  const [editorState, setEditorState] = useState(null); // null closed, {} = add, {...workflow} = edit
 
-  useEffect(() => {
-    get("/api/dashboard/workflows").then(setWorkflows).catch((err) => setError(err.message));
-  }, [refreshKey]);
+  async function load() {
+    try {
+      setWorkflows(await get("/api/dashboard/workflows"));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
 
   const list = Object.values(workflows);
 
+  async function handleDelete(id) {
+    if (!confirm(`Delete business "${id}"? This cannot be undone — existing bookings for it are kept, but it can no longer be booked.`)) return;
+    try {
+      await del(`/api/dashboard/workflows/${id}`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function handleSaved() {
+    setEditorState(null);
+    load();
+    bump?.(); // other panels (e.g. Bookings' provider dropdown) may reference workflows too
+  }
+
   return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-title">🏪 Manage Businesses</span>
-        <span className="count-badge">{list.length}</span>
+    <>
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">🏪 Manage Businesses <span className="count-badge">{list.length}</span></span>
+          <button className="btn-primary" onClick={() => setEditorState({})}>＋ Add Business</button>
+        </div>
+        {error && <div className="error-banner">{error}</div>}
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Business ID</th><th>Label</th><th>Description</th><th>Type/Providers</th><th>Actions</th></tr></thead>
+            <tbody>
+              {list.map((w) => (
+                <tr key={w.id}>
+                  <td>{w.id}</td>
+                  <td>{w.label}</td>
+                  <td style={{ whiteSpace: "normal", maxWidth: 320 }}>{w.description}</td>
+                  <td>{(w.providers?.length || 0) + (w.hotels?.reduce((n, h) => n + (h.rooms?.length || 0), 0) || 0)}</td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    <button className="btn-secondary" onClick={() => setEditorState(w)}>Edit</button>
+                    <button className="btn-danger" onClick={() => handleDelete(w.id)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-        Read-only in this view — add/edit a business's steps and providers from the classic dashboard at <a href="/dashboard">/dashboard</a> for now.
-      </div>
-      {error && <div className="error-banner">{error}</div>}
-      <div className="table-scroll">
-        <table>
-          <thead><tr><th>Business ID</th><th>Label</th><th>Description</th><th>Providers</th></tr></thead>
-          <tbody>
-            {list.map((w) => (
-              <tr key={w.id}>
-                <td>{w.id}</td>
-                <td>{w.label}</td>
-                <td style={{ whiteSpace: "normal", maxWidth: 360 }}>{w.description}</td>
-                <td>{(w.providers?.length || 0) + (w.hotels?.reduce((n, h) => n + (h.rooms?.length || 0), 0) || 0)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+
+      <MarketplacePanel workflows={workflows} refreshKey={refreshKey} onInstalled={handleSaved} />
+
+      {editorState !== null && (
+        <WorkflowEditorModal
+          workflow={Object.keys(editorState).length ? editorState : null}
+          onClose={() => setEditorState(null)}
+          onSaved={handleSaved}
+        />
+      )}
+    </>
   );
 }

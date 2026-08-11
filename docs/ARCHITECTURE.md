@@ -10,7 +10,8 @@ before changing code.
 
 One Node.js process (`server.js`) does everything: it's the WhatsApp
 webhook receiver, the provider/admin dashboard's API, and the static file
-server for `public/dashboard.html`. There's no queue, no separate worker
+server for the React dashboard (`public/app/`, built from `frontend/`).
+There's no queue, no separate worker
 process, no microservices — a single process is enough at this scale, and
 splitting it apart before there's a real reason to would just be
 distributed-systems complexity nobody's paying for yet. The two exceptions
@@ -81,15 +82,14 @@ workflows/*.json         Business definitions — one file per bookable
                         business type, loaded by src/engine/loadWorkflows.js.
                         Adding a new industry means adding a JSON file
                         here, not writing code.
-frontend/               Section 13's React/Vite dashboard rewrite — a
-                        separate npm project (its own package.json,
-                        node_modules) that builds into public/app/,
-                        served by server.js's express.static at /app.
-                        Talks to the exact same /api/dashboard/* and
-                        /api/auth/* routes public/dashboard.html uses;
-                        no server-side duplication, two UIs on one API.
-                        Deliberately additive — public/dashboard.html at
-                        /dashboard keeps working unchanged.
+frontend/               The React/Vite dashboard — a separate npm project
+                        (its own package.json, node_modules) that builds
+                        into public/app/, served by server.js's
+                        express.static at /app. This is the only
+                        dashboard (Item 4 deleted the original hand-rolled
+                        public/dashboard.html once this reached feature
+                        parity with it); GET /dashboard just 302s to /app
+                        for old links/bookmarks.
 tests/
   ai/ store/ engine/ infra/   Unit tests, mirroring src/'s split — a test
                         here targets one module (or a couple of tightly
