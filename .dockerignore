@@ -1,0 +1,14 @@
+node_modules
+frontend/node_modules
+.git
+.env
+.env.*
+!.env.example
+src/data
+src/logs
+backups
+public/app
+*.log
+*.jsonl
+.claude
+tests

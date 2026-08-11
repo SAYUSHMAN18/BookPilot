@@ -50,4 +50,20 @@ function isApiRateLimited(rawKey) {
   return recent.length > API_MAX_PER_WINDOW;
 }
 
-module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited };
+// Self-serve signup's own limit — keyed by IP only (there's no account yet
+// to key by email/id). Loose enough for a real business to retry a typo'd
+// form a few times, tight enough that scripting the public endpoint can't
+// mass-create tenants.
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+const SIGNUP_MAX_ATTEMPTS = 8;
+const signupHits = new Map(); // ip -> timestamps[]
+
+function isSignupRateLimited(ip) {
+  const now = Date.now();
+  const recent = (signupHits.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
+  recent.push(now);
+  signupHits.set(ip, recent);
+  return recent.length > SIGNUP_MAX_ATTEMPTS;
+}
+
+module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited };

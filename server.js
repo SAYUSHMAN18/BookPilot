@@ -66,7 +66,7 @@ const { labelToMinutes, formatLongDate, parseIsoDate } = require("./src/engine/d
 const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/infra/auth");
 const users = require("./src/store/userStore");
 const { recordAudit, listAudit } = require("./src/store/auditLog");
-const { isLoginRateLimited, isApiRateLimited } = require("./src/infra/rateLimit");
+const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited } = require("./src/infra/rateLimit");
 const { generateWorkflowFromDescription } = require("./src/ai/workflowGenerator");
 const knowledge = require("./src/store/knowledgeStore");
 const templates = require("./src/store/templateStore");
@@ -250,6 +250,20 @@ if (bootstrap?.bootstrapped) {
 const platformBootstrap = users.bootstrapPlatformAdminIfNeeded();
 if (platformBootstrap?.bootstrapped) {
   log("INFO", `Bootstrapped platform_admin account for ${platformBootstrap.email} from PLATFORM_ADMIN_BOOTSTRAP_EMAIL/PASSWORD.`);
+}
+
+// Found live (production-readiness audit): bootstrap only ever WARNS about
+// unset credentials or CONFIRMS a fresh bootstrap — a startup where the
+// account already existed from a PRIOR run and the bootstrap env vars are
+// STILL sitting in .env produced no signal at all. That's a real, easy
+// mistake (the "you can unset those now" message above is easy to miss or
+// forget), and it means a plaintext admin password lingers in .env
+// indefinitely for no reason once the account it was for already exists.
+if (!bootstrap?.bootstrapped && process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+  log("WARN", "ADMIN_BOOTSTRAP_PASSWORD is still set even though the admin account it bootstraps already exists — it's not doing anything anymore. Remove it from .env.");
+}
+if (!platformBootstrap?.bootstrapped && process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD) {
+  log("WARN", "PLATFORM_ADMIN_BOOTSTRAP_PASSWORD is still set even though a platform_admin account already exists — it's not doing anything anymore. Remove it from .env.");
 }
 
 // Crash instead of continuing in an unknown state; run under a process
@@ -675,6 +689,82 @@ function requireTenantId(req) {
   return req.user.tenantId;
 }
 
+// Self-serve signup — the missing link between the public marketing site
+// and the dashboard: until now only a platform_admin could create a
+// tenant (POST /api/platform/tenants). Creates the tenant AND its first
+// admin account in one request, then logs that admin straight in (same
+// session-cookie mechanism as /api/auth/login below) so "Get started"
+// lands the owner directly in their new dashboard, not back at a login
+// form for an account they just made.
+//
+// New tenants default to "pending" status (tenantStore.create's own
+// behavior, same as a platform_admin-created one) — deliberately NOT a
+// hard gate: requireAuth() only blocks "suspended"/"cancelled", so a
+// pending tenant's own admin can fully use the dashboard immediately.
+// "pending" exists for platform_admin's own visibility/review, not as a
+// signup approval bottleneck.
+app.post("/api/signup", (req, res) => {
+  if (!process.env.SESSION_SECRET) {
+    return res.status(500).json({ error: "Server misconfigured: SESSION_SECRET is not set." });
+  }
+  if (isSignupRateLimited(req.ip)) {
+    log("WARN", `Signup rate-limited for ${req.ip}`);
+    return res.status(429).json({ error: "Too many signup attempts. Try again in a while." });
+  }
+
+  const { businessName, ownerName, email, password } = req.body || {};
+  if (typeof businessName !== "string" || !businessName.trim()) {
+    return res.status(400).json({ error: "Business name is required." });
+  }
+  if (typeof email !== "string" || !email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+    return res.status(400).json({ error: "A valid email is required." });
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters." });
+  }
+
+  // Derive a URL-safe slug from the business name, same character rules
+  // POST /api/platform/tenants already enforces (lowercase, digits,
+  // dashes) — then de-duplicate against existing tenants by suffixing
+  // -2, -3, ... rather than rejecting the signup over a name collision a
+  // customer has no way to resolve themselves (unlike the platform_admin
+  // form, there's no separate "slug" field on this one).
+  const baseSlug = businessName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "business";
+  let slug = baseSlug;
+  for (let suffix = 2; tenantStore.getBySlug(slug); suffix++) {
+    slug = `${baseSlug}-${suffix}`;
+  }
+
+  let tenant;
+  try {
+    tenant = tenantStore.create({ name: businessName.trim(), slug, plan: "free", billingEmail: email.trim() });
+  } catch (err) {
+    if (err.code === "DUPLICATE_SLUG") return res.status(409).json({ error: "A business with a very similar name already exists — try a slightly different name." });
+    throw err;
+  }
+
+  let user;
+  try {
+    user = users.create({ email: email.trim(), password, role: "admin", name: (ownerName || "").trim() || null, tenantId: tenant.id });
+  } catch (err) {
+    if (err.code === "DUPLICATE_EMAIL") return res.status(409).json({ error: "An account already exists for that email — try logging in instead." });
+    throw err;
+  }
+
+  const token = createSessionToken({
+    uid: user.id,
+    email: user.email,
+    role: user.role,
+    name: user.name,
+    workflowId: user.workflowId,
+    providerId: user.providerId,
+  });
+  setSessionCookie(res, token);
+  recordAudit(tenant.id, user, "tenant.self_signup", { name: tenant.name, slug: tenant.slug });
+  log("INFO", `${user.email} self-signed-up and created tenant "${tenant.name}" (${tenant.slug})`);
+  res.status(201).json({ ok: true, user: { email: user.email, role: user.role, name: user.name, tenantId: user.tenantId } });
+});
+
 app.post("/api/auth/login", (req, res) => {
   if (!process.env.SESSION_SECRET) {
     return res.status(500).json({ error: "Server misconfigured: SESSION_SECRET is not set." });
@@ -835,6 +925,18 @@ app.get("/dashboard", (req, res) => {
 // the classic dashboard's own role toggle), so no SPA-fallback wildcard
 // is needed beyond serving the built directory statically.
 app.use("/app", express.static(path.join(__dirname, "public", "app")));
+
+// Public marketing site (public/marketing/) — plain HTML/CSS/JS, same
+// "static files served by Express" pattern as /dashboard and /app above,
+// no build step. This is now what "/" serves instead of the old
+// plain-text status line; the JSON health check moved to /healthz.
+app.use("/marketing", express.static(path.join(__dirname, "public", "marketing")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "marketing", "index.html"));
+});
+app.get("/signup", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "marketing", "signup.html"));
+});
 
 app.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
   const all = listAllProviders();
@@ -2029,10 +2131,6 @@ app.get("/api/v1/bookings/:bookingId", requireApiKey, (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", workflows: Object.keys(workflows), uptimeSeconds: process.uptime() });
-});
-
-app.get("/", (req, res) => {
-  res.type("text/plain").send(`BookPilot AI is running. Workflows loaded: ${Object.keys(workflows).join(", ")}. Messages arrive at POST /webhook.`);
 });
 
 // Anything that fell through every route above.

@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BookPilot AI — Turn WhatsApp Into Your Booking Desk</title>
+  <meta name="description" content="BookPilot AI answers, books, and reminds your customers automatically on WhatsApp — for salons, clinics, hotels, studios, and service shops. No app to install, nothing for customers to download." />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="canonical" href="/" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="BookPilot AI" />
+  <meta property="og:title" content="BookPilot AI — Turn WhatsApp Into Your Booking Desk" />
+  <meta property="og:description" content="AI answers, books, and reminds your customers automatically on WhatsApp — no app for them to install, nothing to download." />
+  <meta property="og:image" content="/marketing/og-image.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="BookPilot AI — Turn WhatsApp Into Your Booking Desk" />
+  <meta name="twitter:description" content="AI answers, books, and reminds your customers automatically on WhatsApp." />
+  <meta name="twitter:image" content="/marketing/og-image.svg" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📅</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/marketing/styles.css" />
+</head>
+<body>
+
+  <div class="grain"></div>
+  <div class="cursor-glow" id="cursorGlow"></div>
+
+  <!-- ============ NAV ============ -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#top" class="brand">
+        <span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#how">How it works</a>
+        <a href="#features">Features</a>
+        <a href="#demo">Live demo</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="nav-cta">
+        <a href="/app" class="btn btn-ghost">Log in</a>
+        <a href="/signup" class="btn btn-primary btn-magnetic"><span>Get started free</span></a>
+      </div>
+      <button class="nav-burger" id="navBurger" aria-label="Menu" aria-expanded="false" aria-controls="navMobile"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-mobile" id="navMobile" role="navigation">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#demo">Live demo</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="/app">Log in</a>
+      <a href="/signup" class="btn btn-primary">Get started free</a>
+    </div>
+  </header>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <div class="hero-glow hero-glow-1"></div>
+    <div class="hero-glow hero-glow-2"></div>
+    <div class="hero-inner">
+      <div class="hero-copy" data-reveal>
+        <div class="eyebrow"><span class="pulse-dot"></span> Now booking on WhatsApp — no app required</div>
+        <h1>
+          Your business,<br />
+          <span class="gradient-text">always open</span><br />
+          on WhatsApp.
+        </h1>
+        <p class="hero-sub">
+          BookPilot AI answers every WhatsApp message instantly, understands what a customer wants in
+          their own words, books the right slot, takes payment, and reminds them before they arrive —
+          so you stop losing bookings to a missed call.
+        </p>
+        <div class="hero-actions">
+          <a href="/signup" class="btn btn-primary btn-lg btn-magnetic"><span>Start free — no card needed</span></a>
+          <a href="#demo" class="btn btn-outline btn-lg">
+            <span class="play-ring"><span class="play-tri"></span></span>
+            See it in action
+          </a>
+        </div>
+        <div class="hero-trust">
+          <div class="avatars">
+            <span style="--i:0">💇</span><span style="--i:1">🏨</span><span style="--i:2">💊</span><span style="--i:3">💄</span><span style="--i:4">🚗</span>
+          </div>
+          <span>Built for salons, clinics, hotels, studios &amp; service shops</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" data-reveal>
+        <div class="phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="wa-header">
+              <div class="wa-avatar">💇</div>
+              <div>
+                <div class="wa-name">Snip &amp; Style</div>
+                <div class="wa-status" id="waStatus">online</div>
+              </div>
+            </div>
+            <div class="wa-body" id="waBody"></div>
+          </div>
+        </div>
+        <div class="floating-card fc-1">
+          <div class="fc-icon">✅</div>
+          <div><div class="fc-title">Booking confirmed</div><div class="fc-sub">Auto-synced to calendar</div></div>
+        </div>
+        <div class="floating-card fc-2">
+          <div class="fc-icon">⚡</div>
+          <div><div class="fc-title">6s avg. reply time</div><div class="fc-sub">24/7, every language</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stat-strip" data-reveal>
+      <div class="stat"><span class="stat-num" data-count="24">0</span><span>/7 always answering</span></div>
+      <div class="stat"><span class="stat-num" data-count="11">0</span><span>languages, incl. voice notes</span></div>
+      <div class="stat"><span class="stat-num" data-count="5">0</span><span>industries out of the box</span></div>
+      <div class="stat"><span class="stat-num" data-count="0">0</span><span>apps for your customer to install</span></div>
+    </div>
+  </section>
+
+  <!-- ============ PROBLEM / SOUND FAMILIAR ============ -->
+  <section class="problem" id="problem">
+    <div class="section-inner">
+      <h2 data-reveal>Sound familiar?</h2>
+      <p class="section-sub" data-reveal>Every missed message is a customer who books somewhere else instead.</p>
+      <div class="problem-grid">
+        <div class="problem-card" data-reveal>
+          <div class="problem-x">😤</div>
+          <h3>Customers message after hours</h3>
+          <p>and you don't see it until the slot's already gone.</p>
+        </div>
+        <div class="problem-card" data-reveal>
+          <div class="problem-x">📞</div>
+          <h3>Your staff is on the phone all day</h3>
+          <p>instead of doing the work that actually pays.</p>
+        </div>
+        <div class="problem-card" data-reveal>
+          <div class="problem-x">📋</div>
+          <h3>Double-bookings and no-shows</h3>
+          <p>because there's no single source of truth for who's coming when.</p>
+        </div>
+        <div class="problem-card" data-reveal>
+          <div class="problem-x">💸</div>
+          <h3>Chasing payment after the fact</h3>
+          <p>instead of collecting a deposit the moment they book.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="how" id="how">
+    <div class="section-inner">
+      <h2 data-reveal>Four steps. Zero apps.</h2>
+      <p class="section-sub" data-reveal>Your customer never leaves the WhatsApp chat they already have open.</p>
+      <div class="how-steps">
+        <div class="how-step" data-reveal>
+          <div class="how-num">01</div>
+          <h3>They message you</h3>
+          <p>"Need a haircut tomorrow evening" — typed, or a voice note, in any language they're comfortable in.</p>
+        </div>
+        <div class="how-step" data-reveal>
+          <div class="how-num">02</div>
+          <h3>AI understands &amp; guides</h3>
+          <p>BookPilot figures out what they want, shows real availability, and walks them to a confirmed slot.</p>
+        </div>
+        <div class="how-step" data-reveal>
+          <div class="how-num">03</div>
+          <h3>Payment &amp; confirmation</h3>
+          <p>An optional deposit link, an instant confirmation with your address and a booking code — done.</p>
+        </div>
+        <div class="how-step" data-reveal>
+          <div class="how-num">04</div>
+          <h3>You run the day from one screen</h3>
+          <p>Live queue, reminders sent automatically, and a reschedule/cancel handled without a phone call.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LIVE DEMO ============ -->
+  <section class="demo" id="demo">
+    <div class="section-inner">
+      <h2 data-reveal>Watch a real booking happen</h2>
+      <p class="section-sub" data-reveal>This is the exact conversation a customer has — replayed, not staged.</p>
+      <div class="demo-stage" data-reveal>
+        <div class="demo-phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="wa-header">
+              <div class="wa-avatar">💊</div>
+              <div>
+                <div class="wa-name">ABC Multispeciality Clinic</div>
+                <div class="wa-status">online</div>
+              </div>
+            </div>
+            <div class="wa-body" id="demoBody"></div>
+          </div>
+        </div>
+        <div class="demo-side">
+          <button class="btn btn-primary btn-lg" id="demoReplay"><span>▶ Replay the conversation</span></button>
+          <ul class="demo-points">
+            <li>✅ Understood a symptom, suggested the right doctor</li>
+            <li>✅ Tappable date &amp; time — no back-and-forth typing</li>
+            <li>✅ Confirmation with map link, sent instantly</li>
+          </ul>
+          <a href="/signup" class="btn btn-outline">Try it with your own business →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="features" id="features">
+    <div class="section-inner">
+      <h2 data-reveal>Everything a front desk does. Automatically.</h2>
+      <p class="section-sub" data-reveal>One dashboard. Every business type. No developer required.</p>
+      <div class="feature-grid">
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">🤖</div>
+          <h3>AI that actually understands</h3>
+          <p>Not a rigid menu bot — customers type naturally, in Hindi, English, or a mix, and still get booked correctly.</p>
+        </div>
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">🎙️</div>
+          <h3>Voice notes, transcribed</h3>
+          <p>Customers who'd rather speak than type get replied to in the same spoken language, automatically.</p>
+        </div>
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">📆</div>
+          <h3>Real-time availability</h3>
+          <p>Per-provider slots, blackout ranges, and double-booking protection — the calendar is always the truth.</p>
+        </div>
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">💳</div>
+          <h3>Payments built in</h3>
+          <p>Optional deposits collected at booking time via a secure payment link — fewer no-shows, guaranteed.</p>
+        </div>
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">🔔</div>
+          <h3>Reminders that send themselves</h3>
+          <p>Automatic "you're next" and appointment reminders — nobody on your team has to remember to text.</p>
+        </div>
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">📊</div>
+          <h3>One dashboard, full visibility</h3>
+          <p>Bookings, feedback, live queue, and analytics — for a single provider or your whole business.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INDUSTRIES ============ -->
+  <section class="industries">
+    <div class="section-inner">
+      <h2 data-reveal>Built for how your business actually runs</h2>
+      <div class="industry-row" data-reveal>
+        <div class="industry-pill">💇 Salons &amp; Grooming</div>
+        <div class="industry-pill">🏨 Hotels &amp; Stays</div>
+        <div class="industry-pill">💊 Clinics &amp; Doctors</div>
+        <div class="industry-pill">💄 Makeup &amp; Studios</div>
+        <div class="industry-pill">🚗 Auto Service</div>
+        <div class="industry-pill">➕ Your industry, in minutes</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRICING ============ -->
+  <section class="pricing" id="pricing">
+    <div class="section-inner">
+      <h2 data-reveal>Simple pricing, no surprises</h2>
+      <p class="section-sub" data-reveal>Start free. Upgrade when the bookings start rolling in.</p>
+      <div class="pricing-grid">
+        <div class="price-card" data-reveal>
+          <div class="price-name">Starter</div>
+          <div class="price-amount">Free</div>
+          <div class="price-desc">For a single provider getting started</div>
+          <ul class="price-features">
+            <li>✓ 1 WhatsApp number</li>
+            <li>✓ Up to 100 bookings/mo</li>
+            <li>✓ Core AI booking flow</li>
+            <li>✓ Email support</li>
+          </ul>
+          <a href="/signup" class="btn btn-outline btn-full">Start free</a>
+        </div>
+        <div class="price-card price-featured" data-reveal>
+          <div class="price-badge">Most popular</div>
+          <div class="price-name">Growth</div>
+          <div class="price-amount">₹1,999<span>/mo</span></div>
+          <div class="price-desc">For a business with a real front desk</div>
+          <ul class="price-features">
+            <li>✓ Everything in Starter</li>
+            <li>✓ Unlimited bookings</li>
+            <li>✓ Voice notes &amp; multilingual AI</li>
+            <li>✓ Payments &amp; deposits</li>
+            <li>✓ Calendar sync</li>
+            <li>✓ Priority support</li>
+          </ul>
+          <a href="/signup" class="btn btn-primary btn-full">Start free trial</a>
+        </div>
+        <div class="price-card" data-reveal>
+          <div class="price-name">Enterprise</div>
+          <div class="price-amount">Custom</div>
+          <div class="price-desc">Multi-location, custom workflows</div>
+          <ul class="price-features">
+            <li>✓ Everything in Growth</li>
+            <li>✓ Multiple locations/providers</li>
+            <li>✓ Custom workflow design</li>
+            <li>✓ Dedicated onboarding</li>
+          </ul>
+          <a href="#faq" class="btn btn-outline btn-full">Talk to us</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section class="faq" id="faq">
+    <div class="section-inner section-inner-narrow">
+      <h2 data-reveal>Questions, answered</h2>
+      <div class="faq-list" data-reveal>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a-1">Do my customers need to install anything? <span class="faq-toggle">+</span></button>
+          <div class="faq-a" id="faq-a-1"><p>No. They message your existing WhatsApp Business number like they would any contact — nothing to download, no account to create.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a-2">How long does setup actually take? <span class="faq-toggle">+</span></button>
+          <div class="faq-a" id="faq-a-2"><p>Most businesses are live the same day. Pick your industry template, add your providers and hours, connect your WhatsApp number, and you're taking bookings.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a-3">What if a customer asks something the bot can't answer? <span class="faq-toggle">+</span></button>
+          <div class="faq-a" id="faq-a-3"><p>It says so honestly instead of guessing, and logs it as a support request in your dashboard so a real person can follow up.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a-4">Is my business's data isolated from other businesses on the platform? <span class="faq-toggle">+</span></button>
+          <div class="faq-a" id="faq-a-4"><p>Completely. Every account is fully isolated at the data layer — your bookings, customers, and conversations are never visible to another business.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a-5">Can I cancel anytime? <span class="faq-toggle">+</span></button>
+          <div class="faq-a" id="faq-a-5"><p>Yes — no lock-in contracts. Downgrade to the free tier or cancel from your dashboard whenever you want.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section class="final-cta">
+    <div class="final-cta-glow"></div>
+    <div class="section-inner" data-reveal>
+      <h2>Stop losing bookings to a missed message.</h2>
+      <p>Set up your business in minutes — free to start, no credit card required.</p>
+      <a href="/signup" class="btn btn-primary btn-lg btn-magnetic"><span>Create your free account</span></a>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="#top" class="brand"><span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span></a>
+        <p>The WhatsApp front desk for local businesses.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Product</h4>
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#demo">Live demo</a>
+      </div>
+      <div class="footer-col">
+        <h4>Account</h4>
+        <a href="/signup">Create account</a>
+        <a href="/app">Log in</a>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <a href="#faq">FAQ</a>
+        <a href="mailto:hello@bookpilot.ai">Contact</a>
+      </div>
+    </div>
+    <div class="footer-bottom">© <span id="year"></span> BookPilot AI. All rights reserved.</div>
+  </footer>
+
+  <script src="/marketing/script.js"></script>
+</body>
+</html>

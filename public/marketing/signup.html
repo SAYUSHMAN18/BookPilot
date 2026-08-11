@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create your account — BookPilot AI</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📅</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/marketing/styles.css" />
+  <link rel="stylesheet" href="/marketing/auth.css" />
+</head>
+<body class="auth-body">
+  <div class="grain"></div>
+
+  <a href="/" class="auth-brand"><span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span></a>
+
+  <div class="auth-wrap">
+    <div class="auth-side">
+      <h1>Start taking bookings<br />on WhatsApp today.</h1>
+      <p>Free to start. No credit card, no developer, no app for your customers to install.</p>
+      <ul class="auth-checklist">
+        <li>✅ Live in minutes, not weeks</li>
+        <li>✅ Works with the WhatsApp number you already have</li>
+        <li>✅ Cancel anytime, no lock-in</li>
+      </ul>
+    </div>
+
+    <form class="auth-card" id="signupForm" novalidate>
+      <h2>Create your business account</h2>
+      <p class="auth-sub">Already have one? <a href="/app">Log in</a></p>
+
+      <div class="field">
+        <label for="businessName">Business name</label>
+        <input id="businessName" name="businessName" type="text" placeholder="e.g. Snip &amp; Style Salon" required autofocus />
+      </div>
+      <div class="field">
+        <label for="ownerName">Your name</label>
+        <input id="ownerName" name="ownerName" type="text" placeholder="e.g. Aisha Khan" />
+      </div>
+      <div class="field">
+        <label for="email">Work email</label>
+        <input id="email" name="email" type="email" placeholder="you@yourbusiness.com" required />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" placeholder="At least 8 characters" minlength="8" required />
+      </div>
+
+      <div class="error-banner" id="errorBanner" hidden></div>
+
+      <button class="btn btn-primary btn-full btn-lg" type="submit" id="submitBtn"><span>Create free account</span></button>
+      <p class="auth-fineprint">By continuing you agree this account is for your own business — you can invite team members and connect WhatsApp once you're in.</p>
+    </form>
+  </div>
+
+  <script src="/marketing/auth.js"></script>
+</body>
+</html>

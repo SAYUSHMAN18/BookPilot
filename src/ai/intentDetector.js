@@ -6,13 +6,14 @@ const { groqChatCompletion } = require("./groqClient");
 // every value — a new intent added here that a caller ignores falls through
 // to the default "unclear" path, which is always safe.
 const INTENTS = {
-  CANCEL_BOOKING: "cancel_booking", // wants to cancel an existing booking
-  CHECK_STATUS: "check_status",   // wants to know their booking status
-  RESTART: "restart",        // start fresh / book something else
-  QUESTION: "question",       // factual question (hours, prices, policy)
-  COMPLAINT: "complaint",      // frustrated / venting — needs empathy first
-  BOOKING_INTENT: "booking_intent", // actively wants to book right now
-  UNCLEAR: "unclear",        // greeting / small talk / truly ambiguous
+  CANCEL_BOOKING: "cancel_booking",
+  CHECK_STATUS: "check_status",
+  RESTART: "restart",
+  QUESTION: "question",
+  COMPLAINT: "complaint",
+  BOOKING_INTENT: "booking_intent",
+  GREETING: "greeting",
+  UNCLEAR: "unclear",
 };
 
 const VALID_INTENTS = new Set(Object.values(INTENTS));
@@ -41,18 +42,22 @@ const COMPLAINT_RE = /\b(frustrated|angry|upset|terrible|horrible|awful|this (is
 const SYMPTOM_RE =
   /\b(fever|bukhar|cough|khansi|pain|dard|headache|sar\s*dard|stomach\s*ache|cold|jukam|zukam|vomit|ulti|injury|chot|rash)\b/i;
 
+const GREETING_RE =
+  /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar)[\s!,.?]*$/i;
+
 function keywordIntent(text) {
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().trim();
+
   if (CANCEL_RE.test(t)) return INTENTS.CANCEL_BOOKING;
   if (STATUS_RE.test(t)) return INTENTS.CHECK_STATUS;
   if (RESTART_RE.test(t)) return INTENTS.RESTART;
   if (QUESTION_RE.test(t)) return INTENTS.QUESTION;
   if (COMPLAINT_RE.test(t)) return INTENTS.COMPLAINT;
-  // A symptom report ("mujhe bukhar hai") is a booking intent even though
-  // it names no business/provider — it falls through to classifyBusiness()
-  // same as any other booking_intent/unclear result, which is what
-  // actually routes it to the medical workflow.
+
+  if (GREETING_RE.test(t)) return INTENTS.GREETING;
+
   if (SYMPTOM_RE.test(t)) return INTENTS.BOOKING_INTENT;
+
   return INTENTS.UNCLEAR;
 }
 
@@ -71,43 +76,44 @@ async function detectGeneralIntent(text, hasActiveBooking) {
       temperature: 0,
       max_tokens: 10,
       messages: [
-          {
-            role: "system",
-            content:
-              "You classify a WhatsApp customer message into EXACTLY ONE intent for a booking bot. " +
-              `The customer ${hasActiveBooking ? "HAS an existing booking" : "has NO existing booking"}.\n\n` +
-              "Intents (reply with ONLY the intent word, nothing else):\n" +
-              "- cancel_booking: wants to cancel/delete/remove an existing booking or appointment\n" +
-              "- check_status: wants to know their booking status, date, time, or details\n" +
-              "- restart: wants to start over, book something different, or see the full menu\n" +
-              "- question: asking a factual question about the business (hours, price, location, policy)\n" +
-              "- complaint: expressing frustration, anger, or dissatisfaction with the service or bot\n" +
-              "- booking_intent: actively trying to make a new booking right now\n" +
-              "- unclear: greeting, small talk, random noise, or genuinely ambiguous\n\n" +
-              "If the message could be cancel_booking OR booking_intent, prefer cancel_booking when the customer HAS an existing booking.\n" +
-              "Reply with ONLY one of: cancel_booking, check_status, restart, question, complaint, booking_intent, unclear",
-          },
-          // Few-shot examples covering the exact failure patterns from the
-          // real conversation — the model observed inventing intent names or
-          // routing "CANCEL THAT" to booking_intent without these.
-          { role: "user", content: "HELLO" },
-          { role: "assistant", content: "unclear" },
-          { role: "user", content: "CANCEL THAT" },
-          { role: "assistant", content: "cancel_booking" },
-          { role: "user", content: "STATUS" },
-          { role: "assistant", content: "check_status" },
-          { role: "user", content: "I WANT TO CANCEL MY OLD APPOINTMENT" },
-          { role: "assistant", content: "cancel_booking" },
-          { role: "user", content: "ok" },
-          { role: "assistant", content: "unclear" },
-          { role: "user", content: "BUT THE BOOKING IS CANCELLED HOW COME THERE'S STILL A BOOKING" },
-          { role: "assistant", content: "complaint" },
-          { role: "user", content: "how much does a haircut cost" },
-          { role: "assistant", content: "question" },
-          { role: "user", content: "book a doctor appointment" },
-          { role: "assistant", content: "booking_intent" },
-          { role: "user", content: "can I start over" },
-          { role: "assistant", content: "restart" },
+        {
+          role: "system",
+          content:
+            "You classify a WhatsApp customer message into EXACTLY ONE intent for a booking bot. " +
+            `The customer ${hasActiveBooking ? "HAS an existing booking" : "has NO existing booking"}.\n\n` +
+            "Intents (reply with ONLY the intent word, nothing else):\n" +
+            "- cancel_booking: wants to cancel/delete/remove an existing booking or appointment\n" +
+            "- check_status: wants to know their booking status, date, time, or details\n" +
+            "- restart: wants to start over, book something different, or see the full menu\n" +
+            "- question: asking a factual question about the business (hours, price, location, policy)\n" +
+            "- complaint: expressing frustration, anger, or dissatisfaction with the service or bot\n" +
+            "- booking_intent: actively trying to make a new booking right now\n" +
+            "- greeting: simple greeting such as hi, hello, hey, good morning, namaste\n" +
+            "- unclear: random noise or genuinely ambiguous request\n\n" +
+            "If the message could be cancel_booking OR booking_intent, prefer cancel_booking when the customer HAS an existing booking.\n" +
+            "Reply with ONLY one of: cancel_booking, check_status, restart, question, complaint, booking_intent, greeting, unclear",
+        },
+        // Few-shot examples covering the exact failure patterns from the
+        // real conversation — the model observed inventing intent names or
+        // routing "CANCEL THAT" to booking_intent without these.
+        { role: "user", content: "HELLO" },
+        { role: "assistant", content: "unclear" },
+        { role: "user", content: "CANCEL THAT" },
+        { role: "assistant", content: "cancel_booking" },
+        { role: "user", content: "STATUS" },
+        { role: "assistant", content: "check_status" },
+        { role: "user", content: "I WANT TO CANCEL MY OLD APPOINTMENT" },
+        { role: "assistant", content: "cancel_booking" },
+        { role: "user", content: "ok" },
+        { role: "assistant", content: "unclear" },
+        { role: "user", content: "BUT THE BOOKING IS CANCELLED HOW COME THERE'S STILL A BOOKING" },
+        { role: "assistant", content: "complaint" },
+        { role: "user", content: "how much does a haircut cost" },
+        { role: "assistant", content: "question" },
+        { role: "user", content: "book a doctor appointment" },
+        { role: "assistant", content: "booking_intent" },
+        { role: "user", content: "can I start over" },
+        { role: "assistant", content: "restart" },
         { role: "user", content: capForAI(text) },
       ],
     });

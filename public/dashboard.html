@@ -688,6 +688,7 @@
       box-shadow: var(--shadow-sm);
       background: var(--card);
     }
+
     .provider-info-photo {
       width: 220px;
       min-width: 220px;
@@ -695,6 +696,7 @@
       display: block;
       background: #e8e8f0;
     }
+
     .provider-info-photo-placeholder {
       width: 220px;
       min-width: 220px;
@@ -704,6 +706,7 @@
       font-size: 56px;
       background: color-mix(in srgb, var(--profile) 8%, white);
     }
+
     .provider-info-body {
       flex: 1;
       padding: 20px 24px;
@@ -711,11 +714,13 @@
       flex-direction: column;
       gap: 10px;
     }
+
     .provider-info-name {
       font-size: 20px;
       font-weight: 700;
       letter-spacing: -0.02em;
     }
+
     .provider-info-sub {
       font-size: 13px;
       color: var(--muted);
@@ -723,12 +728,14 @@
       align-items: center;
       gap: 6px;
     }
+
     .provider-info-chips {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       margin-top: 4px;
     }
+
     .info-chip {
       display: inline-flex;
       align-items: center;
@@ -740,6 +747,7 @@
       background: var(--bg);
       border: 1px solid var(--border);
     }
+
     .map-link {
       display: inline-flex;
       align-items: center;
@@ -755,10 +763,22 @@
       width: fit-content;
       margin-top: 6px;
     }
-    .map-link:hover { filter: brightness(0.9); }
+
+    .map-link:hover {
+      filter: brightness(0.9);
+    }
+
     @media (max-width: 640px) {
-      .provider-info-banner { flex-direction: column; }
-      .provider-info-photo, .provider-info-photo-placeholder { width: 100%; min-width: 0; height: 160px; }
+      .provider-info-banner {
+        flex-direction: column;
+      }
+
+      .provider-info-photo,
+      .provider-info-photo-placeholder {
+        width: 100%;
+        min-width: 0;
+        height: 160px;
+      }
     }
 
     /* ─── Workflow modal ─────────────────────────────── */
@@ -861,558 +881,683 @@
 <body>
 
   <!-- ── Login screen (shown until /api/auth/me succeeds) ── -->
-  <div id="loginScreen" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg);">
-    <form id="loginForm" class="card" style="width:100%; max-width:360px; display:flex; flex-direction:column; gap:14px;">
+  <div id="loginScreen"
+    style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg);">
+    <form id="loginForm" class="card"
+      style="width:100%; max-width:360px; display:flex; flex-direction:column; gap:14px;">
       <div>
         <div style="font-size:20px; font-weight:700; display:flex; align-items:center; gap:8px;">📋 BookPilot AI</div>
         <div style="font-size:12px; color:var(--muted); margin-top:2px;">Sign in to your dashboard.</div>
       </div>
-      <div id="loginError" style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;"></div>
-      <div>
-        <label class="form-label">Email</label>
-        <input type="email" id="loginEmail" class="form-input" autocomplete="username" required />
+      <div id="loginError"
+        style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;">
       </div>
       <div>
-        <label class="form-label">Password</label>
-        <input type="password" id="loginPassword" class="form-input" autocomplete="current-password" required />
+        <label class="form-label" for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" class="form-input" autocomplete="username" placeholder="you@example.com"
+          required />
       </div>
-      <button type="submit" class="btn-primary" id="loginSubmitBtn" style="padding:10px; text-align:center;">Sign in</button>
-      <button type="button" class="btn-link" id="showForgotPasswordBtn" style="font-size:12px; align-self:center;">Forgot password?</button>
+      <div>
+        <label class="form-label" for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" class="form-input" autocomplete="current-password"
+          placeholder="••••••••" required />
+      </div>
+      <button type="submit" class="btn-primary" id="loginSubmitBtn" style="padding:10px; text-align:center;">Sign
+        in</button>
+      <button type="button" class="btn-link" id="showForgotPasswordBtn"
+        style="font-size:12px; align-self:center;">Forgot password?</button>
     </form>
 
     <!-- Section 6: self-serve password reset — request step. -->
-    <form id="forgotPasswordForm" class="card" style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
+    <form id="forgotPasswordForm" class="card"
+      style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
       <div>
         <div style="font-size:20px; font-weight:700;">Reset your password</div>
-        <div style="font-size:12px; color:var(--muted); margin-top:2px;">We'll send a reset link to your email if an account exists.</div>
+        <div style="font-size:12px; color:var(--muted); margin-top:2px;">We'll send a reset link to your email if an
+          account exists.</div>
       </div>
-      <div id="forgotPasswordMessage" style="display:none; background:#dcfce7; color:#166534; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #bbf7d0;"></div>
+      <div id="forgotPasswordMessage"
+        style="display:none; background:#dcfce7; color:#166534; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #bbf7d0;">
+      </div>
       <div>
-        <label class="form-label">Email</label>
-        <input type="email" id="forgotPasswordEmail" class="form-input" autocomplete="username" required />
+        <label class="form-label" for="forgotPasswordEmail">Email</label>
+        <input type="email" id="forgotPasswordEmail" class="form-input" autocomplete="username"
+          placeholder="you@example.com" required />
       </div>
-      <button type="submit" class="btn-primary" id="forgotPasswordSubmitBtn" style="padding:10px; text-align:center;">Send reset link</button>
-      <button type="button" class="btn-link" id="backToLoginBtn" style="font-size:12px; align-self:center;">Back to sign in</button>
+      <button type="submit" class="btn-primary" id="forgotPasswordSubmitBtn"
+        style="padding:10px; text-align:center;">Send reset link</button>
+      <button type="button" class="btn-link" id="backToLoginBtn" style="font-size:12px; align-self:center;">Back to sign
+        in</button>
     </form>
 
     <!-- Section 6: self-serve password reset — completion step, reached via the emailed link's ?resetToken=... -->
-    <form id="resetPasswordForm" class="card" style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
+    <form id="resetPasswordForm" class="card"
+      style="display:none; width:100%; max-width:360px; flex-direction:column; gap:14px;">
       <div>
         <div style="font-size:20px; font-weight:700;">Set a new password</div>
       </div>
-      <div id="resetPasswordError" style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;"></div>
-      <div>
-        <label class="form-label">New password</label>
-        <input type="password" id="resetPasswordNew" class="form-input" autocomplete="new-password" minlength="8" required />
+      <div id="resetPasswordError"
+        style="display:none; background:#fee2e2; color:#991b1b; padding:9px 12px; border-radius:var(--radius-sm); font-size:13px; border:1px solid #fecaca;">
       </div>
-      <button type="submit" class="btn-primary" id="resetPasswordSubmitBtn" style="padding:10px; text-align:center;">Set new password</button>
+      <div>
+        <label class="form-label" for="resetPasswordNew">New password</label>
+        <input type="password" id="resetPasswordNew" class="form-input" autocomplete="new-password"
+          placeholder="Minimum 8 characters" minlength="8" required />
+      </div>
+      <button type="submit" class="btn-primary" id="resetPasswordSubmitBtn" style="padding:10px; text-align:center;">Set
+        new password</button>
     </form>
   </div>
 
   <!-- ── App shell (hidden until logged in) ── -->
   <div id="appShell" style="display:none;">
 
-  <header>
-    <div class="header-left">
-      <h1>
-        <span id="profileIcon">📋</span>
-        BookPilot AI
-        <span class="profile-badge" id="profileBadge" style="display:none;"></span>
-      </h1>
-      <div class="sub">Bookings made on WhatsApp — all in one place.</div>
-    </div>
-
-    <div class="header-right">
-      <!-- Sliding pill role toggle -->
-      <div class="role-toggle" id="roleToggle">
-        <div class="role-slider" id="roleSlider"></div>
-        <button id="roleProviderBtn" class="active">🏢 Provider</button>
-        <button id="roleAdminBtn">👑 Admin</button>
+    <header>
+      <div class="header-left">
+        <h1>
+          <span id="profileIcon">📋</span>
+          BookPilot AI
+          <span class="profile-badge" id="profileBadge" style="display:none;"></span>
+        </h1>
+        <div class="sub">Bookings made on WhatsApp — all in one place.</div>
       </div>
 
-      <!-- Provider selector (hidden in admin mode) -->
-      <div class="provider-select-wrap" id="providerSelectWrap">
-        <select id="providerSelect">
-          <option>Loading providers…</option>
-        </select>
-      </div>
+      <div class="header-right">
+        <!-- Sliding pill role toggle -->
+        <div class="role-toggle" id="roleToggle">
+          <div class="role-slider" id="roleSlider"></div>
+          <button id="roleProviderBtn" class="active">🏢 Provider</button>
+          <button id="roleAdminBtn">👑 Admin</button>
+        </div>
 
-      <button class="btn-secondary" id="refreshBtn">↻ Refresh</button>
-      <span id="liveIndicator" title="Live updates" style="font-size:11px; color:var(--muted); display:flex; align-items:center; gap:4px;">
-        <span id="liveDot" style="width:7px; height:7px; border-radius:50%; background:#9ca3af; display:inline-block;"></span> Live
-      </span>
-      <span id="currentUserLabel" style="font-size:12px; color:var(--muted);"></span>
-      <button class="btn-link" id="logoutBtn">Log out</button>
-    </div>
-  </header>
+        <!-- Provider selector (hidden in admin mode) -->
+        <div class="provider-select-wrap" id="providerSelectWrap">
+          <select id="providerSelect" aria-label="Select provider">
+            <option>Loading providers…</option>
+          </select>
+        </div>
 
-  <main>
-    <div id="errorBanner"></div>
-
-    <!-- ── Always-visible stats bar ── -->
-    <div class="stat-bar" id="statBar"></div>
-
-    <!-- ── ADMIN VIEW: search + filters + all-bookings table ── -->
-    <div class="card" id="adminFiltersCard" style="display:none;">
-      <div class="card-header">
-        <span class="card-title">
-          📊 All Bookings
-          <span class="count-badge" id="adminCountBadge">—</span>
+        <button class="btn-secondary" id="refreshBtn">↻ Refresh</button>
+        <span id="liveIndicator" title="Live updates"
+          style="font-size:11px; color:var(--muted); display:flex; align-items:center; gap:4px;">
+          <span id="liveDot"
+            style="width:7px; height:7px; border-radius:50%; background:#9ca3af; display:inline-block;"></span> Live
         </span>
+        <span id="currentUserLabel" style="font-size:12px; color:var(--muted);"></span>
+        <button class="btn-link" id="logoutBtn">Log out</button>
       </div>
+    </header>
 
-      <!-- Promoted full-width search -->
-      <div class="search-wrap">
-        <span class="s-icon">🔍</span>
-        <input type="text" id="searchFilter" placeholder="Search by customer name or booking ID…" autocomplete="off" />
-      </div>
+    <main>
+      <div id="errorBanner"></div>
 
-      <!-- Filters row -->
-      <div class="filters-row">
-        <select id="businessFilter">
-          <option value="">All businesses</option>
-        </select>
-        <select id="adminStatusFilter">
-          <option value="">All statuses</option>
-          <option value="booked">Booked</option>
-          <option value="arrived">Arrived</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <input type="date" id="adminDateFilter" title="Filter by appointment / check-in date" />
-        <button class="btn-link" id="clearAdminFiltersBtn">× Clear all</button>
-      </div>
+      <!-- ── Always-visible stats bar ── -->
+      <div class="stat-bar" id="statBar"></div>
 
-      <!-- Active filter chips -->
-      <div class="active-filters" id="activeFilters"></div>
-
-      <div class="table-scroll" id="adminBookingsContainer">
-        <div class="empty">Loading…</div>
-      </div>
-    </div>
-
-    <!-- ── ADMIN VIEW: Manage Businesses ── -->
-    <div class="card" id="adminWorkflowsCard" style="display:none; margin-top: 18px;">
-      <div class="card-header">
-        <span class="card-title">
-          🏪 Manage Businesses
-          <span class="count-badge" id="workflowsCountBadge">—</span>
-        </span>
-        <button class="btn-primary" id="addWorkflowBtn">＋ Add Business</button>
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Business ID</th>
-              <th>Label (Name)</th>
-              <th>Description</th>
-              <th>Type/Providers</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="workflowsList">
-            <tr>
-              <td colspan="5" class="empty">Loading businesses…</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── ADMIN VIEW: Marketplace ── -->
-    <div class="card" id="adminTemplatesCard" style="display:none; margin-top: 18px;">
-      <div class="card-header">
-        <span class="card-title">🧩 Marketplace <span class="count-badge" id="templatesCountBadge">—</span></span>
-        <button class="btn-primary" id="publishTemplateBtn">＋ Publish a Business</button>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
-        Save a working business as a reusable template, then install it to spin up a new one. Installing copies the config — editing the new business never touches the template.
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>Template</th><th>Industry</th><th>Description</th><th>Size</th><th>Published By</th><th>Actions</th></tr></thead>
-          <tbody id="templatesList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Modal: publish a business as a template -->
-    <div id="publishTemplateModal" class="modal-overlay">
-      <div class="modal-card" style="max-width:480px;">
-        <div class="card-header" style="margin-bottom: 0;">
-          <span class="card-title" style="font-size: 16px;">Publish as Template</span>
-          <button class="btn-link" id="closePublishModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+      <!-- ── ADMIN VIEW: search + filters + all-bookings table ── -->
+      <div class="card" id="adminFiltersCard" style="display:none;">
+        <div class="card-header">
+          <span class="card-title">
+            📊 All Bookings
+            <span class="count-badge" id="adminCountBadge">—</span>
+          </span>
         </div>
-        <div id="publishModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div>
-            <label class="form-label">Business to publish</label>
-            <select id="publishWorkflowInput" class="form-select"></select>
+
+        <!-- Promoted full-width search -->
+        <div class="search-wrap">
+          <span class="s-icon">🔍</span>
+          <input type="text" id="searchFilter" placeholder="Search by customer name or booking ID…"
+            aria-label="Search bookings" autocomplete="off" />
+        </div>
+
+        <!-- Filters row -->
+        <div class="filters-row">
+          <select id="businessFilter" aria-label="Filter by business">
+            <option value="">All businesses</option>
+          </select>
+          <select id="adminStatusFilter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="booked">Booked</option>
+            <option value="arrived">Arrived</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <input type="date" id="adminDateFilter" title="Filter by appointment / check-in date"
+            aria-label="Filter by date" />
+          <button class="btn-link" id="clearAdminFiltersBtn">× Clear all</button>
+        </div>
+
+        <!-- Active filter chips -->
+        <div class="active-filters" id="activeFilters"></div>
+
+        <div class="table-scroll" id="adminBookingsContainer">
+          <div class="empty">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ── ADMIN VIEW: Manage Businesses ── -->
+      <div class="card" id="adminWorkflowsCard" style="display:none; margin-top: 18px;">
+        <div class="card-header">
+          <span class="card-title">
+            🏪 Manage Businesses
+            <span class="count-badge" id="workflowsCountBadge">—</span>
+          </span>
+          <button class="btn-primary" id="addWorkflowBtn">＋ Add Business</button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Business ID</th>
+                <th>Label (Name)</th>
+                <th>Description</th>
+                <th>Type/Providers</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="workflowsList">
+              <tr>
+                <td colspan="5" class="empty">Loading businesses…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── ADMIN VIEW: Marketplace ── -->
+      <div class="card" id="adminTemplatesCard" style="display:none; margin-top: 18px;">
+        <div class="card-header">
+          <span class="card-title">🧩 Marketplace <span class="count-badge" id="templatesCountBadge">—</span></span>
+          <button class="btn-primary" id="publishTemplateBtn">＋ Publish a Business</button>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          Save a working business as a reusable template, then install it to spin up a new one. Installing copies the
+          config — editing the new business never touches the template.
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Template</th>
+                <th>Industry</th>
+                <th>Description</th>
+                <th>Size</th>
+                <th>Published By</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="templatesList">
+              <tr>
+                <td colspan="6" class="empty">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Modal: publish a business as a template -->
+      <div id="publishTemplateModal" class="modal-overlay">
+        <div class="modal-card" style="max-width:480px;">
+          <div class="card-header" style="margin-bottom: 0;">
+            <span class="card-title" style="font-size: 16px;">Publish as Template</span>
+            <button class="btn-link" id="closePublishModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
           </div>
-          <div class="form-group-row">
-            <div class="form-control-wrap">
-              <label class="form-label">Template name</label>
-              <input type="text" id="publishNameInput" class="form-input" placeholder="e.g. Standard Dental Clinic" />
+          <div id="publishModalError"
+            style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <label class="form-label" for="publishWorkflowInput">Business to publish</label>
+              <select id="publishWorkflowInput" class="form-select"></select>
             </div>
-            <div class="form-control-wrap">
-              <label class="form-label">Industry</label>
-              <input type="text" id="publishIndustryInput" class="form-input" placeholder="e.g. Healthcare" />
+            <div class="form-group-row">
+              <div class="form-control-wrap">
+                <label class="form-label" for="publishNameInput">Template name</label>
+                <input type="text" id="publishNameInput" class="form-input" placeholder="e.g. Standard Dental Clinic" />
+              </div>
+              <div class="form-control-wrap">
+                <label class="form-label" for="publishIndustryInput">Industry</label>
+                <input type="text" id="publishIndustryInput" class="form-input" placeholder="e.g. Healthcare" />
+              </div>
             </div>
-          </div>
-          <div>
-            <label class="form-label">Description</label>
-            <input type="text" id="publishDescInput" class="form-input" placeholder="What this template sets up" />
-          </div>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-          <button class="btn-secondary" id="cancelPublishModalBtn">Cancel</button>
-          <button class="btn-primary" id="savePublishBtn">Publish</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal: install a template as a new business -->
-    <div id="installTemplateModal" class="modal-overlay">
-      <div class="modal-card" style="max-width:480px;">
-        <div class="card-header" style="margin-bottom: 0;">
-          <span class="card-title" style="font-size: 16px;" id="installModalTitle">Install Template</span>
-          <button class="btn-link" id="closeInstallModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
-        </div>
-        <div id="installModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div>
-            <label class="form-label">New business ID</label>
-            <input type="text" id="installIdInput" class="form-input" placeholder="e.g. dental-central (lowercase, no spaces)" />
-          </div>
-          <div>
-            <label class="form-label">New business name</label>
-            <input type="text" id="installLabelInput" class="form-input" placeholder="e.g. Central Dental Clinic" />
-          </div>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-          <button class="btn-secondary" id="cancelInstallModalBtn">Cancel</button>
-          <button class="btn-primary" id="saveInstallBtn">Install</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── ADMIN VIEW: Manage Team ── -->
-    <div class="card" id="adminUsersCard" style="display:none; margin-top: 18px;">
-      <div class="card-header">
-        <span class="card-title">👥 Manage Team <span class="count-badge" id="usersCountBadge">—</span></span>
-        <button class="btn-primary" id="addUserBtn">＋ Add Login</button>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
-        One login per person — a provider account only ever sees its own workflow/provider's bookings and availability, enforced on the server, not just hidden in this UI.
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr><th>Email</th><th>Name</th><th>Role</th><th>Business / Provider</th><th>Status</th><th>Actions</th></tr>
-          </thead>
-          <tbody id="usersList"><tr><td colspan="6" class="empty">Loading team…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── ADMIN VIEW: Audit Log ── -->
-    <div class="card" id="adminAuditCard" style="display:none; margin-top: 18px;">
-      <div class="card-header">
-        <span class="card-title">🕵️ Audit Log <span class="count-badge" id="auditCountBadge">—</span></span>
-      </div>
-      <div class="table-scroll" id="auditLogContainer"><div class="empty">Loading…</div></div>
-    </div>
-
-    <!-- Modal for adding a team login -->
-    <div id="userModal" class="modal-overlay">
-      <div class="modal-card" style="max-width:480px;">
-        <div class="card-header" style="margin-bottom: 0;">
-          <span class="card-title" style="font-size: 16px;">Add a Login</span>
-          <button class="btn-link" id="closeUserModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
-        </div>
-        <div id="userModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div>
-            <label class="form-label">Role</label>
-            <select id="userRoleInput" class="form-select">
-              <option value="provider">Provider — sees only their own business</option>
-              <option value="admin">Admin — sees everything</option>
-            </select>
-          </div>
-          <div id="userProviderWrap">
-            <label class="form-label">Which provider is this login for?</label>
-            <select id="userProviderInput" class="form-select"></select>
-          </div>
-          <div class="form-group-row">
-            <div class="form-control-wrap">
-              <label class="form-label">Name</label>
-              <input type="text" id="userNameInput" class="form-input" placeholder="e.g. Dr. Rajesh Sharma" />
-            </div>
-            <div class="form-control-wrap">
-              <label class="form-label">Email (their login)</label>
-              <input type="email" id="userEmailInput" class="form-input" placeholder="name@example.com" />
+            <div>
+              <label class="form-label" for="publishDescInput">Description</label>
+              <input type="text" id="publishDescInput" class="form-input" placeholder="What this template sets up" />
             </div>
           </div>
-          <div>
-            <label class="form-label">Temporary Password</label>
-            <input type="text" id="userPasswordInput" class="form-input" placeholder="At least 8 characters" />
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn-secondary" id="cancelPublishModalBtn">Cancel</button>
+            <button class="btn-primary" id="savePublishBtn">Publish</button>
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-          <button class="btn-secondary" id="cancelUserModalBtn">Cancel</button>
-          <button class="btn-primary" id="saveUserBtn">Create Login</button>
-        </div>
       </div>
-    </div>
 
-    <!-- ── PROVIDER VIEW: info banner (photo + geolocation) ── -->
-    <div id="providerInfoBanner" style="display:none;"></div>
-
-    <!-- ── PROVIDER VIEW: bookings table ── -->
-    <div class="card" id="providerBookingsCard">
-      <div class="card-header">
-        <span class="card-title">📋 Bookings</span>
-      </div>
-      <div class="prov-filters">
-        <select id="statusFilter">
-          <option value="">All statuses</option>
-          <option value="booked">Booked</option>
-          <option value="arrived">Arrived</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <input type="date" id="dateFilter" title="Filter by date" />
-        <button class="btn-link" id="clearFiltersBtn">× Clear filters</button>
-      </div>
-      <div class="table-scroll" id="bookingsContainer">
-        <div class="empty">Select a provider above.</div>
-      </div>
-    </div>
-
-    <!-- ── Analytics (both roles; provider sees only their own numbers) ── -->
-    <div class="card" id="analyticsCard">
-      <div class="card-header">
-        <span class="card-title">📈 Analytics</span>
-        <select id="analyticsRangeSelect" style="font-family:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-xs); background:white;">
-          <option value="7">Last 7 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </select>
-      </div>
-      <div id="analyticsBody"><div class="empty">Loading…</div></div>
-    </div>
-
-    <!-- ── Support Requests (both roles; provider sees only their own business) ── -->
-    <div class="card" id="supportRequestsCard">
-      <div class="card-header">
-        <span class="card-title">🆘 Support Requests <span class="count-badge" id="supportRequestsCountBadge">—</span></span>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
-        A customer asked for a human twice in the same conversation. The bot can't connect them directly, but every one of these lands here so someone real can follow up.
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>When (IST)</th><th>Customer</th><th>Business</th><th>Message</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="supportRequestsList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── Feedback (both roles; provider sees only their own business) ── -->
-    <div class="card" id="feedbackCard">
-      <div class="card-header">
-        <span class="card-title">💬 Feedback <span class="count-badge" id="feedbackCountBadge">—</span></span>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
-        Collected after a provider marks a booking complete — the bot asks once, no repeated nudging.
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>When (IST)</th><th>Customer</th><th>Booking</th><th>Business</th><th>Rating</th><th>Comment</th></tr></thead>
-          <tbody id="feedbackList"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── Knowledge Base (both roles; provider sees only their own business) ── -->
-    <div class="card" id="knowledgeCard">
-      <div class="card-header">
-        <span class="card-title">📚 Knowledge Base <span class="count-badge" id="knowledgeCountBadge">—</span></span>
-        <button class="btn-primary" id="addKnowledgeBtn">＋ Add Entry</button>
-      </div>
-      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
-        FAQs, policies, and pricing the WhatsApp bot can answer customers from. The bot only answers from what's written here plus your business config — it won't invent anything.
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>Business</th><th>Title</th><th>Content</th><th>Actions</th></tr></thead>
-          <tbody id="knowledgeList"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Modal for adding/editing a knowledge entry -->
-    <div id="knowledgeModal" class="modal-overlay">
-      <div class="modal-card" style="max-width:560px;">
-        <div class="card-header" style="margin-bottom: 0;">
-          <span class="card-title" id="knowledgeModalTitle" style="font-size: 16px;">Add Knowledge Entry</span>
-          <button class="btn-link" id="closeKnowledgeModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
-        </div>
-        <div id="knowledgeModalError" style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;"></div>
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div id="knowledgeWorkflowWrap">
-            <label class="form-label">Business</label>
-            <select id="knowledgeWorkflowInput" class="form-select"></select>
+      <!-- Modal: install a template as a new business -->
+      <div id="installTemplateModal" class="modal-overlay">
+        <div class="modal-card" style="max-width:480px;">
+          <div class="card-header" style="margin-bottom: 0;">
+            <span class="card-title" style="font-size: 16px;" id="installModalTitle">Install Template</span>
+            <button class="btn-link" id="closeInstallModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
           </div>
-          <div>
-            <label class="form-label">Title / Question</label>
-            <input type="text" id="knowledgeTitleInput" class="form-input" placeholder="e.g. Do you accept insurance?" />
+          <div id="installModalError"
+            style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
           </div>
-          <div>
-            <label class="form-label">Answer / Content</label>
-            <textarea id="knowledgeContentInput" class="form-textarea" rows="6" style="font-family:inherit; font-size:13px;" placeholder="e.g. We accept most major insurance providers including..."></textarea>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <label class="form-label" for="installIdInput">New business ID</label>
+              <input type="text" id="installIdInput" class="form-input"
+                placeholder="e.g. dental-central (lowercase, no spaces)" />
+            </div>
+            <div>
+              <label class="form-label" for="installLabelInput">New business name</label>
+              <input type="text" id="installLabelInput" class="form-input" placeholder="e.g. Central Dental Clinic" />
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn-secondary" id="cancelInstallModalBtn">Cancel</button>
+            <button class="btn-primary" id="saveInstallBtn">Install</button>
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-          <button class="btn-secondary" id="cancelKnowledgeModalBtn">Cancel</button>
-          <button class="btn-primary" id="saveKnowledgeBtn">Save Entry</button>
+      </div>
+
+      <!-- ── ADMIN VIEW: Manage Team ── -->
+      <div class="card" id="adminUsersCard" style="display:none; margin-top: 18px;">
+        <div class="card-header">
+          <span class="card-title">👥 Manage Team <span class="count-badge" id="usersCountBadge">—</span></span>
+          <button class="btn-primary" id="addUserBtn">＋ Add Login</button>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          One login per person — a provider account only ever sees its own workflow/provider's bookings and
+          availability, enforced on the server, not just hidden in this UI.
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Business / Provider</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersList">
+              <tr>
+                <td colspan="6" class="empty">Loading team…</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
 
-    <!-- ── PROVIDER VIEW: availability ── -->
-    <div class="card" id="availabilityCard">
-      <div class="card-header">
-        <span class="card-title">🗓 Availability</span>
-      </div>
-      <div class="avail-add">
-        <input type="date" id="blockDate" />
-        <input type="time" id="blockTime" placeholder="Start (optional)" title="Start time — leave blank to block the whole day" />
-        <span style="color:var(--muted); font-size:13px;">to</span>
-        <input type="time" id="blockEndTime" placeholder="End" title="End time — leave blank to block just the start time" />
-        <input type="text" id="blockReason" placeholder="Reason (optional)" style="min-width:190px;" />
-        <button class="btn-primary" id="addBlockBtn">Block</button>
-      </div>
-      <div class="note">Leave both times blank to block the entire day. Set a start and end to block a range (e.g. 2:30–3:40 excludes every slot in between, not just one). Leave end blank with a start set to block just that one slot. Applies immediately to the WhatsApp bot's available slots.</div>
-      <div id="blockConflictWarning" style="display:none; background:#fff7ed; color:#9a3412; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid #fed7aa; font-size:13px; margin-bottom:10px;"></div>
-      <div class="block-list" id="blockList"></div>
-    </div>
-
-    <!-- ── PROVIDER VIEW: Google Calendar sync (Section 10) ── -->
-    <div class="card" id="calendarCard">
-      <div class="card-header">
-        <span class="card-title">📆 Calendar Sync</span>
-      </div>
-      <div id="calendarStatusRow" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <span id="calendarStatusText" style="font-size:13px; color:var(--muted);">Loading…</span>
-        <div id="calendarActions"></div>
-      </div>
-      <div class="note">Connecting syncs every confirmed booking to this provider's own Google Calendar automatically — a cancellation removes the event, a reschedule moves it. One-way only: an event added directly in Google Calendar doesn't yet block a slot here.</div>
-    </div>
-
-    <!-- Modal for Workflow Add/Edit -->
-    <div id="workflowModal" class="modal-overlay">
-      <div class="modal-card">
-        <div class="card-header" style="margin-bottom: 0;">
-          <span class="card-title" id="workflowModalTitle" style="font-size: 16px;">Add Business Workflow</span>
-          <button class="btn-link" id="closeWorkflowModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+      <!-- ── ADMIN VIEW: Audit Log ── -->
+      <div class="card" id="adminAuditCard" style="display:none; margin-top: 18px;">
+        <div class="card-header">
+          <span class="card-title">🕵️ Audit Log <span class="count-badge" id="auditCountBadge">—</span></span>
         </div>
-
-        <div id="workflowModalError"
-          style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+        <div class="table-scroll" id="auditLogContainer">
+          <div class="empty">Loading…</div>
         </div>
+      </div>
 
-        <div style="background: color-mix(in srgb, var(--profile) 6%, white); border: 1px solid color-mix(in srgb, var(--profile) 20%, white); border-radius: var(--radius-sm); padding: 12px 14px; display:flex; flex-direction:column; gap:8px;">
-          <label class="form-label" style="margin:0;">✨ Generate with AI (optional)</label>
-          <textarea id="aiGenDescription" class="form-textarea" rows="2" style="font-family:inherit; font-size:13px;" placeholder="Describe the business in plain language, e.g. &quot;A car wash and detailing shop, two bays, appointments by the hour&quot;"></textarea>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <button class="btn-primary" id="aiGenBtn" type="button" style="white-space:nowrap;">✨ Generate</button>
-            <span id="aiGenStatus" style="font-size:12px; color:var(--muted);"></span>
+      <!-- Modal for adding a team login -->
+      <div id="userModal" class="modal-overlay">
+        <div class="modal-card" style="max-width:480px;">
+          <div class="card-header" style="margin-bottom: 0;">
+            <span class="card-title" style="font-size: 16px;">Add a Login</span>
+            <button class="btn-link" id="closeUserModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
           </div>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="form-group-row">
-            <div class="form-control-wrap">
-              <label class="form-label">Start from Template</label>
-              <select id="workflowTemplateSelect" class="form-select">
-                <option value="custom">Custom (Blank / Custom JSON)</option>
-                <option value="hair">💇 Haircut / Grooming Template</option>
-                <option value="hotel">🏨 Hotel Room Template</option>
-                <option value="medical">🩺 Doctor Appointment Template</option>
+          <div id="userModalError"
+            style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <label class="form-label" for="userRoleInput">Role</label>
+              <select id="userRoleInput" class="form-select">
+                <option value="provider">Provider — sees only their own business</option>
+                <option value="admin">Admin — sees everything</option>
               </select>
             </div>
-            <div class="form-control-wrap">
-              <label class="form-label">Workflow / Business ID</label>
-              <input type="text" id="workflowIdInput" placeholder="e.g. spa (lowercase, no spaces)"
+            <div id="userProviderWrap">
+              <label class="form-label" for="userProviderInput">Which provider is this login for?</label>
+              <select id="userProviderInput" class="form-select"></select>
+            </div>
+            <div class="form-group-row">
+              <div class="form-control-wrap">
+                <label class="form-label" for="userNameInput">Name</label>
+                <input type="text" id="userNameInput" class="form-input" placeholder="e.g. Dr. Rajesh Sharma" />
+              </div>
+              <div class="form-control-wrap">
+                <label class="form-label" for="userEmailInput">Email (their login)</label>
+                <input type="email" id="userEmailInput" class="form-input" placeholder="name@example.com" />
+              </div>
+            </div>
+            <div>
+              <label class="form-label" for="userPasswordInput">Temporary Password</label>
+              <input type="text" id="userPasswordInput" class="form-input" placeholder="At least 8 characters" />
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn-secondary" id="cancelUserModalBtn">Cancel</button>
+            <button class="btn-primary" id="saveUserBtn">Create Login</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PROVIDER VIEW: info banner (photo + geolocation) ── -->
+      <div id="providerInfoBanner" style="display:none;"></div>
+
+      <!-- ── PROVIDER VIEW: bookings table ── -->
+      <div class="card" id="providerBookingsCard">
+        <div class="card-header">
+          <span class="card-title">📋 Bookings</span>
+        </div>
+        <div class="prov-filters">
+          <select id="statusFilter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="booked">Booked</option>
+            <option value="arrived">Arrived</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <input type="date" id="dateFilter" title="Filter by date" aria-label="Filter by date" />
+          <button class="btn-link" id="clearFiltersBtn">× Clear filters</button>
+        </div>
+        <div class="table-scroll" id="bookingsContainer">
+          <div class="empty">Select a provider above.</div>
+        </div>
+      </div>
+
+      <!-- ── Analytics (both roles; provider sees only their own numbers) ── -->
+      <div class="card" id="analyticsCard">
+        <div class="card-header">
+          <span class="card-title">📈 Analytics</span>
+          <select id="analyticsRangeSelect" aria-label="Analytics date range"
+            style="font-family:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-xs); background:white;">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+        <div id="analyticsBody">
+          <div class="empty">Loading…</div>
+        </div>
+      </div>
+
+      <!-- ── Support Requests (both roles; provider sees only their own business) ── -->
+      <div class="card" id="supportRequestsCard">
+        <div class="card-header">
+          <span class="card-title">🆘 Support Requests <span class="count-badge"
+              id="supportRequestsCountBadge">—</span></span>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          A customer asked for a human twice in the same conversation. The bot can't connect them directly, but every
+          one of these lands here so someone real can follow up.
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>When (IST)</th>
+                <th>Customer</th>
+                <th>Business</th>
+                <th>Message</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="supportRequestsList">
+              <tr>
+                <td colspan="6" class="empty">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Feedback (both roles; provider sees only their own business) ── -->
+      <div class="card" id="feedbackCard">
+        <div class="card-header">
+          <span class="card-title">💬 Feedback <span class="count-badge" id="feedbackCountBadge">—</span></span>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          Collected after a provider marks a booking complete — the bot asks once, no repeated nudging.
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>When (IST)</th>
+                <th>Customer</th>
+                <th>Booking</th>
+                <th>Business</th>
+                <th>Rating</th>
+                <th>Comment</th>
+              </tr>
+            </thead>
+            <tbody id="feedbackList">
+              <tr>
+                <td colspan="6" class="empty">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Knowledge Base (both roles; provider sees only their own business) ── -->
+      <div class="card" id="knowledgeCard">
+        <div class="card-header">
+          <span class="card-title">📚 Knowledge Base <span class="count-badge" id="knowledgeCountBadge">—</span></span>
+          <button class="btn-primary" id="addKnowledgeBtn">＋ Add Entry</button>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          FAQs, policies, and pricing the WhatsApp bot can answer customers from. The bot only answers from what's
+          written here plus your business config — it won't invent anything.
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Business</th>
+                <th>Title</th>
+                <th>Content</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="knowledgeList">
+              <tr>
+                <td colspan="4" class="empty">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Modal for adding/editing a knowledge entry -->
+      <div id="knowledgeModal" class="modal-overlay">
+        <div class="modal-card" style="max-width:560px;">
+          <div class="card-header" style="margin-bottom: 0;">
+            <span class="card-title" id="knowledgeModalTitle" style="font-size: 16px;">Add Knowledge Entry</span>
+            <button class="btn-link" id="closeKnowledgeModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+          </div>
+          <div id="knowledgeModalError"
+            style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div id="knowledgeWorkflowWrap">
+              <label class="form-label" for="knowledgeWorkflowInput">Business</label>
+              <select id="knowledgeWorkflowInput" class="form-select"></select>
+            </div>
+            <div>
+              <label class="form-label" for="knowledgeTitleInput">Title / Question</label>
+              <input type="text" id="knowledgeTitleInput" class="form-input"
+                placeholder="e.g. Do you accept insurance?" />
+            </div>
+            <div>
+              <label class="form-label" for="knowledgeContentInput">Answer / Content</label>
+              <textarea id="knowledgeContentInput" class="form-textarea" rows="6"
+                style="font-family:inherit; font-size:13px;"
+                placeholder="e.g. We accept most major insurance providers including..."></textarea>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn-secondary" id="cancelKnowledgeModalBtn">Cancel</button>
+            <button class="btn-primary" id="saveKnowledgeBtn">Save Entry</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PROVIDER VIEW: availability ── -->
+      <div class="card" id="availabilityCard">
+        <div class="card-header">
+          <span class="card-title">🗓 Availability</span>
+        </div>
+        <div class="avail-add">
+          <input type="date" id="blockDate" aria-label="Block date" title="Block date" />
+          <input type="time" id="blockTime" placeholder="Start (optional)" aria-label="Start time"
+            title="Start time — leave blank to block the whole day" />
+          <span style="color:var(--muted); font-size:13px;">to</span>
+          <input type="time" id="blockEndTime" placeholder="End" aria-label="End time"
+            title="End time — leave blank to block just the start time" />
+          <input type="text" id="blockReason" placeholder="Reason (optional)" aria-label="Block reason"
+            style="min-width:190px;" />
+          <button class="btn-primary" id="addBlockBtn">Block</button>
+        </div>
+        <div class="note">Leave both times blank to block the entire day. Set a start and end to block a range (e.g.
+          2:30–3:40 excludes every slot in between, not just one). Leave end blank with a start set to block just that
+          one slot. Applies immediately to the WhatsApp bot's available slots.</div>
+        <div id="blockConflictWarning"
+          style="display:none; background:#fff7ed; color:#9a3412; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid #fed7aa; font-size:13px; margin-bottom:10px;">
+        </div>
+        <div class="block-list" id="blockList"></div>
+      </div>
+
+      <!-- ── PROVIDER VIEW: Google Calendar sync (Section 10) ── -->
+      <div class="card" id="calendarCard">
+        <div class="card-header">
+          <span class="card-title">📆 Calendar Sync</span>
+        </div>
+        <div id="calendarStatusRow" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <span id="calendarStatusText" style="font-size:13px; color:var(--muted);">Loading…</span>
+          <div id="calendarActions"></div>
+        </div>
+        <div class="note">Connecting syncs every confirmed booking to this provider's own Google Calendar automatically
+          — a cancellation removes the event, a reschedule moves it. One-way only: an event added directly in Google
+          Calendar doesn't yet block a slot here.</div>
+      </div>
+
+      <!-- Modal for Workflow Add/Edit -->
+      <div id="workflowModal" class="modal-overlay">
+        <div class="modal-card">
+          <div class="card-header" style="margin-bottom: 0;">
+            <span class="card-title" id="workflowModalTitle" style="font-size: 16px;">Add Business Workflow</span>
+            <button class="btn-link" id="closeWorkflowModalBtn" style="font-size: 20px; font-weight: bold;">×</button>
+          </div>
+
+          <div id="workflowModalError"
+            style="display:none; background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px;">
+          </div>
+
+          <div
+            style="background: color-mix(in srgb, var(--profile) 6%, white); border: 1px solid color-mix(in srgb, var(--profile) 20%, white); border-radius: var(--radius-sm); padding: 12px 14px; display:flex; flex-direction:column; gap:8px;">
+            <label class="form-label" for="aiGenDescription" style="margin:0;">✨ Generate with AI (optional)</label>
+            <textarea id="aiGenDescription" class="form-textarea" rows="2" style="font-family:inherit; font-size:13px;"
+              placeholder="Describe the business in plain language, e.g. &quot;A car wash and detailing shop, two bays, appointments by the hour&quot;"></textarea>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <button class="btn-primary" id="aiGenBtn" type="button" style="white-space:nowrap;">✨ Generate</button>
+              <span id="aiGenStatus" style="font-size:12px; color:var(--muted);"></span>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="form-group-row">
+              <div class="form-control-wrap">
+                <label class="form-label" for="workflowTemplateSelect">Start from Template</label>
+                <select id="workflowTemplateSelect" class="form-select">
+                  <option value="custom">Custom (Blank / Custom JSON)</option>
+                  <option value="hair">💇 Haircut / Grooming Template</option>
+                  <option value="hotel">🏨 Hotel Room Template</option>
+                  <option value="medical">🩺 Doctor Appointment Template</option>
+                </select>
+              </div>
+              <div class="form-control-wrap">
+                <label class="form-label" for="workflowIdInput">Workflow / Business ID</label>
+                <input type="text" id="workflowIdInput" placeholder="e.g. spa (lowercase, no spaces)"
+                  class="form-input" />
+              </div>
+            </div>
+
+            <div class="form-group-row">
+              <div class="form-control-wrap">
+                <label class="form-label" for="workflowLabelInput">Label (Name)</label>
+                <input type="text" id="workflowLabelInput" placeholder="e.g. Zen Massage & Spa" class="form-input" />
+              </div>
+              <div class="form-control-wrap">
+                <label class="form-label" for="workflowPrefixInput">Booking ID Prefix</label>
+                <input type="text" id="workflowPrefixInput" placeholder="e.g. SPA" class="form-input" />
+              </div>
+            </div>
+
+            <div>
+              <label class="form-label" for="workflowDescInput">Description</label>
+              <input type="text" id="workflowDescInput" placeholder="e.g. massage, therapy, relaxation, wellness"
                 class="form-input" />
             </div>
-          </div>
 
-          <div class="form-group-row">
-            <div class="form-control-wrap">
-              <label class="form-label">Label (Name)</label>
-              <input type="text" id="workflowLabelInput" placeholder="e.g. Zen Massage & Spa" class="form-input" />
-            </div>
-            <div class="form-control-wrap">
-              <label class="form-label">Booking ID Prefix</label>
-              <input type="text" id="workflowPrefixInput" placeholder="e.g. SPA" class="form-input" />
-            </div>
-          </div>
-
-          <div>
-            <label class="form-label">Description</label>
-            <input type="text" id="workflowDescInput" placeholder="e.g. massage, therapy, relaxation, wellness"
-              class="form-input" />
-          </div>
-
-          <div>
-            <label class="form-label">Full Workflow JSON Config</label>
-            <textarea id="workflowJsonInput" rows="12" class="form-textarea"
-              placeholder="Paste or edit workflow JSON configuration..."></textarea>
-            <div style="font-size:11px; color:var(--muted); margin-top:4px;">The metadata fields above will
-              automatically update key properties of this JSON on save. Use standard syntax matching existing workflows.
+            <div>
+              <label class="form-label" for="workflowJsonInput">Full Workflow JSON Config</label>
+              <textarea id="workflowJsonInput" rows="12" class="form-textarea"
+                placeholder="Paste or edit workflow JSON configuration..."></textarea>
+              <div style="font-size:11px; color:var(--muted); margin-top:4px;">The metadata fields above will
+                automatically update key properties of this JSON on save. Use standard syntax matching existing
+                workflows.
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-          <button class="btn-secondary" id="cancelWorkflowModalBtn">Cancel</button>
-          <button class="btn-primary" id="saveWorkflowBtn">Save Business</button>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button class="btn-secondary" id="cancelWorkflowModalBtn">Cancel</button>
+            <button class="btn-primary" id="saveWorkflowBtn">Save Business</button>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- ── Reschedule booking modal ── -->
-    <div id="rescheduleModal" class="modal-overlay" style="display:none;">
-      <div class="modal-card" style="max-width:420px;">
-        <div class="card-header" style="margin-bottom:0;">
-          <span class="card-title" style="font-size:15px;">📅 Reschedule Booking</span>
-          <button class="btn-link" id="closeRescheduleModalBtn" style="font-size:20px;font-weight:bold;">×</button>
-        </div>
-        <div id="rescheduleModalSubtitle" style="font-size:13px;color:var(--muted);margin:8px 0 14px;"></div>
-        <div id="rescheduleModalError" style="display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid #fecaca;font-size:13px;margin-bottom:10px;"></div>
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          <div>
-            <label class="form-label">New Date <span style="color:var(--danger);">*</span></label>
-            <input type="date" id="rescheduleDate" class="form-input" />
+      <!-- ── Reschedule booking modal ── -->
+      <div id="rescheduleModal" class="modal-overlay" style="display:none;">
+        <div class="modal-card" style="max-width:420px;">
+          <div class="card-header" style="margin-bottom:0;">
+            <span class="card-title" style="font-size:15px;">📅 Reschedule Booking</span>
+            <button class="btn-link" id="closeRescheduleModalBtn" style="font-size:20px;font-weight:bold;">×</button>
           </div>
-          <div>
-            <label class="form-label">New Time <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-            <input type="time" id="rescheduleTime" class="form-input" />
+          <div id="rescheduleModalSubtitle" style="font-size:13px;color:var(--muted);margin:8px 0 14px;"></div>
+          <div id="rescheduleModalError"
+            style="display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid #fecaca;font-size:13px;margin-bottom:10px;">
           </div>
-          <div>
-            <label class="form-label">Message to customer <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-            <textarea id="rescheduleNote" class="form-textarea" rows="3" placeholder="e.g. Sorry for the inconvenience — the doctor has an emergency. Your new slot is confirmed."></textarea>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div>
+              <label class="form-label" for="rescheduleDate">New Date <span
+                  style="color:var(--danger);">*</span></label>
+              <input type="date" id="rescheduleDate" class="form-input" />
+            </div>
+            <div>
+              <label class="form-label" for="rescheduleTime">New Time <span
+                  style="color:var(--muted);font-weight:400;">(optional)</span></label>
+              <input type="time" id="rescheduleTime" class="form-input" />
+            </div>
+            <div>
+              <label class="form-label" for="rescheduleNote">Message to customer <span
+                  style="color:var(--muted);font-weight:400;">(optional)</span></label>
+              <textarea id="rescheduleNote" class="form-textarea" rows="3"
+                placeholder="e.g. Sorry for the inconvenience — the doctor has an emergency. Your new slot is confirmed."></textarea>
+            </div>
           </div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-          <button class="btn-secondary" id="cancelRescheduleModalBtn">Cancel</button>
-          <button class="btn-primary" id="saveRescheduleBtn">📅 Reschedule &amp; Notify</button>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+            <button class="btn-secondary" id="cancelRescheduleModalBtn">Cancel</button>
+            <button class="btn-primary" id="saveRescheduleBtn">📅 Reschedule &amp; Notify</button>
+          </div>
         </div>
       </div>
-    </div>
 
-  </main>
+    </main>
 
   </div><!-- /#appShell -->
 
@@ -1420,7 +1565,7 @@
     /* ─────────────────────────────────────────────────────
        Helpers
     ───────────────────────────────────────────────────── */
-// Session identity lives in an HttpOnly cookie, never in JS-reachable
+    // Session identity lives in an HttpOnly cookie, never in JS-reachable
     // storage or the URL — every request just needs credentials: "include".
     async function api(path, options) {
       const resp = await fetch(path, {
@@ -1815,8 +1960,8 @@
           // behind it down a position on their next STATUS check.
           const queueActions = actionable && b.visitTime
             ? (b.status === "serving"
-                ? `<button class="btn-secondary btn-complete-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Mark done">✅ Complete</button>`
-                : `<button class="btn-secondary btn-serve-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Start serving">▶️ Serve</button>`)
+              ? `<button class="btn-secondary btn-complete-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Mark done">✅ Complete</button>`
+              : `<button class="btn-secondary btn-serve-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Start serving">▶️ Serve</button>`)
             : "";
           // Section 9.8 — the manual refund escape hatch: only offered
           // when a payment actually cleared, for the cases the automatic
@@ -1828,7 +1973,7 @@
             : "";
           const actions = actionable
             ? `${queueActions}${refundAction}<button class="btn-danger btn-cancel-booking" data-id="${b.id}" style="padding:3px 8px;font-size:12px;margin-right:4px;" title="Cancel & notify customer">❌ Cancel</button>
-               <button class="btn-secondary btn-reschedule-booking" data-id="${b.id}" data-name="${escapeHtml(b.customerName||'')}" data-bid="${escapeHtml(b.bookingId)}" style="padding:3px 8px;font-size:12px;" title="Reschedule & notify customer">📅 Reschedule</button>`
+               <button class="btn-secondary btn-reschedule-booking" data-id="${b.id}" data-name="${escapeHtml(b.customerName || '')}" data-bid="${escapeHtml(b.bookingId)}" style="padding:3px 8px;font-size:12px;" title="Reschedule & notify customer">📅 Reschedule</button>`
             : refundAction || `<span style="font-size:12px;color:var(--muted);">—</span>`;
           return `<tr>${profile.columns.map((col) => `<td>${col.render(b)}</td>`).join("")}<td style="white-space:nowrap;">${actions}</td></tr>`;
         }).join("");
@@ -1984,8 +2129,8 @@
         const when = !b.time
           ? " (whole day)"
           : b.endTime
-          ? ` from ${escapeHtml(b.time)} to ${escapeHtml(b.endTime)}`
-          : ` at ${escapeHtml(b.time)}`;
+            ? ` from ${escapeHtml(b.time)} to ${escapeHtml(b.endTime)}`
+            : ` at ${escapeHtml(b.time)}`;
         return `
       <div class="block-item">
         <span>${escapeHtml(b.date)}${when}${b.reason ? " — " + escapeHtml(b.reason) : ""}</span>
@@ -2319,9 +2464,9 @@
           <div>
             <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px;">Revenue collected</div>
             ${a.paidBookingCount > 0
-              ? `<span style="font-size:22px; font-weight:700; color:#16a34a;">₹${a.revenue.toLocaleString("en-IN")}</span>
+          ? `<span style="font-size:22px; font-weight:700; color:#16a34a;">₹${a.revenue.toLocaleString("en-IN")}</span>
                  <span style="font-size:11px; color:var(--muted);"> from ${a.paidBookingCount} paid booking${a.paidBookingCount === 1 ? "" : "s"}</span>`
-              : `<span style="font-size:12px; color:var(--muted);">No payments collected yet</span>`}
+          : `<span style="font-size:12px; color:var(--muted);">No payments collected yet</span>`}
           </div>
         </div>
         ${providerRows}`;
@@ -3173,7 +3318,7 @@
     ───────────────────────────────────────────────────── */
     let currentUser = null;
 
-function showLogin() {
+    function showLogin() {
       document.getElementById("appShell").style.display = "none";
       document.getElementById("loginScreen").style.display = "flex";
       document.getElementById("loginForm").style.display = "flex";
@@ -3281,7 +3426,7 @@ function showLogin() {
     });
 
     document.getElementById("logoutBtn").addEventListener("click", async () => {
-      try { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); } catch {}
+      try { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); } catch { }
       if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
       currentUser = null;
       showLogin();
@@ -3326,17 +3471,17 @@ function showLogin() {
       liveEventSource.onerror = () => { dot.style.background = "#9ca3af"; }; // EventSource retries on its own; this only reflects the gap
       const refreshRelevantViews = () => {
         if (role === "admin") {
-          loadAllBookings().catch(() => {});
-          loadAnalytics().catch(() => {});
+          loadAllBookings().catch(() => { });
+          loadAnalytics().catch(() => { });
         } else {
-          loadBookings().catch(() => {});
-          loadAnalytics().catch(() => {});
+          loadBookings().catch(() => { });
+          loadAnalytics().catch(() => { });
         }
       };
       liveEventSource.addEventListener("booking.created", refreshRelevantViews);
       liveEventSource.addEventListener("booking.updated", refreshRelevantViews);
-      liveEventSource.addEventListener("support_request.created", () => loadSupportRequests().catch(() => {}));
-      liveEventSource.addEventListener("feedback.created", () => loadFeedback().catch(() => {}));
+      liveEventSource.addEventListener("support_request.created", () => loadSupportRequests().catch(() => { }));
+      liveEventSource.addEventListener("feedback.created", () => loadFeedback().catch(() => { }));
     }
 
     (async function initAuth() {

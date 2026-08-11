@@ -938,6 +938,31 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   // slightly off (e.g. "CANCEL THAT" was misrouted to a hair booking).
   const hasActive = bookings.hasActive(tenantId, waId);
 
+  // Handle simple greetings separately.
+  // A greeting is not a booking request and should never fall through to
+  // the "you already have a booking" fallback.
+  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar)[\s!,.?]*$/i.test(trimmed);
+
+  if (isGreeting) {
+    if (hasActive) {
+      await sendWhatsAppText(
+        tenantId,
+        waId,
+        "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else."
+      );
+    } else {
+      await sendWhatsAppText(
+        tenantId,
+        waId,
+        "Hi! 👋 What would you like to book today?"
+      );
+      session.awaitingBusinessPick = true;
+      await sendBusinessMenu(tenantId, waId, workflows);
+    }
+
+    return;
+  }
+
   // Found live: a bare "ok"/"thanks"/"no thanks" with an active booking was
   // falling all the way through to the same "Looks like you already have a
   // booking..." nudge + full business menu as a genuine unmatched request
@@ -951,6 +976,25 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   }
 
   const intent = await detectGeneralIntent(trimmed, hasActive);
+  if (intent === INTENTS.GREETING) {
+    if (hasActive) {
+      await sendWhatsAppText(
+        tenantId,
+        waId,
+        "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else."
+      );
+    } else {
+      session.awaitingBusinessPick = true;
+      await sendWhatsAppText(
+        tenantId,
+        waId,
+        "Hi! 👋 What would you like to book today?"
+      );
+      await sendBusinessMenu(tenantId, waId, workflows);
+    }
+
+    return;
+  }
 
   if (intent === INTENTS.CANCEL_BOOKING) {
     if (hasActive) {
@@ -1056,7 +1100,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     const apology = genuinelyUpset ? "I apologise for the trouble. " : "";
     await sendWhatsAppText(tenantId, waId,
       `${apology}I'm an automated assistant and can't connect you to a person directly here, but I've flagged this for the team to follow up.${contactLine} ` +
-        "In the meantime I can help you book, check your booking status (reply STATUS), or cancel a booking (reply CANCEL)."
+      "In the meantime I can help you book, check your booking status (reply STATUS), or cancel a booking (reply CANCEL)."
     );
     return;
   }
@@ -1081,7 +1125,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
 
     session.awaitingBusinessPick = true;
     if (hasActive) {
-      await sendWhatsAppText(tenantId, waId, "Looks like you already have a booking with us — reply STATUS anytime to check it. If you'd like to book something else too, here's what we offer:");
+      await sendWhatsAppText(tenantId, waId, "I couldn't quite understand that. You already have a booking with us. Reply STATUS to check it, CANCEL to cancel it, or tell me what you'd like to book.");
     }
     await sendBusinessMenu(tenantId, waId, workflows);
     return;
@@ -1249,7 +1293,7 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
   if (plan.action === ACTIONS.HUMAN) {
     await sendWhatsAppText(tenantId, waId,
       "I'm an automated booking assistant, so I can't transfer you to a person — but I can finish this booking for you. " +
-        'If you\'d rather not continue, reply "cancel".'
+      'If you\'d rather not continue, reply "cancel".'
     );
     await sendStepPrompt(tenantId, waId, workflow, currentStep(workflow, session), session);
     return true;
