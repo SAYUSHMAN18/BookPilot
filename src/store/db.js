@@ -24,9 +24,10 @@ db.exec("PRAGMA foreign_keys = ON;");
 // users, sessions, etc. to one of potentially many independent businesses
 // running on this same install. tenant_id is a plain INTEGER, not a
 // declared FOREIGN KEY — matching this schema's existing convention for
-// workflow_id/provider_id (also plain TEXT, not FK-constrained; workflows
-// aren't even DB rows, they're files), not a new stricter pattern
-// introduced partway through.
+// workflow_id/provider_id (also plain TEXT, not FK-constrained — a
+// provider is a key inside a workflow's JSON definition, not its own row;
+// see tenant_workflows below for where the definition itself now lives),
+// not a new stricter pattern introduced partway through.
 //
 // id=1 is always "the default tenant" — created explicitly with that id
 // (not left to autoincrement) specifically so every ensureColumn() call
@@ -569,6 +570,40 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 `);
+// Deliberately global, not tenant_id-scoped, unlike every table below —
+// this is the marketplace's shared catalog (Section "publish a business as
+// a template"), meant to be browsable and installable by any tenant, the
+// same way a template gallery works in other SaaS products. Installing a
+// template deep-copies its definition into that installer's own
+// tenant_workflows row (server.js's persistWorkflow) — the template itself
+// is never mutated by, or exposed as belonging to, any one tenant.
+
+// Item 5 — tenant-owned workflows. Business definitions used to live only
+// in workflows/*.json — a single set of files on disk, loaded once at boot
+// into one in-memory object every tenant's dashboard and webhook traffic
+// read AND wrote through equally. That meant any tenant's admin could
+// view, edit, or delete any OTHER tenant's business config just by
+// knowing (or guessing) a workflow id like "hair" — a real cross-tenant
+// isolation gap, not a theoretical one, since every new tenant used to
+// start from — and so shared — that exact same global "hair"/"hotel"/etc.
+// set. This table makes a workflow row-owned by exactly one tenant, the
+// same pattern every other per-tenant table here already uses.
+// workflows/*.json still exists, but now only as the read-only starter
+// catalog copied into a brand new tenant at signup
+// (src/store/tenantWorkflowStore.js's seedDefaultsForTenant) — no
+// request-handling code reads or writes those files directly anymore.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tenant_workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    workflow_id TEXT NOT NULL,
+    definition TEXT NOT NULL, -- JSON-stringified workflow config, same shape workflows/*.json always used
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(tenant_id, workflow_id)
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tenant_workflows_tenant ON tenant_workflows(tenant_id);`);
 
 // Human escalation used to be a dead end — a customer who asked for a
 // person five different ways got the same canned refusal every time, with

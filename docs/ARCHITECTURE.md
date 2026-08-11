@@ -78,10 +78,16 @@ src/types.js             Section 15 — JSDoc @typedefs for the core data
                         `// @ts-check`'d files (src/store/bookingStore.js
                         is the current worked example) get real editor/CI
                         type-checking without a TypeScript build step.
-workflows/*.json         Business definitions — one file per bookable
-                        business type, loaded by src/engine/loadWorkflows.js.
-                        Adding a new industry means adding a JSON file
-                        here, not writing code.
+workflows/*.json         The read-only starter catalog — one file per demo
+                        business type, loaded by src/engine/loadWorkflows.js
+                        and copied into a brand new tenant's OWN
+                        tenant_workflows DB rows at signup (Item 5's
+                        tenantWorkflowStore.seedDefaultsForTenant). A live
+                        business's actual definition lives in the DB from
+                        that point on, editable per-tenant without touching
+                        these files or any other tenant. Adding a new demo
+                        industry to the starter catalog still means adding
+                        a JSON file here, not writing code.
 frontend/               The React/Vite dashboard — a separate npm project
                         (its own package.json, node_modules) that builds
                         into public/app/, served by server.js's
@@ -172,15 +178,19 @@ alone let booking one doctor block an unrelated hair stylist's identical
 time slot purely because they happened to share an id. `tenant_id` closes
 the same class of bug one level up.
 
-**Known gap, not yet closed**: `workflows/*.json` files themselves are
-still a single global catalog, not yet tenant-scoped — every tenant
-currently sees the same set of business definitions. This is the one
-place Section 8's "fully isolated" guarantee doesn't yet reach; closing it
-means deciding how workflow config becomes per-tenant (a subdirectory per
-tenant slug is the natural fit, matching this file-based system's existing
-philosophy) without disrupting the existing single-tenant install's
-`workflows/*.json` layout. Flagged here deliberately rather than
-silently left inconsistent with everything else in this section.
+**Closed (Item 5)**: `workflows/*.json` files used to be a single global
+catalog, not tenant-scoped — every tenant read AND wrote through the exact
+same in-memory object, meaning any tenant's admin could view, edit, or
+delete any OTHER tenant's business config just by knowing (or guessing) a
+workflow id like `"hair"`. This was the one place Section 8's "fully
+isolated" guarantee didn't yet reach. `src/store/tenantWorkflowStore.js`'s
+`tenant_workflows` table closes it the same way every other per-tenant
+table here already works: every row is owned by exactly one `tenant_id`.
+`workflows/*.json` still exists, but only as the read-only starter catalog
+copied into a brand new tenant's own rows at signup — see the directory
+listing above. `tests/http/workflows.test.js` is the regression coverage
+for the actual bug (two tenants editing/deleting a same-id workflow
+through the real HTTP routes, not just the store layer).
 
 ### 2. The engine owns every write; the LLM only navigates
 

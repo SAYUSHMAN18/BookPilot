@@ -21,7 +21,6 @@
  */
 
 require("dotenv").config();
-const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { log } = require("./src/infra/logger");
@@ -56,7 +55,6 @@ process.on("uncaughtException", (err) => {
   log("ERROR", `Uncaught exception — exiting so a process manager can restart cleanly: ${err.stack || err.message}`);
   process.exit(1);
 });
-const { loadWorkflows } = require("./src/engine/loadWorkflows");
 const { handleIncomingMessage } = require("./src/engine/workflowEngine");
 const { isValidSignature } = require("./src/infra/verifySignature");
 const { isDuplicate } = require("./src/infra/dedupe");
@@ -83,6 +81,7 @@ const { sendWhatsAppText, sendWhatsAppAudio, sendTypingIndicator, sendWithRetry,
 const outboundQueueStore = require("./src/store/outboundQueueStore");
 const { computeQueuePosition, sameQueueBookings, markAlerted, wasAlerted, isOptedOutOfAlerts } = require("./src/store/queueStore");
 const tenantStore = require("./src/store/tenantStore");
+const tenantWorkflowStore = require("./src/store/tenantWorkflowStore");
 const paymentStore = require("./src/store/paymentStore");
 const razorpay = require("./src/infra/paymentProviders/razorpayProvider");
 const { resolvePaymentRequirement, getAvailableSlots } = require("./src/engine/workflowEngine");
@@ -183,7 +182,17 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 8081;
-const workflows = loadWorkflows();
+
+// Item 5 — every tenant now owns its own copy of its business definitions
+// (src/store/tenantWorkflowStore.js), seeded from the workflows/*.json
+// starter catalog at signup. This backfills any tenant that existed
+// before this table did (including the default tenant id=1 every fresh
+// install starts with) — seedDefaultsForTenant is a no-op for a tenant
+// that already has rows, so this is safe to run on every boot, not just
+// the first one after upgrading.
+for (const tenant of tenantStore.list()) {
+  tenantWorkflowStore.seedDefaultsForTenant(tenant.id);
+}
 
 function validateEnv() {
   if (!process.env.WHATSAPP_VERIFY_TOKEN) {
@@ -239,7 +248,7 @@ async function checkWhatsAppTokenValidity() {
   }
 }
 validateEnv();
-log("INFO", `Loaded workflows: ${Object.keys(workflows).join(", ")}`);
+log("INFO", `Tenant workflow backfill complete for ${tenantStore.list().length} tenant(s).`);
 
 const bootstrap = users.bootstrapAdminIfNeeded();
 if (bootstrap?.bootstrapped) {
@@ -383,7 +392,7 @@ app.post("/webhook", async (req, res) => {
       message.button?.text ||
       "";
 
-    if (text) await handleIncomingMessage(tenantId, waId, text, workflows);
+    if (text) await handleIncomingMessage(tenantId, waId, text, tenantWorkflowStore.listForTenant(tenantId));
   } catch (err) {
     // The safety net, not the fix (Section 0's timeouts are the fix — a
     // hung call used to be the actual cause of this path firing at all).
@@ -444,7 +453,7 @@ app.post("/api/payments/webhook", asyncHandler(async (req, res) => {
     } catch (err) {
       log("WARN", `Payment-confirmed WhatsApp notification failed for ${booking.bookingId}: ${err.message}`);
     }
-    await syncBookingCreated(payment.tenantId, booking, workflows[booking.workflowId]);
+    await syncBookingCreated(payment.tenantId, booking, tenantWorkflowStore.get(payment.tenantId, booking.workflowId));
     publishBookingEvent(payment.tenantId, "booking.updated", { ...booking, status: "booked", paymentStatus: "paid" });
   } else if (event.type === "payment.failed") {
     paymentStore.markFailed(payment.id, event.failureReason);
@@ -502,7 +511,7 @@ async function handleVoiceMessage(tenantId, waId, message) {
   // engine itself is untouched and unaware this is a voice conversation.
   beginReplyCapture(waId);
   try {
-    await handleIncomingMessage(tenantId, waId, transcript, workflows);
+    await handleIncomingMessage(tenantId, waId, transcript, tenantWorkflowStore.listForTenant(tenantId));
   } finally {
     const replyText = endReplyCapture(waId);
     if (replyText && languageCode) {
@@ -544,7 +553,7 @@ app.post("/api/simulate-whatsapp", async (req, res) => {
   // curl/test call site from before Section 8 keeps working unchanged.
   const effectiveTenantId = Number.isInteger(tenantId) ? tenantId : 1;
   try {
-    await handleIncomingMessage(effectiveTenantId, from, text, workflows);
+    await handleIncomingMessage(effectiveTenantId, from, text, tenantWorkflowStore.listForTenant(effectiveTenantId));
     res.json({ ok: true, note: "Check the console / logs/app.log for the bot's reply." });
   } catch (err) {
     log("ERROR", `Simulate endpoint error: ${err.stack || err.message}`);
@@ -564,9 +573,9 @@ app.post("/api/simulate-whatsapp", async (req, res) => {
 // ---------------------------------------------------------------------------
 // Provider dashboard — one static page, same UI for every business type.
 // "Login" is just picking yourself from a dropdown for now (explicitly
-// deferred, not an oversight) — the dropdown is built from the same
-// workflows/*.json the bot reads, so a new provider added there shows up
-// here automatically, no dashboard code changes needed.
+// deferred, not an oversight) — the dropdown is built from that tenant's
+// own tenant_workflows rows, so a new provider added there shows up here
+// automatically, no dashboard code changes needed.
 //
 // Hotels: bookings show up here same as any workflow, but the availability
 // editor is unavailable for hotel rooms — that table only knows how to
@@ -743,6 +752,11 @@ app.post("/api/signup", (req, res) => {
     if (err.code === "DUPLICATE_SLUG") return res.status(409).json({ error: "A business with a very similar name already exists — try a slightly different name." });
     throw err;
   }
+  // Item 5 — every brand new tenant starts from its own editable copy of
+  // the demo catalog (workflows/*.json), so the dashboard isn't empty on
+  // first login. Independent from every other tenant's copy from this
+  // point on — editing one never touches another's.
+  tenantWorkflowStore.seedDefaultsForTenant(tenant.id);
 
   let user;
   try {
@@ -868,9 +882,9 @@ app.get("/api/auth/me", requireAuth(), (req, res) => {
   res.json({ email: req.user.email, role: req.user.role, name: req.user.name, workflowId: req.user.workflowId, providerId: req.user.providerId });
 });
 
-function listAllProviders() {
+function listAllProviders(tenantId) {
   const list = [];
-  for (const workflow of Object.values(workflows)) {
+  for (const workflow of Object.values(tenantWorkflowStore.listForTenant(tenantId))) {
     for (const p of workflow.providers || []) {
       list.push({
         workflowId: workflow.id,
@@ -932,7 +946,7 @@ app.get("/signup", (req, res) => {
 });
 
 app.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
-  const all = listAllProviders();
+  const all = listAllProviders(req.user.tenantId);
   if (req.user.role === "provider") {
     // Not the roster — only the caller's own entry, so a provider session
     // can render its label without ever learning who else is on the platform.
@@ -1006,11 +1020,11 @@ app.get("/api/dashboard/alerts", requireAuth("admin"), (req, res) => {
   });
 });
 
-// Business/workflow management — admin only. Mutates the SAME `workflows`
-// object handle_incoming_message() and every dashboard read route already
-// hold a reference to, so a save/delete here takes effect immediately for
-// both the WhatsApp bot and the rest of the dashboard, no restart needed.
-const WORKFLOWS_DIR = path.join(__dirname, "workflows");
+// Business/workflow management — admin only, and (Item 5) tenant-scoped:
+// every read/write here goes through tenantWorkflowStore keyed on
+// req.user.tenantId, so a save/delete here takes effect immediately for
+// that tenant's own WhatsApp bot and dashboard, and is invisible to every
+// other tenant, no restart needed.
 const WORKFLOW_ID_RE = /^[a-z0-9_-]+$/i;
 
 function validateWorkflowShape(workflow) {
@@ -1026,7 +1040,7 @@ function validateWorkflowShape(workflow) {
 }
 
 app.get("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
-  res.json(workflows);
+  res.json(tenantWorkflowStore.listForTenant(req.user.tenantId));
 });
 
 // AI Workflow Generator — drafts a workflow from a plain-language
@@ -1055,14 +1069,8 @@ app.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
   const validationError = validateWorkflowShape(workflow);
   if (validationError) return res.status(400).json({ error: validationError });
 
-  const isUpdate = !!workflows[workflow.id];
-  try {
-    fs.writeFileSync(path.join(WORKFLOWS_DIR, `${workflow.id}.json`), JSON.stringify(workflow, null, 2));
-  } catch (err) {
-    log("ERROR", `Failed to write workflow file for ${workflow.id}: ${err.message}`);
-    return res.status(500).json({ error: "Failed to save workflow file." });
-  }
-  workflows[workflow.id] = workflow;
+  const isUpdate = !!tenantWorkflowStore.get(req.user.tenantId, workflow.id);
+  tenantWorkflowStore.upsert(req.user.tenantId, workflow);
   recordAudit(req.user.tenantId, req.user, isUpdate ? "workflow.update" : "workflow.create", { workflowId: workflow.id });
   log("INFO", `${req.user.email} ${isUpdate ? "updated" : "created"} workflow "${workflow.id}"`);
   res.status(isUpdate ? 200 : 201).json({ ok: true });
@@ -1070,14 +1078,8 @@ app.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
 
 app.delete("/api/dashboard/workflows/:id", requireAuth("admin"), (req, res) => {
   const id = req.params.id;
-  if (!workflows[id]) return res.status(404).json({ error: "Unknown workflowId" });
-  try {
-    fs.unlinkSync(path.join(WORKFLOWS_DIR, `${id}.json`));
-  } catch (err) {
-    log("ERROR", `Failed to delete workflow file for ${id}: ${err.message}`);
-    return res.status(500).json({ error: "Failed to delete workflow file." });
-  }
-  delete workflows[id];
+  if (!tenantWorkflowStore.get(req.user.tenantId, id)) return res.status(404).json({ error: "Unknown workflowId" });
+  tenantWorkflowStore.remove(req.user.tenantId, id);
   recordAudit(req.user.tenantId, req.user, "workflow.delete", { workflowId: id });
   log("INFO", `${req.user.email} deleted workflow "${id}"`);
   res.json({ ok: true });
@@ -1135,7 +1137,7 @@ app.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
     if (typeof workflowId !== "string" || typeof providerId !== "string") {
       return res.status(400).json({ error: "workflowId and providerId are required for a provider account." });
     }
-    const matches = listAllProviders().some((p) => p.workflowId === workflowId && p.providerId === providerId);
+    const matches = listAllProviders(req.user.tenantId).some((p) => p.workflowId === workflowId && p.providerId === providerId);
     if (!matches) return res.status(400).json({ error: "Unknown workflowId/providerId — pick one from the provider list." });
   }
 
@@ -1235,7 +1237,7 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
     // src/engine/paymentRefunds.js's own comment for why.
     const refundResult = await refundIfPaid(req.user.tenantId, booking, {
       initiatedBy: "provider",
-      refundPolicy: workflows[booking.workflowId]?.refundPolicy,
+      refundPolicy: tenantWorkflowStore.get(req.user.tenantId, booking.workflowId)?.refundPolicy,
     });
 
     // Notify the customer on WhatsApp.
@@ -1345,7 +1347,7 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
       log("WARN", `WhatsApp notification failed for reschedule of ${booking.bookingId}: ${err.message}`);
     }
 
-    await syncBookingRescheduled(req.user.tenantId, updated, workflows[updated.workflowId]);
+    await syncBookingRescheduled(req.user.tenantId, updated, tenantWorkflowStore.get(req.user.tenantId, updated.workflowId));
     publishBookingEvent(req.user.tenantId, "booking.updated", updated);
 
     return res.json({ ok: true, booking: updated });
@@ -1438,7 +1440,7 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
     }
 
     const updated = bookings.updateWithMeta(req.user.tenantId, id, { status: "no_show", providerNote: typeof note === "string" ? note.slice(0, 500) : null });
-    const policy = workflows[booking.workflowId]?.refundPolicy?.noShow;
+    const policy = tenantWorkflowStore.get(req.user.tenantId, booking.workflowId)?.refundPolicy?.noShow;
     let refundResult = { refunded: false };
     if (policy === "refund") {
       refundResult = await refundIfPaid(req.user.tenantId, booking, { initiatedBy: "provider", refundPolicy: { providerCancellation: "full" } });
@@ -1495,7 +1497,7 @@ app.post("/api/dashboard/availability", requireAuth("admin", "provider"), (req, 
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
     return res.status(400).json({ error: "workflowId, providerId, and date are required strings" });
   }
-  if (!workflows[workflowId]) return res.status(400).json({ error: "Unknown workflowId" });
+  if (!tenantWorkflowStore.get(req.user.tenantId, workflowId)) return res.status(400).json({ error: "Unknown workflowId" });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be in YYYY-MM-DD format" });
   if (time !== undefined && time !== null && typeof time !== "string") {
     return res.status(400).json({ error: "time must be a string (or omitted to block the whole day)" });
@@ -1806,15 +1808,12 @@ app.get("/api/dashboard/events", requireAuth("admin", "provider"), (req, res) =>
   });
 });
 
-// Marketplace — publish a working business as a reusable template, then
-// install it later (or into another business) as a fresh workflow. Admin
-// only: installing writes a new workflows/*.json and makes it live for the
-// WhatsApp bot immediately, same blast radius as creating one by hand.
-function persistWorkflow(workflow) {
-  fs.writeFileSync(path.join(WORKFLOWS_DIR, `${workflow.id}.json`), JSON.stringify(workflow, null, 2));
-  workflows[workflow.id] = workflow;
-}
-
+// Marketplace — publish a working business as a reusable template (shared
+// across every tenant, deliberately — see workflow_templates' own comment
+// in src/store/db.js), then install it later (into any tenant, or another
+// business within the same one) as a fresh, tenant-owned workflow. Admin
+// only: installing makes it live for that tenant's WhatsApp bot
+// immediately, same blast radius as creating one by hand.
 app.get("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
   // Strip the full definition from the list — it can be large and the
   // browser only needs it at install time, which re-fetches by id.
@@ -1827,7 +1826,7 @@ app.get("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
 
 app.post("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
   const { workflowId, name, industry, description } = req.body || {};
-  const source = workflows[workflowId];
+  const source = tenantWorkflowStore.get(req.user.tenantId, workflowId);
   if (!source) return res.status(400).json({ error: "Unknown workflowId — publish from an existing business." });
   if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "A template name is required." });
 
@@ -1852,7 +1851,7 @@ app.post("/api/dashboard/templates/:id/install", requireAuth("admin"), (req, res
   if (typeof newId !== "string" || !WORKFLOW_ID_RE.test(newId)) {
     return res.status(400).json({ error: "newId is required and must contain only letters, numbers, dashes, and underscores." });
   }
-  if (workflows[newId]) return res.status(409).json({ error: `A business with id "${newId}" already exists.` });
+  if (tenantWorkflowStore.get(req.user.tenantId, newId)) return res.status(409).json({ error: `A business with id "${newId}" already exists.` });
 
   // Deep copy so the stored template is never mutated by the install.
   const workflow = JSON.parse(JSON.stringify(template.definition));
@@ -1862,12 +1861,7 @@ app.post("/api/dashboard/templates/:id/install", requireAuth("admin"), (req, res
   const validationError = validateWorkflowShape(workflow);
   if (validationError) return res.status(400).json({ error: `Template produced an invalid workflow: ${validationError}` });
 
-  try {
-    persistWorkflow(workflow);
-  } catch (err) {
-    log("ERROR", `Failed to install template ${id} as ${newId}: ${err.message}`);
-    return res.status(500).json({ error: "Failed to write the new workflow file." });
-  }
+  tenantWorkflowStore.upsert(req.user.tenantId, workflow);
   recordAudit(req.user.tenantId, req.user, "template.install", { templateId: id, newWorkflowId: newId });
   log("INFO", `${req.user.email} installed template "${template.name}" as workflow "${newId}"`);
   res.status(201).json({ ok: true, workflowId: newId });
@@ -1914,7 +1908,7 @@ app.get("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res)
 app.post("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res) => {
   const { title, content } = req.body || {};
   const workflowId = resolveKnowledgeWorkflowId(req, req.body?.workflowId);
-  if (typeof workflowId !== "string" || !workflows[workflowId]) {
+  if (typeof workflowId !== "string" || !tenantWorkflowStore.get(req.user.tenantId, workflowId)) {
     return res.status(400).json({ error: "A known workflowId is required." });
   }
   if (typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "title is required." });
@@ -2010,6 +2004,7 @@ app.post("/api/platform/tenants", requireAuth("platform_admin"), (req, res) => {
   }
   try {
     const tenant = tenantStore.create({ name: name.trim(), slug, plan, billingEmail });
+    tenantWorkflowStore.seedDefaultsForTenant(tenant.id); // same starter catalog self-signup gets — see POST /api/signup
     recordAudit(tenant.id, req.user, "tenant.create", { name: tenant.name, slug: tenant.slug });
     log("INFO", `${req.user.email} created tenant "${tenant.name}" (${tenant.slug})`);
     res.status(201).json(tenant);
@@ -2103,7 +2098,7 @@ app.get("/api/v1/availability", requireApiKey, (req, res) => {
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
     return res.status(400).json({ error: "workflowId, providerId, and date (YYYY-MM-DD) are required query params." });
   }
-  const workflow = workflows[workflowId];
+  const workflow = tenantWorkflowStore.get(req.apiTenantId, workflowId);
   if (!workflow) return res.status(404).json({ error: "Unknown workflowId." });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be in YYYY-MM-DD format." });
 
@@ -2123,7 +2118,13 @@ app.get("/api/v1/bookings/:bookingId", requireApiKey, (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", workflows: Object.keys(workflows), uptimeSeconds: process.uptime() });
+  // Item 5 — used to list every workflow id on the entire platform here
+  // (Object.keys() of the old global, un-scoped `workflows` object). Now
+  // that workflows are tenant-owned, there's no single "current tenant"
+  // for an unauthenticated health check to report on, and leaking every
+  // tenant's business names to anyone who can reach this URL was never
+  // something this endpoint's actual purpose (process liveness) needed.
+  res.json({ status: "ok", uptimeSeconds: process.uptime() });
 });
 
 // Anything that fell through every route above.
