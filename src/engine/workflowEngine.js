@@ -165,6 +165,37 @@ function takenSlotsFor(tenantId, workflowId, providerId, dateIso) {
   return taken;
 }
 
+// Item 9 — business-hours awareness. "Today" used to always appear as a
+// tappable date option regardless of whether any time slots were actually
+// left in it — a customer messaging after closing time (or between the
+// last slot and closing) could tap "Today" only to be told "No more slots
+// available for that day" one step later, in select_time_slot's own empty
+// check. This filters it out up front instead, the same way isDayBlocked
+// already does for a fully-blocked day. Deliberately only for a select_date
+// step that actually leads into a select_time_slot step (matched by
+// dateField, the same link select_time_slot itself uses) — a hotel's
+// check-in date has no time-of-day component at all, so applying a
+// time-slot emptiness check to it would be checking something that isn't
+// what that date field even means.
+function dateStepUsesTimeSlots(workflow, dateField) {
+  return workflow.steps.some((s) => s.type === "select_time_slot" && s.dateField === dateField);
+}
+
+function filteredDateOptions(tenantId, workflow, session, step) {
+  const providerId = session.selectedProvider?.id;
+  const usesTimeSlots = dateStepUsesTimeSlots(workflow, step.field);
+  const today = isoDate(new Date());
+  return dateOptions(step.days).filter((o) => {
+    if (isDayBlocked(tenantId, workflow.id, providerId, o.iso)) return false;
+    if (usesTimeSlots && o.iso === today) {
+      const excludeSlots = takenSlotsFor(tenantId, workflow.id, providerId, o.iso);
+      const blockedRanges = blockedRangesForDay(tenantId, workflow.id, providerId, o.iso);
+      if (timeSlotsFor(workflow, o.iso, excludeSlots, blockedRanges).length === 0) return false;
+    }
+    return true;
+  });
+}
+
 // Section 14 — the exact same open-slot computation the conversational
 // select_time_slot step uses (see sendStepPrompt/applyStepInput above),
 // pulled out so the Public API's GET /api/v1/availability can reuse it
@@ -288,7 +319,7 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session) {
   }
 
   if (step.type === "select_date") {
-    const options = dateOptions(step.days).filter((o) => !isDayBlocked(tenantId, workflow.id, session.selectedProvider?.id, o.iso));
+    const options = filteredDateOptions(tenantId, workflow, session, step);
     const sections = [{ title: "Dates", rows: options.map((o) => ({ id: o.id, title: o.title })) }];
     await sendWhatsAppList(tenantId, waId, prompt, "Choose", sections);
     return;
@@ -367,10 +398,11 @@ function applyStepInput(tenantId, workflow, step, session, text) {
   }
 
   if (step.type === "select_date") {
-    // Must filter blocked days identically to sendStepPrompt — otherwise a
-    // numeric reply ("3") indexes into a different, unfiltered list than
-    // what was actually shown, silently picking the wrong day.
-    const options = dateOptions(step.days).filter((o) => !isDayBlocked(tenantId, workflow.id, session.selectedProvider?.id, o.iso));
+    // Must filter identically to sendStepPrompt (filteredDateOptions is the
+    // shared source of truth for both) — otherwise a numeric reply ("3")
+    // indexes into a different, unfiltered list than what was actually
+    // shown, silently picking the wrong day.
+    const options = filteredDateOptions(tenantId, workflow, session, step);
     const byIdOrTitle = options.find((o) => o.id === text.toLowerCase() || o.title.toLowerCase() === text.toLowerCase());
     const byIndex = options[parseInt(text, 10) - 1];
     const match = byIdOrTitle || byIndex;
@@ -578,6 +610,7 @@ async function beginWorkflow(tenantId, waId, session, workflowId, workflows, ori
   session.selectedHotel = null;
   session.data = {};
   session.supportAttempts = 0;
+  session.confusionCount = 0; // Item 9 — a successful classification means they're no longer stuck
 
   await sendWhatsAppText(tenantId, waId, `Got it! Based on your message, it looks like you need ${workflow.matchLabel}.`);
 
@@ -899,6 +932,44 @@ async function cancelActiveBooking(tenantId, waId, workflows) {
   return { booking, refundResult };
 }
 
+// Item 9 — loop detection. Before this, a customer who sent unmatched or
+// off-script replies (typos, noise, a request the classifier genuinely
+// couldn't place) got the exact same "I couldn't understand that" +
+// re-prompt every single time, with no escalation path — unlike an
+// explicit complaint/"talk to a human" ask, which already lands in
+// support_requests after a second attempt (see the COMPLAINT branch
+// below). A customer who's stuck without ever saying so in those words
+// deserves the same real escalation, not an infinite loop of the same
+// menu. session.confusionCount increments at the two genuine "I still
+// don't understand" fallbacks (handleDetecting's unclassifiable-message
+// branch, handleRunning's final invalid-input fallback) and resets to 0
+// the moment they actually get somewhere (beginWorkflow, or a step
+// applies successfully) — so it's tracking CONSECUTIVE confusion, not a
+// lifetime count. Reuses the exact same support_requests mechanism and
+// dashboard event the complaint path already does, rather than a second,
+// parallel escalation system.
+const CONFUSION_ESCALATION_THRESHOLD = 3;
+
+async function maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed) {
+  session.confusionCount = (session.confusionCount || 0) + 1;
+  if (session.confusionCount < CONFUSION_ESCALATION_THRESHOLD) return false;
+
+  session.confusionCount = 0; // one escalation per streak, not one per message from here on
+  const activeBooking = bookings.activeForCustomer(tenantId, waId);
+  const workflowId = activeBooking?.workflowId || session.workflowId || null;
+  supportRequests.create(tenantId, waId, workflowId, trimmed);
+  log("INFO", `Support request logged for ${waId} after ${CONFUSION_ESCALATION_THRESHOLD} consecutive unclear replies (workflow=${workflowId || "unknown"}): "${trimmed}"`);
+  dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: trimmed });
+
+  const workflow = workflowId ? workflows[workflowId] : null;
+  const contactLine = workflow?.supportContact ? ` You can also reach us directly at ${workflow.supportContact}.` : "";
+  await sendWhatsAppText(tenantId, waId,
+    `I'm having trouble understanding what you're after, so I've flagged this for the team to follow up.${contactLine} ` +
+    "In the meantime I can help you book, check your booking status (reply STATUS), or cancel a booking (reply CANCEL)."
+  );
+  return true;
+}
+
 // This function calls detectGeneralIntent(), then CONDITIONALLY
 // classifyBusiness(), then CONDITIONALLY tryAnswerFactually() — up to 3
 // sequential Groq calls. Deliberately left sequential, not parallelized:
@@ -1120,9 +1191,15 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     // isn't a booking intent.
     const factualAnswer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
     if (factualAnswer) {
+      session.confusionCount = 0; // a real answer means they weren't actually stuck
       await sendWhatsAppText(tenantId, waId, factualAnswer);
       return;
     }
+
+    // Item 9 — loop detection. Genuinely unclassifiable AND unanswerable:
+    // this is the actual "stuck" case, not the workflow-selection menu
+    // that legitimately appears the first time or two.
+    if (await maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed)) return;
 
     session.awaitingBusinessPick = true;
     if (hasActive) {
@@ -1217,6 +1294,7 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
   const error = applyStepInput(tenantId, workflow, step, session, trimmed);
 
   if (!error) {
+    session.confusionCount = 0; // a valid step answer means they weren't actually stuck
     if (step.type === "select_provider" && step.confirmCard) {
       session.subStage = "CONFIRM_PROVIDER";
       await sendConfirmProviderCard(tenantId, waId, workflow, step, session);
@@ -1262,6 +1340,12 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
   // ever picks a navigation intent; the engine below still performs the
   // action, so validation and slot locking are unaffected.
   if (await executeOrchestratedPlan(tenantId, waId, session, workflow, await planPromise, trimmed, workflows)) return;
+
+  // Item 9 — loop detection. The orchestrator had its shot at figuring out
+  // what they meant and couldn't either; this is the genuine "stuck"
+  // fallback for a mid-flow step, the same real gap as handleDetecting's
+  // equivalent branch above.
+  if (await maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed)) return;
 
   await sendWhatsAppText(tenantId, waId, error);
   await sendStepPrompt(tenantId, waId, workflow, step, session);
