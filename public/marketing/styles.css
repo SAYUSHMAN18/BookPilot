@@ -240,6 +240,22 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }
 
+/* Item 8 — the real, live chat widget (as opposed to the scripted replay
+   above it): same bubble/typing-dot visual language, but growing content
+   needs to actually scroll rather than clip, and it needs an input row. */
+.wa-body.live { overflow-y: auto; }
+.wa-input-row { display: flex; gap: 6px; padding: 8px 10px; background: #f0f2f5; flex-shrink: 0; }
+.wa-input-row input {
+  flex: 1; border: none; border-radius: 20px; padding: 9px 14px; font-size: 12.5px;
+  font-family: inherit; outline: none; min-width: 0;
+}
+.wa-input-row button {
+  border: none; background: var(--brand); color: #fff; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 14px;
+}
+.wa-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+.bubble.error { align-self: center; background: #fee2e2; color: #991b1b; font-size: 11.5px; }
+
 .floating-card {
   position: absolute; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xs);
   box-shadow: var(--shadow-md); padding: 12px 14px; display: flex; align-items: center; gap: 10px;

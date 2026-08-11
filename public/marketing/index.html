@@ -187,8 +187,8 @@
   <!-- ============ LIVE DEMO ============ -->
   <section class="demo" id="demo">
     <div class="section-inner">
-      <h2 data-reveal>Watch a real booking happen</h2>
-      <p class="section-sub" data-reveal>This is the exact conversation a customer has — replayed, not staged.</p>
+      <h2 data-reveal>Watch a real booking happen — or try it yourself</h2>
+      <p class="section-sub" data-reveal>The replay shows the exact flow a customer follows. Type your own message below and talk to the real AI, live — no signup needed.</p>
       <div class="demo-stage" data-reveal>
         <div class="demo-phone">
           <div class="phone-notch"></div>
@@ -197,10 +197,14 @@
               <div class="wa-avatar">💊</div>
               <div>
                 <div class="wa-name">ABC Multispeciality Clinic</div>
-                <div class="wa-status">online</div>
+                <div class="wa-status" id="demoStatus">online</div>
               </div>
             </div>
             <div class="wa-body" id="demoBody"></div>
+            <form class="wa-input-row" id="liveDemoForm">
+              <input id="liveDemoInput" type="text" placeholder="Type a message to try it live…" maxlength="500" autocomplete="off" />
+              <button type="submit" id="liveDemoSend" aria-label="Send">➤</button>
+            </form>
           </div>
         </div>
         <div class="demo-side">
@@ -209,6 +213,7 @@
             <li>✅ Understood a symptom, suggested the right doctor</li>
             <li>✅ Tappable date &amp; time — no back-and-forth typing</li>
             <li>✅ Confirmation with map link, sent instantly</li>
+            <li>💬 Or type your own message above — it's a real, live conversation</li>
           </ul>
           <a href="/signup" class="btn btn-outline">Try it with your own business →</a>
         </div>

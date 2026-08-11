@@ -171,5 +171,101 @@
     { threshold: 0.4 }
   );
   demoObserver.observe(demoBody);
-  document.getElementById("demoReplay").addEventListener("click", () => playSequence(demoBody, demoSteps));
+  document.getElementById("demoReplay").addEventListener("click", () => {
+    demoBody.classList.remove("live");
+    playSequence(demoBody, demoSteps);
+  });
+
+  /* ---------- Item 8: the real, live chat widget ----------
+     Talks to POST /api/demo/chat — a dedicated, permanently-sandboxed
+     demo tenant on the backend (never any real business's data). A
+     per-tab sessionId (sessionStorage, so it's gone when the tab closes)
+     keeps this visitor's conversation independent of every other
+     visitor's, without ever looking like a real WhatsApp number. */
+  function demoSessionId() {
+    let id = sessionStorage.getItem("bp_demo_session");
+    if (!id) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      sessionStorage.setItem("bp_demo_session", id);
+    }
+    return id;
+  }
+
+  const liveDemoForm = document.getElementById("liveDemoForm");
+  const liveDemoInput = document.getElementById("liveDemoInput");
+  const liveDemoSend = document.getElementById("liveDemoSend");
+  const demoStatus = document.getElementById("demoStatus");
+  let liveModeStarted = false;
+
+  function enterLiveMode() {
+    if (liveModeStarted) return;
+    liveModeStarted = true;
+    demoObserver.unobserve(demoBody); // the scripted replay never auto-plays over a real conversation
+    demoBody.classList.add("live");
+    demoBody.innerHTML = "";
+  }
+
+  async function sendLiveDemoMessage(text) {
+    enterLiveMode();
+    const userBubble = document.createElement("div");
+    userBubble.className = "bubble in";
+    userBubble.textContent = text;
+    demoBody.appendChild(userBubble);
+    demoBody.scrollTop = demoBody.scrollHeight;
+
+    const dots = document.createElement("div");
+    dots.className = "typing-dots";
+    dots.innerHTML = "<span></span><span></span><span></span>";
+    demoBody.appendChild(dots);
+    demoBody.scrollTop = demoBody.scrollHeight;
+    if (demoStatus) demoStatus.textContent = "typing…";
+
+    liveDemoInput.disabled = true;
+    liveDemoSend.disabled = true;
+    try {
+      const resp = await fetch("/api/demo/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: demoSessionId(), text }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      dots.remove();
+      if (!resp.ok) {
+        const errBubble = document.createElement("div");
+        errBubble.className = "bubble error";
+        errBubble.textContent = data.error || "Something went wrong — please try again in a moment.";
+        demoBody.appendChild(errBubble);
+      } else {
+        for (const part of String(data.reply || "").split("\n\n")) {
+          if (!part.trim()) continue;
+          const outBubble = document.createElement("div");
+          outBubble.className = "bubble out";
+          outBubble.textContent = part;
+          demoBody.appendChild(outBubble);
+        }
+      }
+    } catch {
+      dots.remove();
+      const errBubble = document.createElement("div");
+      errBubble.className = "bubble error";
+      errBubble.textContent = "Couldn't reach the demo right now — please try again in a moment.";
+      demoBody.appendChild(errBubble);
+    } finally {
+      if (demoStatus) demoStatus.textContent = "online";
+      liveDemoInput.disabled = false;
+      liveDemoSend.disabled = false;
+      demoBody.scrollTop = demoBody.scrollHeight;
+      liveDemoInput.focus();
+    }
+  }
+
+  if (liveDemoForm) {
+    liveDemoForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = liveDemoInput.value.trim();
+      if (!text) return;
+      liveDemoInput.value = "";
+      sendLiveDemoMessage(text);
+    });
+  }
 })();

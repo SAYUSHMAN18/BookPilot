@@ -66,4 +66,24 @@ function isSignupRateLimited(ip) {
   return recent.length > SIGNUP_MAX_ATTEMPTS;
 }
 
-module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited };
+// Item 8 — the public marketing site's live chat widget (POST
+// /api/demo/chat) is unauthenticated by design (anyone should be able to
+// try the bot with zero signup) and always targets one shared, dedicated
+// demo tenant — which makes it the one endpoint in this app where a
+// single IP could otherwise burn through this project's own Groq quota,
+// or spam DB writes, just by scripting requests. Keyed by IP (there's no
+// account or WhatsApp id yet), generous enough for a real person actually
+// trying the demo conversation, tight enough to blunt a script.
+const DEMO_CHAT_WINDOW_MS = 5 * 60 * 1000;
+const DEMO_CHAT_MAX_PER_WINDOW = 30;
+const demoChatHits = new Map(); // ip -> timestamps[]
+
+function isDemoChatRateLimited(ip) {
+  const now = Date.now();
+  const recent = (demoChatHits.get(ip) || []).filter((t) => now - t < DEMO_CHAT_WINDOW_MS);
+  recent.push(now);
+  demoChatHits.set(ip, recent);
+  return recent.length > DEMO_CHAT_MAX_PER_WINDOW;
+}
+
+module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited };

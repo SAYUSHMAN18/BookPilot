@@ -22,6 +22,7 @@
 
 require("dotenv").config();
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const { log } = require("./src/infra/logger");
 
@@ -65,7 +66,7 @@ const { labelToMinutes, formatLongDate, parseIsoDate } = require("./src/engine/d
 const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/infra/auth");
 const users = require("./src/store/userStore");
 const { recordAudit, listAudit } = require("./src/store/auditLog");
-const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited } = require("./src/infra/rateLimit");
+const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited } = require("./src/infra/rateLimit");
 const { generateWorkflowFromDescription } = require("./src/ai/workflowGenerator");
 const knowledge = require("./src/store/knowledgeStore");
 const templates = require("./src/store/templateStore");
@@ -184,13 +185,32 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 8081;
 
+// Item 8 — the public marketing site's live chat widget (POST
+// /api/demo/chat) needs somewhere to run real conversations that isn't
+// any actual customer's business. A dedicated, permanent tenant — created
+// once (idempotent via its well-known slug, safe to call on every boot)
+// and never assigned real WhatsApp credentials, so its sends always stay
+// in simulated/logged mode regardless of what any real tenant on this
+// install has configured. Never the upgrade-continuity fallback tenant
+// (id 1) — a real single-tenant install's actual business could BE
+// tenant 1, and a public demo visitor must never be able to touch it.
+const DEMO_TENANT_SLUG = "bookpilot-live-demo";
+function ensureDemoTenant() {
+  const existing = tenantStore.getBySlug(DEMO_TENANT_SLUG);
+  if (existing) return existing.id;
+  const created = tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
+  log("INFO", `Created dedicated demo tenant (id ${created.id}) for the public marketing chat widget.`);
+  return created.id;
+}
+const DEMO_TENANT_ID = ensureDemoTenant();
+
 // Item 5 — every tenant now owns its own copy of its business definitions
 // (src/store/tenantWorkflowStore.js), seeded from the workflows/*.json
 // starter catalog at signup. This backfills any tenant that existed
 // before this table did (including the default tenant id=1 every fresh
-// install starts with) — seedDefaultsForTenant is a no-op for a tenant
-// that already has rows, so this is safe to run on every boot, not just
-// the first one after upgrading.
+// install starts with, and the demo tenant just created above) —
+// seedDefaultsForTenant is a no-op for a tenant that already has rows, so
+// this is safe to run on every boot, not just the first one after upgrading.
 for (const tenant of tenantStore.list()) {
   tenantWorkflowStore.seedDefaultsForTenant(tenant.id);
 }
@@ -568,6 +588,55 @@ app.post("/api/simulate-whatsapp", async (req, res) => {
       // best-effort
     }
     res.status(500).json({ error: "Internal error — see logs/app.log for details." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Item 8 — the public marketing site's live chat widget. Deliberately a
+// SEPARATE route from /api/simulate-whatsapp above, not a relaxed version
+// of it, because the two have fundamentally different trust models:
+// simulate-whatsapp accepts a client-chosen tenantId (a dev/test tool,
+// disabled by default once real WhatsApp traffic is live) — accepting
+// that same freedom here, on a route meant to be reachable by anyone on
+// the internet with no login, would let a visitor inject fake messages
+// into ANY real tenant's live conversation. This route can't do that even
+// in principle: the tenant is hardcoded to DEMO_TENANT_ID, never read from
+// the request. Safe to leave enabled permanently, independent of whether
+// this install also has real WhatsApp/ALLOW_SIMULATE_ENDPOINT configured.
+//
+// `sessionId` is a random token the widget generates client-side (crypto.
+// randomUUID(), stored in sessionStorage — gone when the tab closes) and
+// is NOT treated as a real phone number; it's hashed into a synthetic
+// waId so two concurrent visitors' demo conversations never collide, and
+// so nothing here ever touches the shape a real WhatsApp id has.
+// ---------------------------------------------------------------------------
+function syntheticDemoWaId(sessionId) {
+  const hash = crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+  return `demo-${hash}`;
+}
+
+app.post("/api/demo/chat", async (req, res) => {
+  if (isDemoChatRateLimited(req.ip)) {
+    return res.status(429).json({ error: "Too many demo messages from this connection — please wait a few minutes and try again." });
+  }
+  const { sessionId, text } = req.body || {};
+  if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 200) {
+    return res.status(400).json({ error: "sessionId is required." });
+  }
+  if (typeof text !== "string" || !text.trim() || text.length > 500) {
+    return res.status(400).json({ error: "text is required and must be 500 characters or fewer." });
+  }
+
+  const waId = syntheticDemoWaId(sessionId.trim());
+  beginReplyCapture(waId);
+  try {
+    await handleIncomingMessage(DEMO_TENANT_ID, waId, text.trim(), tenantWorkflowStore.listForTenant(DEMO_TENANT_ID));
+    const reply = endReplyCapture(waId);
+    res.json({ reply: reply || "..." });
+  } catch (err) {
+    endReplyCapture(waId);
+    log("ERROR", `Demo chat error: ${err.stack || err.message}`);
+    res.status(500).json({ reply: "Sorry, something went wrong on my end — could you try that again?" });
   }
 });
 
