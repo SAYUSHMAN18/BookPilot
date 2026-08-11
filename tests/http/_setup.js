@@ -73,6 +73,8 @@ function freshApp({ webhookAppSecret } = {}) {
     "../../src/store/userStore",
     "../../src/store/sessionStore",
     "../../src/store/availabilityStore",
+    "../../src/store/signupOtpStore",
+    "../../src/infra/rateLimit",
     "../../src/engine/workflowEngine",
     "../../src/engine/loadWorkflows",
   ]) {
@@ -86,4 +88,27 @@ function freshApp({ webhookAppSecret } = {}) {
   return require("../../server");
 }
 
-module.exports = { freshApp };
+// New plan, Section 2 — signup no longer grants instant dashboard access:
+// a fresh tenant is "pending" until a platform_admin activates it, and
+// POST /api/signup itself now requires a verified OTP. Every test in this
+// suite that just needs a working logged-in admin (not specifically
+// testing the OTP/activation flow itself, which is auth.test.js's job)
+// uses this instead of hand-rolling the dance: generates a real OTP
+// directly via signupOtpStore (bypassing the request-otp HTTP round trip,
+// since the point here is a fast, valid fixture, not re-testing that
+// route), signs up, then activates directly via tenantStore.setStatus
+// (bypassing the platform_admin HTTP layer for the same reason).
+async function signupAndActivate(app, request, { businessName, email, password = "password123", ownerName } = {}) {
+  const { createOtp } = require("../../src/store/signupOtpStore");
+  const tenantStore = require("../../src/store/tenantStore");
+  const otp = createOtp(email);
+  const resp = await request(app).post("/api/signup").send({ businessName, ownerName, email, password, otp });
+  if (resp.status !== 201) {
+    throw new Error(`signupAndActivate: POST /api/signup failed (${resp.status}): ${JSON.stringify(resp.body)}`);
+  }
+  const tenantId = resp.body.user.tenantId;
+  tenantStore.setStatus(tenantId, "active");
+  return { cookie: resp.headers["set-cookie"], tenantId };
+}
+
+module.exports = { freshApp, signupAndActivate };

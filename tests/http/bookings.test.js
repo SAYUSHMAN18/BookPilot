@@ -7,11 +7,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
-const { freshApp } = require("./_setup");
+const { freshApp, signupAndActivate } = require("./_setup");
 
 async function adminSession(app, email = "admin@example.com") {
-  const resp = await request(app).post("/api/signup").send({ businessName: "Booking HTTP Test Biz", email, password: "password123" });
-  return { cookie: resp.headers["set-cookie"], tenantId: resp.body.user.tenantId };
+  return signupAndActivate(app, request, { businessName: "Booking HTTP Test Biz", email });
 }
 
 function seedBooking(bookingStore, tenantId, overrides = {}) {

@@ -66,7 +66,7 @@ const { labelToMinutes, formatLongDate, parseIsoDate } = require("./src/engine/d
 const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/infra/auth");
 const users = require("./src/store/userStore");
 const { recordAudit, listAudit } = require("./src/store/auditLog");
-const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited } = require("./src/infra/rateLimit");
+const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited } = require("./src/infra/rateLimit");
 const { generateWorkflowFromDescription } = require("./src/ai/workflowGenerator");
 const knowledge = require("./src/store/knowledgeStore");
 const templates = require("./src/store/templateStore");
@@ -77,6 +77,7 @@ const { runBackup, listBackups, scheduleBackups } = require("./src/infra/backupS
 const { getErrorRate } = require("./src/infra/alerting");
 const { MAX_DOC_CHARS } = require("./src/ai/factualQA");
 const { createResetToken, consumeResetToken } = require("./src/store/passwordResetStore");
+const { createOtp, verifyOtp } = require("./src/store/signupOtpStore");
 const { sendEmail } = require("./src/infra/emailSender");
 const { isVoiceEnabled, downloadWhatsAppMedia, transcribeAudio, synthesizeSpeech } = require("./src/infra/voice");
 const { sendWhatsAppText, sendWhatsAppAudio, sendTypingIndicator, sendWithRetry, beginReplyCapture, endReplyCapture, startOutboundQueueWorker } = require("./src/infra/whatsapp");
@@ -107,6 +108,8 @@ function publishBookingEvent(tenantId, type, booking) {
 }
 
 const app = express();
+app.disable("x-powered-by");
+
 
 // Section 15 — the very first middleware, ahead of even the security
 // headers below: every log() call anywhere in this request's lifecycle
@@ -199,6 +202,13 @@ function ensureDemoTenant() {
   const existing = tenantStore.getBySlug(DEMO_TENANT_SLUG);
   if (existing) return existing.id;
   const created = tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
+  // tenantStore.create() always starts a tenant "pending" (every tenant
+  // needs a platform_admin to explicitly activate it — see requireAuth()'s
+  // own comment). The demo tenant never has a real user logging in
+  // through it, so "pending" would just be permanent, meaningless clutter
+  // in a platform admin's activation queue — set it active immediately,
+  // the one tenant this bootstrap owns end-to-end itself.
+  tenantStore.setStatus(created.id, "active");
   log("INFO", `Created dedicated demo tenant (id ${created.id}) for the public marketing chat widget.`);
   return created.id;
 }
@@ -297,23 +307,6 @@ if (!platformBootstrap?.bootstrapped && process.env.PLATFORM_ADMIN_BOOTSTRAP_PAS
   log("WARN", "PLATFORM_ADMIN_BOOTSTRAP_PASSWORD is still set even though a platform_admin account already exists — it's not doing anything anymore. Remove it from .env.");
 }
 
-// Crash instead of continuing in an unknown state; run under a process
-// manager (PM2, systemd, Docker restart policy) so it comes back up.
-process.on("uncaughtException", (err) => {
-  log("ERROR", `Uncaught exception — exiting: ${err.stack || err.message}`);
-  process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-  log("ERROR", `Unhandled promise rejection: ${reason}`);
-});
-process.on("SIGTERM", () => {
-  log("INFO", "SIGTERM received, shutting down.");
-  process.exit(0);
-});
-process.on("SIGINT", () => {
-  log("INFO", "SIGINT received, shutting down.");
-  process.exit(0);
-});
 
 // ---------------------------------------------------------------------------
 // WhatsApp Cloud API webhook (Meta)
@@ -334,7 +327,7 @@ app.get("/webhook", (req, res) => {
 });
 
 // Incoming messages from real WhatsApp users.
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", asyncHandler(async (req, res) => {
   const signature = req.get("X-Hub-Signature-256");
   if (!isValidSignature(req.rawBody, signature)) {
     log("WARN", "Rejected webhook POST: invalid or missing signature.");
@@ -430,7 +423,8 @@ app.post("/webhook", async (req, res) => {
       }
     }
   }
-});
+}));
+
 
 // Section 9.5 — Razorpay's webhook. Same discipline as the WhatsApp
 // webhook above: verify the signature over the RAW body before trusting
@@ -563,7 +557,7 @@ if (!simulateEndpointEnabled) {
   log("INFO", "POST /api/simulate-whatsapp is disabled (WHATSAPP_APP_SECRET is set). Set ALLOW_SIMULATE_ENDPOINT=true to re-enable it.");
 }
 
-app.post("/api/simulate-whatsapp", async (req, res) => {
+app.post("/api/simulate-whatsapp", asyncHandler(async (req, res) => {
   if (!simulateEndpointEnabled) return res.sendStatus(404);
 
   const { from, text, tenantId } = req.body || {};
@@ -589,7 +583,7 @@ app.post("/api/simulate-whatsapp", async (req, res) => {
     }
     res.status(500).json({ error: "Internal error — see logs/app.log for details." });
   }
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Item 8 — the public marketing site's live chat widget. Deliberately a
@@ -615,7 +609,7 @@ function syntheticDemoWaId(sessionId) {
   return `demo-${hash}`;
 }
 
-app.post("/api/demo/chat", async (req, res) => {
+app.post("/api/demo/chat", asyncHandler(async (req, res) => {
   if (isDemoChatRateLimited(req.ip)) {
     return res.status(429).json({ error: "Too many demo messages from this connection — please wait a few minutes and try again." });
   }
@@ -638,7 +632,8 @@ app.post("/api/demo/chat", async (req, res) => {
     log("ERROR", `Demo chat error: ${err.stack || err.message}`);
     res.status(500).json({ reply: "Sorry, something went wrong on my end — could you try that again?" });
   }
-});
+}));
+
 
 // ---------------------------------------------------------------------------
 // Provider dashboard — one static page, same UI for every business type.
@@ -717,10 +712,22 @@ function requireAuth(...allowedRoles) {
     // `active` check just above: a tenant getting suspended must take
     // effect on the user's very next request, not linger until their
     // session naturally expires (up to 12h).
+    //
+    // New plan, Section 2 — "pending" now blocks here too, a deliberate
+    // reversal of this route's own previous behavior. It used to be
+    // explicitly NOT a hard gate (a self-signed-up admin got instant
+    // dashboard access; "pending" existed only for a platform_admin's own
+    // visibility). Account creation is now sales-assisted: a self-signup
+    // creates a real, logged-in-capable account, but every dashboard
+    // route stays blocked until a platform_admin reviews and activates it
+    // (PATCH /api/platform/tenants/:id/status) — see README.
     if (liveUser.tenantId) {
       const tenant = tenantStore.getById(liveUser.tenantId);
       if (!tenant || tenant.status === "suspended" || tenant.status === "cancelled") {
         return res.status(403).json({ error: `This account's business is ${tenant?.status || "no longer available"}. Contact support if this seems wrong.` });
+      }
+      if (tenant.status === "pending") {
+        return res.status(403).json({ error: "Your account is pending activation. Our team will be in touch shortly — contact support if it's been a while.", pendingActivation: true });
       }
     }
     if (allowedRoles.length && !allowedRoles.includes(liveUser.role)) {
@@ -769,21 +776,46 @@ function requireTenantId(req) {
   return req.user.tenantId;
 }
 
+// New plan, Section 2 — verifies the signer actually owns the email
+// before anything else happens. Deliberately loose about whether that
+// email already has an account (uniform response either way) — telling
+// an anonymous caller "that email's taken" is an enumeration leak this
+// endpoint doesn't need to have; POST /api/signup below still gives the
+// real "an account already exists" error, but only to someone who could
+// also prove they own the code that address's real inbox received.
+app.post("/api/signup/request-otp", asyncHandler(async (req, res) => {
+  const { email } = req.body || {};
+  if (typeof email !== "string" || !email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+    return res.status(400).json({ error: "A valid email is required." });
+  }
+  if (isOtpRateLimited(email.trim())) {
+    log("WARN", `Signup OTP rate-limited for ${email.trim()}`);
+    return res.status(429).json({ error: "Too many codes requested for this email. Please wait a while and try again." });
+  }
+  const code = createOtp(email.trim());
+  await sendEmail(email.trim(), "Your BookPilot AI verification code", `Your verification code is ${code}. It expires in 10 minutes.`);
+  res.json({ ok: true, message: "A verification code has been sent to that email." });
+}));
+
 // Self-serve signup — the missing link between the public marketing site
 // and the dashboard: until now only a platform_admin could create a
 // tenant (POST /api/platform/tenants). Creates the tenant AND its first
-// admin account in one request, then logs that admin straight in (same
-// session-cookie mechanism as /api/auth/login below) so "Get started"
-// lands the owner directly in their new dashboard, not back at a login
-// form for an account they just made.
+// admin account in one request (after verifying the OTP from
+// POST /api/signup/request-otp above), then logs that admin in (same
+// session-cookie mechanism as /api/auth/login below) — but landing a
+// session doesn't mean landing in a working dashboard yet, see below.
 //
 // New tenants default to "pending" status (tenantStore.create's own
-// behavior, same as a platform_admin-created one) — deliberately NOT a
-// hard gate: requireAuth() only blocks "suspended"/"cancelled", so a
-// pending tenant's own admin can fully use the dashboard immediately.
-// "pending" exists for platform_admin's own visibility/review, not as a
-// signup approval bottleneck.
-app.post("/api/signup", (req, res) => {
+// behavior, same as a platform_admin-created one). Unlike before, this IS
+// now a hard gate — requireAuth() blocks "pending" the same way it
+// already blocked "suspended"/"cancelled" — so a self-signed-up admin can
+// log in (the account is real) but every /api/dashboard/* route 403s
+// with a clear "pending activation" message until a platform_admin
+// reviews and activates the tenant (PATCH /api/platform/tenants/:id/status).
+// This is a deliberate reversal of this route's own previous behavior
+// (instant self-serve dashboard access) — see README's "Account creation
+// & activation" section for why.
+app.post("/api/signup", asyncHandler(async (req, res) => {
   if (!process.env.SESSION_SECRET) {
     return res.status(500).json({ error: "Server misconfigured: SESSION_SECRET is not set." });
   }
@@ -792,7 +824,7 @@ app.post("/api/signup", (req, res) => {
     return res.status(429).json({ error: "Too many signup attempts. Try again in a while." });
   }
 
-  const { businessName, ownerName, email, password } = req.body || {};
+  const { businessName, ownerName, email, password, otp } = req.body || {};
   if (typeof businessName !== "string" || !businessName.trim()) {
     return res.status(400).json({ error: "Business name is required." });
   }
@@ -801,6 +833,9 @@ app.post("/api/signup", (req, res) => {
   }
   if (typeof password !== "string" || password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters." });
+  }
+  if (!verifyOtp(email.trim(), otp)) {
+    return res.status(400).json({ error: "That verification code is invalid or has expired. Request a new one and try again." });
   }
 
   // Derive a URL-safe slug from the business name, same character rules
@@ -846,9 +881,19 @@ app.post("/api/signup", (req, res) => {
   });
   setSessionCookie(res, token);
   recordAudit(tenant.id, user, "tenant.self_signup", { name: tenant.name, slug: tenant.slug });
-  log("INFO", `${user.email} self-signed-up and created tenant "${tenant.name}" (${tenant.slug})`);
-  res.status(201).json({ ok: true, user: { email: user.email, role: user.role, name: user.name, tenantId: user.tenantId } });
-});
+  // 🔔 — deliberately distinct from every other INFO log line in this
+  // file, so a platform admin tailing/grepping logs.app.log can find
+  // exactly the events that need their action, the same way a real
+  // notification would surface — see README's "Account creation &
+  // activation" section for the honest gap this is standing in for (no
+  // real email/Slack notification channel exists yet).
+  log("INFO", `🔔 New signup pending activation: "${tenant.name}" (${tenant.slug}, tenant id ${tenant.id}) — ${user.email}`);
+  res.status(201).json({
+    ok: true,
+    pending: true,
+    user: { email: user.email, role: user.role, name: user.name, tenantId: user.tenantId },
+  });
+}));
 
 app.post("/api/auth/login", (req, res) => {
   if (!process.env.SESSION_SECRET) {
@@ -1171,7 +1216,7 @@ app.get("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
 // draft in the same modal used for hand-written JSON, and only the
 // existing POST /api/dashboard/workflows below (with its own
 // validateWorkflowShape check) actually persists it.
-app.post("/api/dashboard/workflows/generate", requireAuth("admin"), async (req, res) => {
+app.post("/api/dashboard/workflows/generate", requireAuth("admin"), asyncHandler(async (req, res) => {
   const { description } = req.body || {};
   if (typeof description !== "string" || !description.trim()) {
     return res.status(400).json({ error: "A business description is required." });
@@ -1185,7 +1230,8 @@ app.post("/api/dashboard/workflows/generate", requireAuth("admin"), async (req, 
     log("ERROR", `Workflow generation failed: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
-});
+}));
+
 
 app.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
   const workflow = req.body;

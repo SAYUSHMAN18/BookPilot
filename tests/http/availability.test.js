@@ -4,11 +4,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
-const { freshApp } = require("./_setup");
+const { freshApp, signupAndActivate } = require("./_setup");
 
 async function adminSession(app, email = "avail-admin@example.com") {
-  const resp = await request(app).post("/api/signup").send({ businessName: "Availability HTTP Test Biz", email, password: "password123" });
-  return { cookie: resp.headers["set-cookie"] };
+  return signupAndActivate(app, request, { businessName: "Availability HTTP Test Biz", email });
 }
 
 test("GET availability is empty for a fresh provider, then reflects a POSTed block", async () => {

@@ -463,6 +463,26 @@ db.exec(`
 `);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash);`);
 
+// New plan, Section 2 — signup now verifies the signer actually owns the
+// email address before a tenant is created at all, via a short-lived OTP.
+// Same discipline as password_reset_tokens above: only the SHA-256 hash
+// of the code is ever stored, the raw 6-digit code only ever exists in
+// the (simulated, see src/infra/emailSender.js) email itself. Keyed by
+// email (not user_id — there's no user yet at this point), short 10-minute
+// expiry (a code is meant to be read and typed back within the same
+// browser session, not a bookmark-for-later link like password reset).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS signup_otps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    created_at INTEGER NOT NULL
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_signup_otps_email ON signup_otps(email);`);
+
 // "Especially admin actions" — who did what, when. Append-only by
 // convention (nothing in this codebase updates or deletes a row here).
 db.exec(`

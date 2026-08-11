@@ -86,4 +86,23 @@ function isDemoChatRateLimited(ip) {
   return recent.length > DEMO_CHAT_MAX_PER_WINDOW;
 }
 
-module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited };
+// New plan, Section 2 — OTP requests, keyed by the target email (not IP —
+// the thing actually worth limiting is "how many codes get generated for
+// one inbox," since that's both the abuse vector, spamming someone else's
+// real email with codes, and the cost driver, one simulated/real send per
+// request). Loose enough for a genuine retry ("didn't arrive, resend"),
+// tight enough that scripting this endpoint can't mass-generate codes.
+const OTP_WINDOW_MS = 10 * 60 * 1000;
+const OTP_MAX_PER_WINDOW = 5;
+const otpHits = new Map(); // normalized email -> timestamps[]
+
+function isOtpRateLimited(email) {
+  const now = Date.now();
+  const key = email.trim().toLowerCase();
+  const recent = (otpHits.get(key) || []).filter((t) => now - t < OTP_WINDOW_MS);
+  recent.push(now);
+  otpHits.set(key, recent);
+  return recent.length > OTP_MAX_PER_WINDOW;
+}
+
+module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited };

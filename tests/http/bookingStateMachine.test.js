@@ -9,7 +9,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
-const { freshApp } = require("./_setup");
+const { freshApp, signupAndActivate } = require("./_setup");
 
 function seedBooking(bookingStore, overrides = {}) {
   return bookingStore.create(1, "919000005678", {
@@ -68,9 +68,7 @@ test('HERE still correctly marks a "booked" booking as "arrived" (the happy path
 test('PATCH .../bookings/:id with action "serve" or "complete" rejects an already-no_show booking (the gap that guard used to miss)', async () => {
   const app = freshApp();
   const bookingStore = require("../../src/store/bookingStore");
-  const resp = await request(app).post("/api/signup").send({ businessName: "State Machine Biz", email: "sm@example.com", password: "password123" });
-  const cookie = resp.headers["set-cookie"];
-  const tenantId = resp.body.user.tenantId;
+  const { cookie, tenantId } = await signupAndActivate(app, request, { businessName: "State Machine Biz", email: "sm@example.com" });
   const booking = bookingStore.create(tenantId, "919000005679", {
     bookingId: `APT-SM2-${Math.random().toString(36).slice(2, 8)}`,
     workflowId: "medical",

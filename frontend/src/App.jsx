@@ -7,7 +7,7 @@ import ProviderView from "./pages/ProviderView";
 import AdminView from "./pages/AdminView";
 
 export default function App() {
-  const { user, logout } = useAuth();
+  const { user, pending, logout } = useAuth();
   const [providers, setProviders] = useState([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [mode, setMode] = useState("provider"); // view toggle — an admin ACCOUNT can still browse a single provider's own view, same as the vanilla dashboard
@@ -15,12 +15,12 @@ export default function App() {
   const bump = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
-    if (user === undefined || user === null) return;
+    if (user === undefined || user === null || pending) return;
     get("/api/dashboard/providers").then((list) => {
       setProviders(list);
       if (list.length) setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
     });
-  }, [user]);
+  }, [user, pending]);
 
   const connected = useLiveEvents((type) => {
     // Any booking/support/feedback event is relevant to at least one
@@ -31,6 +31,21 @@ export default function App() {
   });
 
   if (user === undefined) return null; // still checking session
+  if (pending) {
+    return (
+      <div className="login-wrap">
+        <div className="login-card">
+          <h1>Almost there 👋</h1>
+          <p>
+            {user ? `Thanks, ${user.name || user.email} — your` : "Your"} account is pending activation. Our team
+            reviews every new business and will be in touch shortly to get you fully set up. You'll get an email
+            once you're activated and ready to log in.
+          </p>
+          <button className="btn-link" onClick={logout} style={{ marginTop: 14 }}>Log out</button>
+        </div>
+      </div>
+    );
+  }
   if (!user) return <LoginPage />;
 
   const isAdminAccount = user.role === "admin";

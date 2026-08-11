@@ -5,11 +5,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
-const { freshApp } = require("./_setup");
+const { freshApp, signupAndActivate } = require("./_setup");
 
 async function adminSession(app, email, businessName) {
-  const resp = await request(app).post("/api/signup").send({ businessName, email, password: "password123" });
-  return { cookie: resp.headers["set-cookie"], tenantId: resp.body.user.tenantId };
+  return signupAndActivate(app, request, { businessName, email });
 }
 
 test("a brand new tenant's checklist starts not-dismissed with every item false", async () => {
