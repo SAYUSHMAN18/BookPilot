@@ -64,6 +64,11 @@ const updateWithMetaStmt = db.prepare(`
   WHERE id = ? AND tenant_id = ?
 `);
 const clearFeedbackRequestStmt = db.prepare("UPDATE bookings SET feedback_requested_at = NULL WHERE id = ? AND tenant_id = ?");
+// New plan, Block 13 — one statement per reminder kind rather than a
+// single parameterized column name (node:sqlite, like most SQL drivers,
+// can't bind a column name as a placeholder).
+const markReminder24hSentStmt = db.prepare("UPDATE bookings SET reminder_24h_sent_at = ? WHERE id = ? AND tenant_id = ?");
+const markReminder2hSentStmt = db.prepare("UPDATE bookings SET reminder_2h_sent_at = ? WHERE id = ? AND tenant_id = ?");
 const getByIdStmt = db.prepare("SELECT * FROM bookings WHERE id = ? AND tenant_id = ?");
 // Section 14 — the tenant-issued bookingId (e.g. "APT-20260101-XY12"),
 // not the internal numeric row id above. This is what a customer's own
@@ -120,6 +125,8 @@ function rowToBooking(row) {
     // read or enforced anywhere yet. 'not_required' for every booking
     // today since no workflow actually declares requiresPayment.
     paymentStatus: row.payment_status,
+    reminder24hSentAt: row.reminder_24h_sent_at,
+    reminder2hSentAt: row.reminder_2h_sent_at,
   };
 }
 
@@ -294,6 +301,15 @@ const bookings = {
   /** @param {number} tenantId @param {number} id */
   clearFeedbackRequest(tenantId, id) {
     clearFeedbackRequestStmt.run(id, tenantId);
+  },
+
+  // New plan, Block 13 — marks one specific reminder (never both at
+  // once) as sent, so src/infra/reminders.js's periodic scan never sends
+  // the same one twice.
+  /** @param {number} tenantId @param {number} id @param {"24h"|"2h"} which */
+  markReminderSent(tenantId, id, which) {
+    const stmt = which === "24h" ? markReminder24hSentStmt : markReminder2hSentStmt;
+    stmt.run(Date.now(), id, tenantId);
   },
 
   /** @param {number} tenantId @returns {Booking[]} */

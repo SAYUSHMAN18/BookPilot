@@ -281,6 +281,19 @@ ensureColumn("bookings", "feedback_requested_at", "INTEGER");
 // (NULL vs 'not_required') for Section 9 to have to reconcile later.
 ensureColumn("bookings", "payment_status", "TEXT");
 
+// New plan, Block 13 — pre-appointment reminders. Two separate nullable
+// timestamps (not one "reminded" boolean) because the 24h and 2h
+// reminders are independent sends with independent send-once guarantees
+// — a booking made 90 minutes before its slot should still get the 2h
+// reminder even though it was never eligible for the 24h one, and a
+// booking that already got its 24h reminder must still get a separate
+// 2h one later. NULL means "not sent yet"; set once, in
+// src/infra/reminders.js, and never cleared — a reschedule that moves
+// the appointment far enough away to re-cross a threshold is treated as
+// a new booking for reminder purposes, not something worth chasing here.
+ensureColumn("bookings", "reminder_24h_sent_at", "INTEGER");
+ensureColumn("bookings", "reminder_2h_sent_at", "INTEGER");
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

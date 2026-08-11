@@ -75,6 +75,7 @@ const { getUsageSummary } = require("./src/engine/billing");
 const supportRequests = require("./src/store/supportRequestStore");
 const feedbackStore = require("./src/store/feedbackStore");
 const { runBackup, listBackups, scheduleBackups } = require("./src/infra/backupStore");
+const { scheduleReminders } = require("./src/infra/reminders");
 const { getErrorRate } = require("./src/infra/alerting");
 const { MAX_DOC_CHARS } = require("./src/ai/factualQA");
 const { createResetToken, consumeResetToken } = require("./src/store/passwordResetStore");
@@ -2374,6 +2375,7 @@ if (require.main === module) {
     scheduleBackups(); // every BACKUP_INTERVAL_HOURS (default 6h)
     runBackup().catch((err) => log("ERROR", `Startup backup threw: ${err.message}`)); // one immediately, don't wait 6h for the first
     startOutboundQueueWorker(); // polls the durable send queue every 60s
+    scheduleReminders(); // every 10 minutes — Block 13's 24h/2h pre-appointment reminders
     checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
   });
 }

@@ -91,6 +91,7 @@ function freshApp({ webhookAppSecret } = {}) {
     "../../src/engine/analytics",
     "../../src/engine/calendarSync",
     "../../src/engine/paymentRefunds",
+    "../../src/infra/reminders",
   ]) {
     try {
       delete require.cache[require.resolve(mod)];
