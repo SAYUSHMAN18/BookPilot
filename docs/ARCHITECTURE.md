@@ -130,13 +130,42 @@ only calls `app.listen()` when run as the process entry point, via
 get the bare app, no real port bound, no background loops started). It
 covers signup/login/session/role-gating, booking CRUD + conflict detection
 (the `SlotTakenError` → 409 mapping), availability CRUD + role scoping,
-and the webhook's signature verification + duplicate-delivery handling —
-driven through a full real conversation via the actual signed `/webhook`
-route, not just `/api/simulate-whatsapp`. That was the honest prerequisite
-this section used to flag for splitting `server.js` safely; it's done, and
-a route-mounting refactor is no longer flying blind. It's still real,
-focused work of its own — not something to rush through at the tail end
-of a different change.
+workflow tenant-isolation, the booking state machine, and the webhook's
+signature verification + duplicate-delivery handling — driven through a
+full real conversation via the actual signed `/webhook` route, not just
+`/api/simulate-whatsapp`. That was the honest prerequisite this section
+used to flag for splitting `server.js` safely; it's done, and a
+route-mounting refactor is no longer flying blind.
+
+**Still deliberately not done, and why**: the prerequisite being satisfied
+isn't the same as the split being low-risk to attempt casually. Two
+different pieces of this got weighed and both deferred, for different
+reasons:
+
+- **The file split itself** (`server.js`'s ~85 routes into
+  `src/routes/*.js` + controllers/services/repositories/middleware) is
+  real, valuable, but purely organizational — no bug gets fixed, no
+  feature gets unlocked. It's also large enough (every route touches at
+  least one of the shared closures in this file — `listAllProviders`,
+  `publishBookingEvent`, `notifyQueueShifts`, `requireAuth`,
+  `asyncHandler` — that a route-mounting refactor has to correctly wire
+  up as imports/DI instead of just being "in scope") that attempting it
+  in the same pass as unrelated feature work risks leaving it
+  half-migrated if that work needs to take priority partway through.
+- **A uniform `{success, error:{code,message,requestId}}` response
+  envelope** is a genuinely different kind of change from the file split:
+  it's a **breaking API-shape change**, not an internal reorganization.
+  Every response shape it would touch (`resp.body.error`,
+  `resp.body.user.tenantId`, `resp.body.booking`, `resp.body.ok`, ...) is
+  already depended on by the entire React dashboard (`frontend/src/lib/
+  api.js` and every component that reads a response body) and every one
+  of this suite's HTTP-level tests. Doing it properly means rewriting the
+  frontend's response handling and every test's assertions in the same
+  pass as the backend change — real, separate, coordinated work, not a
+  drive-by consistency pass.
+
+Both are flagged here deliberately, the same as every other scope decision
+in this document — not silently skipped.
 
 ## Core invariants
 
