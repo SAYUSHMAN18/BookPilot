@@ -200,14 +200,18 @@ const PORT = process.env.PORT || 8081;
 const DEMO_TENANT_SLUG = "bookpilot-live-demo";
 function ensureDemoTenant() {
   const existing = tenantStore.getBySlug(DEMO_TENANT_SLUG);
-  if (existing) return existing.id;
-  const created = tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
   // tenantStore.create() always starts a tenant "pending" (every tenant
   // needs a platform_admin to explicitly activate it — see requireAuth()'s
   // own comment). The demo tenant never has a real user logging in
   // through it, so "pending" would just be permanent, meaningless clutter
-  // in a platform admin's activation queue — set it active immediately,
-  // the one tenant this bootstrap owns end-to-end itself.
+  // in a platform admin's activation queue — force it active on every
+  // boot, not just at creation, so an install that already had this
+  // tenant from before this check existed gets corrected too.
+  if (existing) {
+    if (existing.status !== "active") tenantStore.setStatus(existing.id, "active");
+    return existing.id;
+  }
+  const created = tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
   tenantStore.setStatus(created.id, "active");
   log("INFO", `Created dedicated demo tenant (id ${created.id}) for the public marketing chat widget.`);
   return created.id;

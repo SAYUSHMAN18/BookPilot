@@ -70,3 +70,31 @@ test("a 31st request from the same IP within the window is rate-limited", async 
   }
   assert.equal(lastStatus, 429);
 });
+
+// Real bug, found live while testing the new platform-admin UI: the demo
+// tenant is only forced "active" in the branch that just CREATED it — an
+// install that already had this tenant from before that check existed
+// (or from before this session added it) kept showing up "pending"
+// forever, cluttering a platform admin's activation queue with an entry
+// there's nothing to actually do about. ensureDemoTenant() now corrects
+// an existing-but-wrong status on every boot, not just at creation.
+test("the demo tenant self-heals to active on the next boot even if something had left it pending", () => {
+  freshApp(); // first "boot" — creates the demo tenant, active
+  const tenantStore = require("../../src/store/tenantStore");
+  const demoTenant = tenantStore.getBySlug("bookpilot-live-demo");
+  assert.equal(demoTenant.status, "active");
+
+  tenantStore.setStatus(demoTenant.id, "pending"); // simulate a pre-existing install's stale state
+
+  // A real second boot re-runs server.js's whole startup sequence,
+  // including ensureDemoTenant(). freshApp() always points at a brand
+  // new temp DATA_DIR, which would just create a second, unrelated demo
+  // tenant and trivially pass without testing anything — so only
+  // server.js itself is busted here, deliberately leaving tenantStore
+  // (and the live DB connection it holds) exactly as-is, the same
+  // in-process module the line above just used to set "pending".
+  delete require.cache[require.resolve("../../server")];
+  require("../../server");
+  const healed = tenantStore.getBySlug("bookpilot-live-demo");
+  assert.equal(healed.status, "active");
+});

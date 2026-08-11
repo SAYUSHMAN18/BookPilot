@@ -5,6 +5,7 @@ import { useLiveEvents } from "./lib/useLiveEvents";
 import LoginPage from "./pages/LoginPage";
 import ProviderView from "./pages/ProviderView";
 import AdminView from "./pages/AdminView";
+import PlatformAdminView from "./pages/PlatformAdminView";
 
 export default function App() {
   const { user, pending, logout } = useAuth();
@@ -13,14 +14,18 @@ export default function App() {
   const [mode, setMode] = useState("provider"); // view toggle — an admin ACCOUNT can still browse a single provider's own view, same as the vanilla dashboard
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const isPlatformAdmin = user?.role === "platform_admin";
 
   useEffect(() => {
-    if (user === undefined || user === null || pending) return;
+    // A platform_admin has no tenantId — /api/dashboard/* routes aren't
+    // theirs to call at all (requireAuth("admin", "provider") 403s them),
+    // they get PlatformAdminView instead, below.
+    if (user === undefined || user === null || pending || isPlatformAdmin) return;
     get("/api/dashboard/providers").then((list) => {
       setProviders(list);
       if (list.length) setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
     });
-  }, [user, pending]);
+  }, [user, pending, isPlatformAdmin]);
 
   const connected = useLiveEvents((type) => {
     // Any booking/support/feedback event is relevant to at least one
@@ -47,6 +52,7 @@ export default function App() {
     );
   }
   if (!user) return <LoginPage />;
+  if (isPlatformAdmin) return <PlatformAdminView currentUserEmail={user.email} logout={logout} />;
 
   const isAdminAccount = user.role === "admin";
   const provider = providers.find((p) => `${p.workflowId}::${p.providerId}` === selectedKey);
