@@ -77,6 +77,20 @@ function freshApp({ webhookAppSecret } = {}) {
     "../../src/infra/rateLimit",
     "../../src/engine/workflowEngine",
     "../../src/engine/loadWorkflows",
+    // Real bug, found live: any engine module that caches a require()'d
+    // store reference at module scope (const bookings = require(...) at
+    // the top of the file, not inside each function) holds onto that
+    // FIRST freshApp() call's db connection forever unless it's busted
+    // here too — src/engine/billing.js's usage counts were silently
+    // reading from the wrong (stale, first-test's) database for every
+    // freshApp() after the first one in the same file. workflowEngine.js
+    // above already needed this same fix; these three have the identical
+    // shape and would hit the identical bug the moment a test file uses
+    // more than one tenant across more than one freshApp() call.
+    "../../src/engine/billing",
+    "../../src/engine/analytics",
+    "../../src/engine/calendarSync",
+    "../../src/engine/paymentRefunds",
   ]) {
     try {
       delete require.cache[require.resolve(mod)];

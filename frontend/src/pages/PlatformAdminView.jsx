@@ -38,6 +38,22 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
     }
   }
 
+  // New plan, Block 12 — the one place a tenant's plan can be changed at
+  // all; every creation path (self-signup, this view's own Create Tenant
+  // modal) hardcodes "free".
+  async function setPlan(id, plan) {
+    setBusyId(id);
+    setError("");
+    try {
+      await patch(`/api/platform/tenants/${id}/plan`, { plan });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const pendingCount = tenants.filter((t) => t.status === "pending").length;
 
   return (
@@ -69,7 +85,13 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
                   <tr key={t.id}>
                     <td>{t.name}</td>
                     <td><code>{t.slug}</code></td>
-                    <td>{t.plan}</td>
+                    <td>
+                      <select value={t.plan} disabled={busyId === t.id} onChange={(e) => setPlan(t.id, e.target.value)} style={{ fontSize: 12, padding: "3px 6px" }}>
+                        <option value="free">Starter (free)</option>
+                        <option value="growth">Growth</option>
+                        <option value="enterprise">Enterprise</option>
+                      </select>
+                    </td>
                     <td><span className={`status-badge status-${t.status === "cancelled" ? "cancelled" : t.status === "active" ? "arrived" : t.status === "suspended" ? "no_show" : "payment_pending"}`}>{t.status}</span></td>
                     <td>{t.whatsappConnected ? "✅" : "—"}</td>
                     <td>{t.bookingCount}</td>

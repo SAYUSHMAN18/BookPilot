@@ -10,6 +10,7 @@ import AuditLogPanel from "../components/AuditLogPanel";
 import ManageBusinessesPanel from "../components/ManageBusinessesPanel";
 import ApiKeysPanel from "../components/ApiKeysPanel";
 import SetupChecklistPanel from "../components/SetupChecklistPanel";
+import BillingPanel from "../components/BillingPanel";
 
 export default function AdminView({ providers, refreshKey, bump, currentUserEmail }) {
   const [bookings, setBookings] = useState([]);
@@ -72,6 +73,7 @@ export default function AdminView({ providers, refreshKey, bump, currentUserEmai
       </div>
 
       <AnalyticsPanel refreshKey={refreshKey} />
+      <BillingPanel refreshKey={refreshKey} />
       <ManageBusinessesPanel refreshKey={refreshKey} bump={bump} />
       <ManageTeamPanel refreshKey={refreshKey} providers={providers} currentUserEmail={currentUserEmail} />
       <ApiKeysPanel refreshKey={refreshKey} />

@@ -10,6 +10,7 @@ const getBySlugStmt = db.prepare("SELECT * FROM tenants WHERE slug = ? COLLATE N
 const getByPhoneNumberIdStmt = db.prepare("SELECT * FROM tenants WHERE whatsapp_phone_number_id = ?");
 const listStmt = db.prepare("SELECT * FROM tenants ORDER BY created_at DESC");
 const setStatusStmt = db.prepare("UPDATE tenants SET status = ? WHERE id = ?");
+const setPlanStmt = db.prepare("UPDATE tenants SET plan = ? WHERE id = ?");
 const updateConfigStmt = db.prepare(`
   UPDATE tenants
   SET branding_json = ?, feature_flags_json = ?, groq_api_key_encrypted = ?
@@ -97,6 +98,14 @@ const tenants = {
 
   setStatus(id, status) {
     setStatusStmt.run(status, id);
+    return this.getById(id);
+  },
+
+  // New plan, Block 12 — until now there was no way to change a tenant's
+  // plan at all after creation; every signup path hardcodes "free" and
+  // nothing ever updated it. Platform-admin only, same as setStatus.
+  setPlan(id, plan) {
+    setPlanStmt.run(plan, id);
     return this.getById(id);
   },
 

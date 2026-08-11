@@ -71,6 +71,7 @@ const { generateWorkflowFromDescription } = require("./src/ai/workflowGenerator"
 const knowledge = require("./src/store/knowledgeStore");
 const templates = require("./src/store/templateStore");
 const { computeAnalytics } = require("./src/engine/analytics");
+const { getUsageSummary } = require("./src/engine/billing");
 const supportRequests = require("./src/store/supportRequestStore");
 const feedbackStore = require("./src/store/feedbackStore");
 const { runBackup, listBackups, scheduleBackups } = require("./src/infra/backupStore");
@@ -1115,6 +1116,15 @@ app.post("/api/dashboard/setup-checklist/dismiss", requireAuth("admin"), (req, r
   const tenant = tenantStore.getById(req.user.tenantId);
   tenantStore.updateConfig(req.user.tenantId, { featureFlags: { ...tenant.featureFlags, setupChecklistDismissed: true } });
   res.json({ ok: true });
+});
+
+// New plan, Block 12 — the tenant's own view of the billing skeleton
+// above: which plan they're on and how their usage compares to it this
+// month. Admin only, same as everything else that reveals account-level
+// (not booking-level) information.
+app.get("/api/dashboard/billing", requireAuth("admin"), (req, res) => {
+  const tenant = tenantStore.getById(req.user.tenantId);
+  res.json(getUsageSummary(req.user.tenantId, tenant.plan));
 });
 
 app.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
@@ -2216,6 +2226,29 @@ app.patch("/api/platform/tenants/:id/status", requireAuth("platform_admin"), (re
   const updated = tenantStore.setStatus(id, status);
   recordAudit(id, req.user, "tenant.status_change", { from: existing.status, to: status });
   log("INFO", `${req.user.email} changed tenant ${id} (${existing.slug}) status: ${existing.status} -> ${status}`);
+  const { whatsappAccessToken, ...safeTenant } = updated;
+  res.json(safeTenant);
+});
+
+// New plan, Block 12 — until now nothing could ever change a tenant's
+// plan after creation (every signup path hardcodes "free"); this is that
+// one missing lever, deliberately as bare as the rest of this billing
+// skeleton — no proration, no real payment collection, just a plan
+// string a platform admin sets after handling billing however this pass
+// doesn't (an invoice, a manual bank transfer, a conversation).
+const PLAN_IDS = new Set(["free", "growth", "enterprise"]);
+app.patch("/api/platform/tenants/:id/plan", requireAuth("platform_admin"), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const { plan } = req.body || {};
+  if (!PLAN_IDS.has(plan)) {
+    return res.status(400).json({ error: `plan must be one of: ${[...PLAN_IDS].join(", ")}` });
+  }
+  const existing = tenantStore.getById(id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const updated = tenantStore.setPlan(id, plan);
+  recordAudit(id, req.user, "tenant.plan_change", { from: existing.plan, to: plan });
+  log("INFO", `${req.user.email} changed tenant ${id} (${existing.slug}) plan: ${existing.plan} -> ${plan}`);
   const { whatsappAccessToken, ...safeTenant } = updated;
   res.json(safeTenant);
 });
