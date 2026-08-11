@@ -11,6 +11,7 @@ import ManageBusinessesPanel from "../components/ManageBusinessesPanel";
 import ApiKeysPanel from "../components/ApiKeysPanel";
 import SetupChecklistPanel from "../components/SetupChecklistPanel";
 import BillingPanel from "../components/BillingPanel";
+import SessionsPanel from "../components/SessionsPanel";
 
 export default function AdminView({ providers, refreshKey, bump, currentUserEmail }) {
   const [bookings, setBookings] = useState([]);
@@ -81,6 +82,7 @@ export default function AdminView({ providers, refreshKey, bump, currentUserEmai
       <FeedbackPanel refreshKey={refreshKey} workflowLabel={workflowLabel} />
       <KnowledgeBasePanel refreshKey={refreshKey} isAdmin workflowLabel={workflowLabel} />
       <AuditLogPanel refreshKey={refreshKey} />
+      <SessionsPanel refreshKey={refreshKey} />
     </>
   );
 }

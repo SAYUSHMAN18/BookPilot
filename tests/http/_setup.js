@@ -74,6 +74,7 @@ function freshApp({ webhookAppSecret } = {}) {
     "../../src/store/sessionStore",
     "../../src/store/availabilityStore",
     "../../src/store/signupOtpStore",
+    "../../src/store/authSessionStore",
     "../../src/infra/rateLimit",
     "../../src/engine/workflowEngine",
     "../../src/engine/loadWorkflows",

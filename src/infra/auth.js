@@ -38,10 +38,21 @@ function base64url(input) {
 }
 
 // payload: { uid, email, role, workflowId, providerId }
+//
+// New plan, Block 14 — every token now carries its own random session id
+// (sid), independent of anything in `payload`. The token stays a
+// self-contained, stateless bearer credential (verifySessionToken below
+// is unchanged — no DB read needed just to check "is this signature and
+// expiry valid") but `sid` gives server.js's requireAuth() something to
+// check against a small revocation list (src/store/authSessionStore.js)
+// for "has this ONE session been logged out remotely" — without making
+// every authenticated request do a full session-table lookup keyed on
+// the token itself.
 function createSessionToken(payload) {
-  const body = base64url(JSON.stringify({ ...payload, exp: Date.now() + SESSION_TTL_MS }));
+  const sid = crypto.randomUUID();
+  const body = base64url(JSON.stringify({ ...payload, sid, exp: Date.now() + SESSION_TTL_MS }));
   const sig = crypto.createHmac("sha256", getSessionSecret()).update(body).digest("base64url");
-  return `${body}.${sig}`;
+  return { token: `${body}.${sig}`, sessionId: sid };
 }
 
 function verifySessionToken(token) {

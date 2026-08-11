@@ -64,6 +64,7 @@ const bookings = require("./src/store/bookingStore");
 const { blockSlot, unblockSlot, getBlockById, listBlocksForProvider, timeToMinutes } = require("./src/store/availabilityStore");
 const { labelToMinutes, formatLongDate, parseIsoDate } = require("./src/engine/dateSlots");
 const { createSessionToken, verifySessionToken, SESSION_TTL_MS } = require("./src/infra/auth");
+const authSessions = require("./src/store/authSessionStore");
 const users = require("./src/store/userStore");
 const { recordAudit, listAudit } = require("./src/store/auditLog");
 const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited } = require("./src/infra/rateLimit");
@@ -708,6 +709,17 @@ function requireAuth(...allowedRoles) {
   return (req, res, next) => {
     const session = getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Not logged in." });
+    // New plan, Block 14 — session list/revoke. A signature and an
+    // unexpired `exp` alone used to be the entire check; this closes the
+    // one real gap that left (no way to force ONE session to stop
+    // working before its natural 12h expiry — a "log out that other
+    // device" or a platform_admin responding to a compromised account
+    // both needed this). session.sid is missing entirely for a token
+    // issued before this table existed — treated as not revoked, same as
+    // authSessionStore.isRevoked() itself already documents.
+    if (session.sid && authSessions.isRevoked(session.sid)) {
+      return res.status(401).json({ error: "This session has been logged out. Please log in again." });
+    }
     const liveUser = users.getById(session.uid);
     if (!liveUser || !liveUser.active) {
       return res.status(401).json({ error: "This account is no longer active." });
@@ -739,7 +751,7 @@ function requireAuth(...allowedRoles) {
     if (allowedRoles.length && !allowedRoles.includes(liveUser.role)) {
       return res.status(403).json({ error: "You don't have permission to do that." });
     }
-    req.user = { uid: liveUser.id, email: liveUser.email, role: liveUser.role, name: liveUser.name, workflowId: liveUser.workflowId, providerId: liveUser.providerId, tenantId: liveUser.tenantId };
+    req.user = { uid: liveUser.id, email: liveUser.email, role: liveUser.role, name: liveUser.name, workflowId: liveUser.workflowId, providerId: liveUser.providerId, tenantId: liveUser.tenantId, sid: session.sid };
     next();
   };
 }
@@ -877,7 +889,7 @@ app.post("/api/signup", asyncHandler(async (req, res) => {
     throw err;
   }
 
-  const token = createSessionToken({
+  const { token, sessionId } = createSessionToken({
     uid: user.id,
     email: user.email,
     role: user.role,
@@ -885,6 +897,7 @@ app.post("/api/signup", asyncHandler(async (req, res) => {
     workflowId: user.workflowId,
     providerId: user.providerId,
   });
+  authSessions.create(sessionId, user.id, Date.now() + SESSION_TTL_MS, req.get("User-Agent"));
   setSessionCookie(res, token);
   recordAudit(tenant.id, user, "tenant.self_signup", { name: tenant.name, slug: tenant.slug });
   // 🔔 — deliberately distinct from every other INFO log line in this
@@ -921,7 +934,7 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "Invalid email or password." });
   }
 
-  const token = createSessionToken({
+  const { token, sessionId } = createSessionToken({
     uid: user.id,
     email: user.email,
     role: user.role,
@@ -929,6 +942,7 @@ app.post("/api/auth/login", (req, res) => {
     workflowId: user.workflowId,
     providerId: user.providerId,
   });
+  authSessions.create(sessionId, user.id, Date.now() + SESSION_TTL_MS, req.get("User-Agent"));
   setSessionCookie(res, token);
   recordAudit(user.tenantId, user, "login", null);
   res.json({ ok: true, user: { email: user.email, role: user.role, name: user.name, workflowId: user.workflowId, providerId: user.providerId, tenantId: user.tenantId } });
@@ -994,8 +1008,29 @@ app.post("/api/auth/logout", (req, res) => {
   // The token payload itself has no tenantId (deliberately — see
   // requireAuth()'s comment on always re-reading the live row); a quick
   // lookup here is cheap and keeps this audit entry correctly attributed.
-  if (session) recordAudit(users.getById(session.uid)?.tenantId ?? null, session, "logout", null);
+  if (session) {
+    recordAudit(users.getById(session.uid)?.tenantId ?? null, session, "logout", null);
+    // New plan, Block 14 — revoke the session server-side too, not just
+    // clear the cookie client-side. Without this, a copied/leaked cookie
+    // value would keep working for the rest of its 12h lifetime even
+    // after the legitimate owner "logged out."
+    if (session.sid) authSessions.revoke(session.sid, session.uid);
+  }
   clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// New plan, Block 14 — session list/revoke, the tenant-facing half.
+// "Current" is whichever session this very request is authenticated
+// with (req.user.sid) — the client needs that to grey out/disable
+// revoking the session it's currently looking through.
+app.get("/api/auth/sessions", requireAuth(), (req, res) => {
+  const sessions = authSessions.listForUser(req.user.uid).map((s) => ({ ...s, isCurrent: s.id === req.user.sid }));
+  res.json(sessions);
+});
+
+app.delete("/api/auth/sessions/:id", requireAuth(), (req, res) => {
+  authSessions.revoke(req.params.id, req.user.uid); // scoped to the caller's own user id — see authSessionStore's own comment
   res.json({ ok: true });
 });
 

@@ -496,6 +496,28 @@ db.exec(`
 `);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_signup_otps_email ON signup_otps(email);`);
 
+// New plan, Block 14 — session list/revoke. `id` is the random `sid`
+// src/infra/auth.js now embeds in every signed token (TEXT primary key,
+// not autoincrement — the token itself carries this value, so it has to
+// be generated before any row exists, not assigned by one). The token
+// stays the actual stateless bearer credential; this table only exists
+// so requireAuth() has something small to check a session ID against
+// ("has this ONE session been revoked") without turning every
+// authenticated request into a full session-table lookup keyed on the
+// token contents. revoked_at nullable, same single-use-style pattern as
+// every other "not yet used/actioned" column in this schema.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);`);
+
 // "Especially admin actions" — who did what, when. Append-only by
 // convention (nothing in this codebase updates or deletes a row here).
 db.exec(`
