@@ -56,6 +56,7 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 const { handleIncomingMessage } = require("./src/engine/workflowEngine");
+const { isTerminal } = require("./src/engine/bookingStateMachine");
 const { isValidSignature } = require("./src/infra/verifySignature");
 const { isDuplicate } = require("./src/infra/dedupe");
 const bookings = require("./src/store/bookingStore");
@@ -1209,14 +1210,19 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
   if (action === "cancel") {
     if (booking.status === "cancelled") return res.status(400).json({ error: "Booking is already cancelled." });
     // Real bug, found live during an exhaustive endpoint-testing pass: this
-    // check previously only excluded "cancelled", so a "done" (or
+    // check previously only excluded "cancelled" by name, so a "done" (or
     // "no_show") booking — a finished, historical record — could be
     // silently flipped to "cancelled" and even trigger a refund via
     // refundIfPaid() below for a service that had already been rendered.
     // A terminal state should stay terminal; if a completed booking
     // genuinely needs undoing, that's a manual DB/support action, not a
     // one-click dashboard button with no confirmation of what it implies.
-    if (booking.status === "done" || booking.status === "no_show") {
+    // isTerminal() (Item 6's bookingStateMachine.js) is the single shared
+    // definition of "terminal" every status-changing action below uses —
+    // this exact bug shape (excluding one terminal status by name instead
+    // of terminal-ness itself) recurred enough times in this file that a
+    // hand-written list here was the actual bug, not a one-off typo.
+    if (isTerminal(booking.status)) {
       return res.status(400).json({ error: `Cannot cancel a booking that's already marked ${booking.status.replace("_", "-")} — it's a completed record, not an active one.` });
     }
 
@@ -1271,16 +1277,16 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
     if (!/^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)) {
       return res.status(400).json({ error: "rescheduleDate must be in YYYY-MM-DD format." });
     }
-    if (booking.status === "cancelled") return res.status(400).json({ error: "Cannot reschedule a cancelled booking." });
-    // Same real bug as the cancel branch above, same fix: this only
-    // excluded "cancelled" — a "done"/"no_show" booking (a finished,
-    // historical record) or one currently "serving" (the customer is
-    // being served RIGHT NOW) could be silently rewritten back to
+    // Same real bug as the cancel branch above, same fix (now via the
+    // shared isTerminal() check): a "done"/"no_show"/"cancelled" booking
+    // (a finished, historical record) could be silently rewritten back to
     // "booked" with a new date/time, which is exactly the "un-complete a
     // finished appointment" bug found live in this same pass. Live-verified
     // before this fix: completing a booking, then rescheduling it, flipped
-    // its status straight back to "booked" with no warning.
-    if (booking.status === "done" || booking.status === "no_show" || booking.status === "serving") {
+    // its status straight back to "booked" with no warning. "serving" is
+    // additionally blocked here — a reschedule-specific rule, not a
+    // terminal-status one — since the customer is being served RIGHT NOW.
+    if (isTerminal(booking.status) || booking.status === "serving") {
       return res.status(400).json({ error: `Cannot reschedule a booking that's ${booking.status === "serving" ? "currently being served" : `already marked ${booking.status.replace("_", "-")}`} — cancel and create a new booking instead.` });
     }
     // Reschedule moves a single time-slot booking to a new date/time — a
@@ -1362,8 +1368,15 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
     if (action === "serve" && (!booking.visitTime || !booking.visitDate)) {
       return res.status(400).json({ error: "Serve only applies to a time-slot booking." });
     }
-    if (booking.status === "cancelled") return res.status(400).json({ error: "Cannot update a cancelled booking." });
-    if (booking.status === "done") return res.status(400).json({ error: "Booking is already marked complete." });
+    // Same terminal-status bug shape as the cancel/reschedule branches
+    // above, closed here too: this guard used to only name "cancelled"
+    // and "done", so a "no_show" booking could still be marked "serving"
+    // or "done" — business-nonsensical (a no-show is, by definition, a
+    // completed record of the customer never arriving) but not actually
+    // blocked before this. isTerminal() catches all three uniformly.
+    if (isTerminal(booking.status)) {
+      return res.status(400).json({ error: `Cannot ${action} a booking that's already marked ${booking.status.replace("_", "-")}.` });
+    }
 
     // `note` already destructured from req.body above, alongside action/
     // rescheduleDate/rescheduleTime — no separate `body` variable exists
@@ -1435,7 +1448,7 @@ app.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), async
     if (!booking.visitTime || !booking.visitDate) {
       return res.status(400).json({ error: "no_show only applies to a time-slot booking." });
     }
-    if (booking.status === "cancelled" || booking.status === "done" || booking.status === "no_show") {
+    if (isTerminal(booking.status)) {
       return res.status(400).json({ error: `Cannot mark a ${booking.status} booking as no-show.` });
     }
 

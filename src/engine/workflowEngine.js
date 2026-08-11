@@ -29,6 +29,7 @@ const razorpay = require("../infra/paymentProviders/razorpayProvider");
 const { refundIfPaid } = require("./paymentRefunds");
 const { syncBookingCreated, syncBookingCancelled } = require("./calendarSync");
 const dashboardEvents = require("../infra/dashboardEvents");
+const { isTerminal } = require("./bookingStateMachine");
 
 // One state machine per WhatsApp sender. This is intentionally generic —
 // it has no idea what "medical" or "hotel" mean. It only knows how to walk
@@ -1392,6 +1393,23 @@ async function handleHereCommand(tenantId, waId) {
   const booking = bookings.activeForCustomer(tenantId, waId);
   if (!booking) {
     await sendWhatsAppText(tenantId, waId, "No active booking found to check in.");
+    return;
+  }
+  // Item 6 — this used to have NO status guard at all: activeForCustomer()
+  // only excludes "cancelled", so a customer replying HERE for a booking
+  // already "done"/"no_show" (a finished record) or "serving" (already
+  // further along than "arrived") would silently move it BACKWARD —
+  // exactly the same terminal/out-of-order-status bug shape server.js's
+  // cancel/reschedule/serve/complete/no_show actions each already had to
+  // be fixed for. isTerminal() is the shared source of truth those fixes
+  // now share too (src/engine/bookingStateMachine.js); "serving" is
+  // additionally blocked here since re-arriving can't un-serve someone.
+  if (isTerminal(booking.status) || booking.status === "serving") {
+    const message =
+      booking.status === "serving" ? `You're currently being seen by ${booking.providerName}.` :
+      booking.status === "done" ? `Your${booking.visitTime ? ` ${booking.visitTime}` : ""} appointment with ${booking.providerName} is already complete.` :
+      `Your booking is already marked ${booking.status.replace("_", "-")}.`;
+    await sendWhatsAppText(tenantId, waId, message);
     return;
   }
   bookings.updateStatus(tenantId, booking.id, "arrived");
