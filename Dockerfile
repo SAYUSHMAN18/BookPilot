@@ -43,17 +43,39 @@ COPY public/dashboard.html ./public/dashboard.html
 COPY public/marketing/ ./public/marketing/
 COPY --from=frontend-builder /build/public/app ./public/app
 
-# src/data/ (SQLite DB) and src/logs/ are created at startup by
-# src/store/db.js and src/infra/logger.js themselves (mkdirSync recursive)
-# — declared as volumes so a container restart/redeploy doesn't lose the
-# database or backups. Mount these to real persistent storage in
-# production; without a mount they're still writable, just ephemeral.
-VOLUME ["/app/src/data", "/app/src/logs", "/app/backups"]
+# data/ (SQLite DB) and logs/ are created at startup by src/store/db.js
+# and src/infra/logger.js themselves (mkdirSync recursive) — declared as
+# volumes so a container restart/redeploy doesn't lose the database or
+# backups. Mount these to real persistent storage in production; without
+# a mount they're still writable, just ephemeral.
+#
+# Found live (this Dockerfile's own first verification pass): both paths
+# here originally said /app/src/data and /app/src/logs — stale, matching
+# a path this codebase moved away from (see db.js's DATA_DIR and
+# logger.js's LOG_FILE, both resolve to <root>/data and <root>/logs, not
+# <root>/src/data or <root>/src/logs; the same stale-path confusion this
+# project's own git-hygiene pass separately found and cleaned up for the
+# real dev database). A container using the old paths would silently
+# persist an empty, unused directory while the real database and logs
+# sat in the container's own ephemeral writable layer — gone on every
+# redeploy, with no error to notice it by.
+#
+# Found live (this Dockerfile's second bug, same verification pass): these
+# three directories don't otherwise exist in the image — src/store/db.js
+# and src/infra/logger.js only mkdirSync() them at runtime — so with
+# nothing here to inherit ownership from, Docker initializes a fresh
+# anonymous volume at each of these mount points owned by root. The
+# container then runs as the non-root `node` user (see below) and every
+# write crashed with EACCES before the server ever came up. Explicitly
+# creating them here, in the SAME chown step as the rest of /app, gives
+# Docker real (correctly-owned) directory content to seed each volume
+# from on first mount — the documented way this actually works.
+RUN mkdir -p /app/data /app/logs /app/backups && chown -R node:node /app
+VOLUME ["/app/data", "/app/logs", "/app/backups"]
 
 # Runs as the pre-created non-root `node` user baked into the official
 # image, not root — standard container hardening, and this app has no
 # reason to need root (no privileged ports, no system-level access).
-RUN chown -R node:node /app
 USER node
 
 EXPOSE 8081

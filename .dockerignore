@@ -4,6 +4,8 @@ frontend/node_modules
 .env
 .env.*
 !.env.example
+data
+logs
 src/data
 src/logs
 backups
