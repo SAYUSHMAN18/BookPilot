@@ -36,7 +36,7 @@ export default function ApiKeysPanel({ refreshKey }) {
         <span className="count-badge">{rows.filter((k) => !k.revoked).length} active</span>
       </div>
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-        For your own website or backend to call the Public API (<code>GET /api/v1/availability</code>, <code>GET /api/v1/bookings/:bookingId</code>) directly — <code>Authorization: Bearer &lt;key&gt;</code>. Each key is shown in full exactly once, right after you create it; after that only its prefix is ever shown again.
+        For your own website or backend to call the Public API (<code>GET /api/v1/availability</code>, <code>GET /api/v1/bookings/:bookingId</code>) directly — <code>Authorization: Bearer &lt;key&gt;</code>. Each key is shown in full exactly once, right after you create it; after that only its prefix is ever shown again. Full request/response reference: <a href="/openapi.yaml" target="_blank" rel="noreferrer">OpenAPI spec</a> (import into Postman, Insomnia, or Swagger Editor).
       </div>
       {error && <div className="error-banner">{error}</div>}
 

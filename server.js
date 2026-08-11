@@ -2347,6 +2347,17 @@ app.patch("/api/platform/tenants/:id/config", requireAuth("platform_admin"), (re
 // real, separate design work, not something to rush through here.
 // Flagged explicitly rather than silently shipping a write path that
 // looks equivalent to the conversational one but isn't.
+// New plan, Block 19 — a real, importable OpenAPI 3.0 spec for this
+// Public API, kept as a plain static YAML file (no new dependency —
+// nothing here parses or generates it, the file itself IS the
+// deliverable) rather than a full Swagger UI, which would need a CDN
+// script this project's own CSP (Section 12) deliberately blocks.
+// Unauthenticated, same as the docs a `curl` or a browser tab reaches
+// with no API key at all — the spec describes the API, it isn't the API.
+app.get("/openapi.yaml", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "openapi.yaml"));
+});
+
 app.get("/api/v1/availability", requireApiKey, (req, res) => {
   const { workflowId, providerId, date } = req.query;
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {

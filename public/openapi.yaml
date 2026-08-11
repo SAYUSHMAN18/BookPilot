@@ -1,0 +1,204 @@
+openapi: 3.0.3
+info:
+  title: BookPilot AI Public API
+  version: "1.0.0"
+  description: |
+    Lets a tenant's own website or backend call BookPilot directly —
+    check real-time availability, or look up a booking a customer
+    already has — authenticated with an API key issued from the
+    dashboard's "API Keys" panel, rather than a dashboard session.
+
+    Deliberately read-only in this release: there is no endpoint to
+    create or cancel a booking through this API yet. Every booking write
+    in this app goes through the WhatsApp conversation engine, which is
+    coupled to a step-by-step conversational session in a way that isn't
+    yet factored into a reusable, session-independent function — see the
+    project README's "Public API & platform maturity" section for the
+    full reasoning. `GET /v1/availability` still reuses the *exact* same
+    slot-computation the conversational flow itself uses, so the read
+    side has zero risk of drifting from what the WhatsApp bot actually
+    offers.
+  contact:
+    name: BookPilot AI
+externalDocs:
+  description: Full project README (architecture, every other section of the API)
+  url: /README.md
+servers:
+  - url: /api
+    description: Same origin the dashboard itself is served from — there is no separate API host.
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /v1/availability:
+    get:
+      operationId: getAvailability
+      summary: Real-time available time slots for one provider on one date
+      description: |
+        Reuses the exact slot-computation function the WhatsApp
+        conversational booking flow itself calls — this can never drift
+        from what a customer is actually offered on WhatsApp. Already
+        excludes taken slots (another booking's exact provider/date/time)
+        and anything the provider has blocked off (a full day, or a
+        specific time range).
+      parameters:
+        - name: workflowId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The business/workflow id (as shown in the dashboard's Manage Businesses list — e.g. "hair").
+          example: hair
+        - name: providerId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The specific provider/staff id within that workflow.
+          example: p1
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: YYYY-MM-DD. Today or a future date — this project's own date picker only ever offers a rolling 7–10 day window.
+          example: "2026-08-15"
+      responses:
+        "200":
+          description: The requested date's remaining open slots for that provider.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workflowId:
+                    type: string
+                  providerId:
+                    type: string
+                  date:
+                    type: string
+                    format: date
+                  slots:
+                    type: array
+                    description: 12-hour labels ("10:00 am"), in ascending order, capped at 10 (WhatsApp's own interactive-list row limit) — an empty array means fully booked/blocked, not an error.
+                    items:
+                      type: string
+                    example: ["10:00 am", "10:45 am", "11:30 am"]
+        "400":
+          description: A required query param is missing, or `date` isn't in YYYY-MM-DD format.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "401":
+          description: Missing, invalid, or revoked API key.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "403":
+          description: The key is valid, but that tenant's account is suspended or cancelled.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "404":
+          description: Unknown workflowId for this tenant.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded for this API key (60 requests/minute).
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /v1/bookings/{bookingId}:
+    get:
+      operationId: getBooking
+      summary: Look up a booking by its tenant-issued booking id
+      description: |
+        `bookingId` is the human-readable id (e.g. "APT-20260812-XY12")
+        a customer's own WhatsApp confirmation already showed them — not
+        this app's internal numeric row id. The customer's WhatsApp
+        number is never included in the response, even to the tenant's
+        own authenticated integration; it stays internal-only.
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: APT-20260812-XY12
+      responses:
+        "200":
+          description: The booking, with every field except the customer's WhatsApp number.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "401":
+          description: Missing, invalid, or revoked API key.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "403":
+          description: The key is valid, but that tenant's account is suspended or cancelled.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "404":
+          description: No booking with that id for this tenant.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded for this API key (60 requests/minute).
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: |
+        A key issued from the dashboard's "API Keys" panel (bpk_-prefixed,
+        shown in full exactly once at creation — only its short prefix is
+        ever shown again). Send as `Authorization: Bearer bpk_...`.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    Booking:
+      type: object
+      description: Every field bookingStore returns except `waId`, which is stripped even for the tenant's own integration.
+      properties:
+        id: { type: integer, description: "Internal numeric row id — not the same as bookingId." }
+        tenantId: { type: integer }
+        bookingId: { type: string, example: "APT-20260812-XY12" }
+        bookingCode: { type: string, nullable: true, description: "A separate, short, customer-facing check-in code shown alongside bookingId." }
+        workflowId: { type: string }
+        providerId: { type: string, nullable: true }
+        providerName: { type: string, nullable: true }
+        hotelId: { type: string, nullable: true }
+        hotelName: { type: string, nullable: true }
+        visitDate: { type: string, nullable: true, description: "YYYY-MM-DD — time-slot bookings only, null for a hotel stay." }
+        visitDateLabel: { type: string, nullable: true, description: "Human-readable date, e.g. \"12 August 2026\"." }
+        visitTime: { type: string, nullable: true, example: "10:00 am" }
+        checkInIso: { type: string, nullable: true, description: "YYYY-MM-DD check-in date — hotel bookings only." }
+        nights: { type: integer, nullable: true }
+        customerName: { type: string, nullable: true }
+        age: { type: string, nullable: true }
+        gender: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [payment_pending, booked, arrived, serving, done, cancelled, no_show]
+        createdAt: { type: integer, description: "Unix epoch milliseconds." }
+        cancelledBy: { type: string, nullable: true }
+        rescheduledDate: { type: string, nullable: true }
+        rescheduledTime: { type: string, nullable: true }
+        rescheduleNote: { type: string, nullable: true }
+        providerNote: { type: string, nullable: true }
+        feedbackRequestedAt: { type: integer, nullable: true }
+        paymentStatus:
+          type: string
+          enum: [not_required, pending, paid, failed, refunded, partially_refunded]
+        reminder24hSentAt: { type: integer, nullable: true }
+        reminder2hSentAt: { type: integer, nullable: true }
+      required: [id, tenantId, bookingId, workflowId, status, createdAt]
