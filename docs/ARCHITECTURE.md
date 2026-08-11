@@ -115,17 +115,22 @@ minutes.
 Splitting `server.js`'s ~40 routes into `src/routes/*.js` modules is a
 fundamentally different kind of change — it's a semantic refactor (route
 handlers, shared closures like the in-memory `workflows` object,
-middleware ordering, Express Router mounting), not a mechanical one, and
-**there is currently no automated test coverage for any HTTP route in this
-project** — every route's correctness this far has been verified through
-manual `curl`/browser testing against the live server, not something a
-test run catches if a route split breaks it. Doing that refactor now, on
-a single-process app with real bookings happening on it, with no
-regression safety net, is a materially different risk than everything
-else in this pass. It's flagged here deliberately rather than silently
-skipped: the honest prerequisite for splitting `server.js` safely is
-building real HTTP-level route tests first, and that's a separate, focused
-piece of work — not something to rush through at the tail end of this one.
+middleware ordering, Express Router mounting), not a mechanical one.
+
+**Update:** `tests/http/*.test.js` now exists — real HTTP-level coverage via
+`supertest` against the actual Express `app` (server.js exports it, and
+only calls `app.listen()` when run as the process entry point, via
+`require.main === module` — a test file can `require("../../server")` and
+get the bare app, no real port bound, no background loops started). It
+covers signup/login/session/role-gating, booking CRUD + conflict detection
+(the `SlotTakenError` → 409 mapping), availability CRUD + role scoping,
+and the webhook's signature verification + duplicate-delivery handling —
+driven through a full real conversation via the actual signed `/webhook`
+route, not just `/api/simulate-whatsapp`. That was the honest prerequisite
+this section used to flag for splitting `server.js` safely; it's done, and
+a route-mounting refactor is no longer flying blind. It's still real,
+focused work of its own — not something to rush through at the tail end
+of a different change.
 
 ## Core invariants
 

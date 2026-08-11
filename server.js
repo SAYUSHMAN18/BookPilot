@@ -2149,10 +2149,21 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error." });
 });
 
-app.listen(PORT, () => {
-  log("INFO", `BookPilot AI listening on port ${PORT}`);
-  scheduleBackups(); // every BACKUP_INTERVAL_HOURS (default 6h)
-  runBackup().catch((err) => log("ERROR", `Startup backup threw: ${err.message}`)); // one immediately, don't wait 6h for the first
-  startOutboundQueueWorker(); // polls the durable send queue every 60s
-  checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
-});
+// Item 2 (HTTP-level route tests) needs `app` importable without the side
+// effect of actually binding a port and kicking off background loops
+// (backups, the outbound queue worker, a live WhatsApp token check) —
+// none of which a test run wants. `require.main === module` is true only
+// when this file is the actual process entry point (`node server.js`),
+// never when another file `require()`s it, so `node server.js` behaves
+// identically to before; a test file gets the bare `app` instead.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    log("INFO", `BookPilot AI listening on port ${PORT}`);
+    scheduleBackups(); // every BACKUP_INTERVAL_HOURS (default 6h)
+    runBackup().catch((err) => log("ERROR", `Startup backup threw: ${err.message}`)); // one immediately, don't wait 6h for the first
+    startOutboundQueueWorker(); // polls the durable send queue every 60s
+    checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
+  });
+}
+
+module.exports = app;
