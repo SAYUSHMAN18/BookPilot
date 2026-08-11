@@ -14,6 +14,7 @@ const removeStmt = db.prepare("DELETE FROM tenant_workflows WHERE tenant_id = ? 
 const getStmt = db.prepare("SELECT * FROM tenant_workflows WHERE tenant_id = ? AND workflow_id = ?");
 const listForTenantStmt = db.prepare("SELECT * FROM tenant_workflows WHERE tenant_id = ? ORDER BY created_at ASC");
 const countForTenantStmt = db.prepare("SELECT COUNT(*) AS n FROM tenant_workflows WHERE tenant_id = ?");
+const editedCountStmt = db.prepare("SELECT COUNT(*) AS n FROM tenant_workflows WHERE tenant_id = ? AND updated_at != created_at");
 
 function rowToDefinition(row) {
   if (!row) return undefined;
@@ -65,6 +66,20 @@ const tenantWorkflows = {
     for (const workflow of Object.values(defaults)) {
       upsertStmt.run(tenantId, workflow.id, JSON.stringify(workflow), now, now);
     }
+  },
+
+  // Item 7 — the setup checklist's "customize your first business" signal.
+  // A brand new tenant starts with an UNTOUCHED copy of the demo catalog
+  // (created_at === updated_at on every row, from seedDefaultsForTenant's
+  // single-pass insert) — true once any row has been edited (upsert bumps
+  // only updated_at) or the count has drifted from the seeded default
+  // (a workflow added or deleted), either way real signal that this
+  // tenant's business no longer IS the generic demo.
+  hasCustomizations(tenantId) {
+    const { n: total } = countForTenantStmt.get(tenantId);
+    const { n: edited } = editedCountStmt.get(tenantId);
+    const defaultCount = Object.keys(loadWorkflows()).length;
+    return edited > 0 || total !== defaultCount;
   },
 };
 

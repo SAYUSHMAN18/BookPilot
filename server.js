@@ -946,6 +946,59 @@ app.get("/signup", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "marketing", "signup.html"));
 });
 
+// Item 7 — the go-live journey's persistent checklist. Computed live from
+// real state every call (no separate "wizard progress" table to keep in
+// sync or let drift) — each item's `done` is a genuine fact about the
+// tenant (has any workflow been customized, is a real WhatsApp number
+// connected, is there more than just the founding admin, has a booking
+// ever landed), not a step someone can check off without doing it.
+// `dismissed` persists in the tenant's own feature_flags_json (Section 8's
+// existing per-tenant config store) — no schema change needed for it.
+app.get("/api/dashboard/setup-checklist", requireAuth("admin"), (req, res) => {
+  const tenant = tenantStore.getById(req.user.tenantId);
+  const teamCount = users.list(req.user.tenantId).length;
+  const bookingCount = bookings.values(req.user.tenantId).length;
+
+  const items = [
+    {
+      id: "customize-business",
+      label: "Customize your first business",
+      done: tenantWorkflowStore.hasCustomizations(req.user.tenantId),
+      hint: "Edit or add a business under Manage Businesses — the demo catalog is just a starting point, not your real menu.",
+    },
+    {
+      id: "connect-whatsapp",
+      label: "Connect your WhatsApp number",
+      done: !!tenant?.whatsappPhoneNumberId,
+      hint: "Ask an admin to set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID — or keep testing with simulated messages for now.",
+    },
+    {
+      id: "invite-team",
+      label: "Invite your team",
+      done: teamCount > 1,
+      hint: "Add a login for each provider under Manage Team, so everyone only sees their own bookings.",
+    },
+    {
+      id: "first-booking",
+      label: "Get your first booking",
+      done: bookingCount > 0,
+      hint: "Message your WhatsApp number (or try the simulate endpoint) to see a real booking land here.",
+    },
+  ];
+
+  res.json({
+    items,
+    allDone: items.every((i) => i.done),
+    dismissed: !!tenant?.featureFlags?.setupChecklistDismissed,
+  });
+});
+
+app.post("/api/dashboard/setup-checklist/dismiss", requireAuth("admin"), (req, res) => {
+  const tenant = tenantStore.getById(req.user.tenantId);
+  tenantStore.updateConfig(req.user.tenantId, { featureFlags: { ...tenant.featureFlags, setupChecklistDismissed: true } });
+  res.json({ ok: true });
+});
+
 app.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
   const all = listAllProviders(req.user.tenantId);
   if (req.user.role === "provider") {

@@ -9,6 +9,7 @@ import ManageTeamPanel from "../components/ManageTeamPanel";
 import AuditLogPanel from "../components/AuditLogPanel";
 import ManageBusinessesPanel from "../components/ManageBusinessesPanel";
 import ApiKeysPanel from "../components/ApiKeysPanel";
+import SetupChecklistPanel from "../components/SetupChecklistPanel";
 
 export default function AdminView({ providers, refreshKey, bump, currentUserEmail }) {
   const [bookings, setBookings] = useState([]);
@@ -44,6 +45,8 @@ export default function AdminView({ providers, refreshKey, bump, currentUserEmai
 
   return (
     <>
+      <SetupChecklistPanel refreshKey={refreshKey} />
+
       <div className="card">
         <div className="card-header">
           <span className="card-title">📊 All Bookings</span>
