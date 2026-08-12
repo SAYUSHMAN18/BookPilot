@@ -15,6 +15,24 @@ function isRateLimited(waId) {
   return recent.length > MAX_PER_WINDOW;
 }
 
+// Found live: a rate-limited sender got total silence with no way to know
+// why the bot went quiet — the one deliberately-silent path in an
+// otherwise "always reply" codebase. A notice fixes that, but the notice
+// itself must not become a second flood: isRateLimited() stays true for
+// every message over the limit for the rest of the window, so sending a
+// text on each of those would just replace one kind of spam with another.
+// This tracks "have we already told this sender" separately and caps it
+// to once per window — the first over-limit message in a flood gets a
+// notice, the rest of that same flood stay genuinely silent, same as before.
+const notified = new Map(); // waId -> last-notified timestamp
+function shouldNotifyRateLimit(waId) {
+  const now = Date.now();
+  const last = notified.get(waId);
+  if (last && now - last < WINDOW_MS) return false;
+  notified.set(waId, now);
+  return true;
+}
+
 // Separate, much stricter window for login attempts — this one guards
 // against password guessing, not chat spam, so it's keyed by IP+email
 // rather than WhatsApp id and trips at a much lower count.
@@ -105,4 +123,4 @@ function isOtpRateLimited(email) {
   return recent.length > OTP_MAX_PER_WINDOW;
 }
 
-module.exports = { isRateLimited, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited };
+module.exports = { isRateLimited, shouldNotifyRateLimit, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited };

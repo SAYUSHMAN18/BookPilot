@@ -1,5 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
+const { groqChatCompletion } = require("./groqClient");
 
 // Turns a plain-language business description into a draft workflow JSON
 // matching the exact shape workflows/*.json already uses — same schema
@@ -39,18 +40,26 @@ Fields:
 
 Match the field-naming conventions and step ordering shown above exactly — the engine looks up these exact field names.`;
 
+// Found live: every other AI call site (classify, intent detection,
+// factual Q&A, the orchestrator) goes through groqClient.js's
+// groqChatCompletion(), which wraps every request in a hard AbortController
+// timeout — this was the one call site that hit Groq directly instead,
+// so a hung response here could hang the admin's "generate a business"
+// dashboard request indefinitely, the exact failure mode Section 0's
+// shared timeout exists to rule out everywhere else. Given a much larger
+// max_tokens (2000, vs. 60-400 elsewhere) genuinely needs more time to
+// complete than the module's 5s default, this passes an explicit longer
+// timeout rather than either accepting spurious failures on normal-sized
+// generations or silently keeping the old "no timeout at all" behavior.
+const GENERATE_TIMEOUT_MS = 15000;
+
 async function generateWorkflowFromDescription(description) {
   if (!process.env.GROQ_API_KEY) {
     throw new Error("GROQ_API_KEY is not set — the AI workflow generator needs it (same key used for message classification).");
   }
 
-  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
+  const { data } = await groqChatCompletion(
+    {
       model: "llama-3.1-8b-instant",
       temperature: 0.3,
       max_tokens: 2000,
@@ -59,15 +68,9 @@ async function generateWorkflowFromDescription(description) {
         { role: "system", content: SCHEMA_PROMPT },
         { role: "user", content: `Business description: ${capForAI(description)}` },
       ],
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => "");
-    throw new Error(`Groq API responded ${resp.status}${errText ? `: ${errText.slice(0, 200)}` : ""}`);
-  }
-
-  const data = await resp.json();
+    },
+    { timeoutMs: GENERATE_TIMEOUT_MS }
+  );
   const raw = data.choices?.[0]?.message?.content || "";
 
   let workflow;

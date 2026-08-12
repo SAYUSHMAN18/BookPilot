@@ -15,7 +15,7 @@ const bookings = require("../store/bookingStore"); // SQLite-backed — see src/
 const { SlotTakenError, DateRangeConflictError } = bookings;
 const { dateOptions, timeSlotsFor, parseFlexibleDate, isoDate, parseIsoDate, formatLongDate, labelToMinutes } = require("./dateSlots");
 const { extractContext } = require("../ai/extractContext");
-const { isRateLimited } = require("../infra/rateLimit");
+const { isRateLimited, shouldNotifyRateLimit } = require("../infra/rateLimit");
 const { recordResponseTime } = require("../infra/perf");
 const { isDayBlocked, blockedRangesForDay } = require("../store/availabilityStore");
 const { tryAnswerFactually, tryAnswerAboutBooking } = require("../ai/factualQA");
@@ -250,32 +250,80 @@ function hasDateRangeConflict(tenantId, workflowId, providerId, checkIn, nights)
   return false;
 }
 
+// WhatsApp interactive lists hard-cap at 10 rows — dateOptions()/
+// timeSlotsFor() (dateSlots.js) already enforce this for dates/slots, but
+// nothing capped providers/hotels/rooms/options/businesses, all of which
+// come straight from a tenant's own (unbounded) dashboard config. Found
+// live as a real production risk, not yet a real incident: with 11+ rows
+// the Graph API rejects the whole list message outright, postToGraphApi
+// just logs an ERROR and returns false with no retry and no fallback text
+// (unlike sendWithRetry's proactive sends) — the customer sees the step
+// prompt simply never arrive, with no way to proceed at all.
+//
+// Truncating alone would silently make items 11+ unreachable, which is a
+// quieter version of the same problem — so this pairs with matching
+// name-lookup added to applyStepInput's select_provider/select_hotel/
+// select_room below: a customer whose choice got cut can still reach it
+// by typing its name, and the truncation note here tells them that's an
+// option rather than leaving them to guess.
+const MAX_LIST_ROWS = 10;
+// `ownerLabel` is whatever identifies WHOSE list this is for the log line
+// — a real tenantId for the business menu, a workflow id for everything
+// else (providers/hotels/rooms/options all belong to one business, not
+// the tenant as a whole) — not always literally a tenant id, just enough
+// context to find the right dashboard/catalog to trim.
+function capRows(rows, ownerLabel, context) {
+  if (rows.length <= MAX_LIST_ROWS) return { rows, truncated: false };
+  log("WARN", `${ownerLabel}: ${context} has ${rows.length} rows — WhatsApp's list limit is ${MAX_LIST_ROWS}, showing the first ${MAX_LIST_ROWS}. Consider trimming the catalog or asking for pagination support.`);
+  return { rows: rows.slice(0, MAX_LIST_ROWS), truncated: true };
+}
+const TRUNCATION_HINT = "\n\n(Showing the first 10 — if you don't see the one you want, just type its name.)";
+
 // Shown when we genuinely can't tell what the customer wants (a greeting,
 // small talk, or anything that doesn't match a business) — a clickable menu
 // beats silently guessing a workflow.
 async function sendBusinessMenu(tenantId, waId, workflows) {
-  const sections = [
-    {
-      title: "Services",
-      rows: Object.values(workflows).map((w) => ({
-        id: w.id,
-        title: w.label,
-        description: w.description,
-      })),
-    },
-  ];
-  await sendWhatsAppList(tenantId, waId, "What would you like to book today?", "Choose", sections);
+  const { rows, truncated } = capRows(
+    Object.values(workflows).map((w) => ({ id: w.id, title: w.label, description: w.description })),
+    `tenant ${tenantId}`,
+    "business menu"
+  );
+  const sections = [{ title: "Services", rows }];
+  await sendWhatsAppList(tenantId, waId, `What would you like to book today?${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+}
+
+// Found live: `parseInt(text, 10)` on a free-text reply silently succeeds
+// on any leading digit, not just a clean menu number — a customer typing
+// "3:00 pm" (meaning the TIME, not "pick item 3") parsed as index 3, which
+// silently resolved to whatever the 3rd row happened to be ("10:00 am") —
+// no error, no rejection, just a booking for the wrong time with nothing
+// to signal it. `parseInt("13th", 10)` on a typed date, or a provider name
+// that happens to start with a digit, are the same class of misfire.
+// Every "reply with a number to pick from the list" fallback in this file
+// needs the reply to be PURELY a number (optionally surrounded by
+// whitespace) before treating it as an index at all — anything else falls
+// through to name/id matching or a genuine "didn't understand" instead of
+// silently guessing.
+function parseListIndex(text) {
+  const trimmed = (text || "").trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = parseInt(trimmed, 10);
+  return n > 0 ? n : null;
 }
 
 function matchWorkflowByIdOrIndex(text, workflows) {
   const ids = Object.keys(workflows);
   const byId = workflows[text];
-  const byIndex = workflows[ids[parseInt(text, 10) - 1]];
+  const index = parseListIndex(text);
+  const byIndex = index ? workflows[ids[index - 1]] : undefined;
   return byId || byIndex || null;
 }
 
-async function sendConfirmProviderCard(tenantId, waId, workflow, step, session) {
-  const body = fillTemplate(step.confirmTemplate, session, workflow);
+// `preamble` (optional) is folded into the message body rather than sent
+// as its own separate message beforehand — see beginWorkflow()'s comment
+// for why.
+async function sendConfirmProviderCard(tenantId, waId, workflow, step, session, preamble = "") {
+  const body = (preamble ? `${preamble}\n\n` : "") + fillTemplate(step.confirmTemplate, session, workflow);
   await sendWhatsAppButtons(tenantId, waId, body, [
     { id: "continue", title: "✅ Continue" },
     { id: "choose_another", title: "🔁 Choose Another" },
@@ -283,57 +331,59 @@ async function sendConfirmProviderCard(tenantId, waId, workflow, step, session) 
 }
 
 // Sends the prompt for a step as a tappable WhatsApp UI element where
-// possible, falling back to plain text for free-text fields.
-async function sendStepPrompt(tenantId, waId, workflow, step, session) {
-  const prompt = fillTemplate(step.prompt, session, workflow);
+// possible, falling back to plain text for free-text fields. `preamble`
+// (optional) is prepended to the body instead of being sent as a separate
+// message — see beginWorkflow()'s comment for why.
+async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble = "") {
+  const prompt = (preamble ? `${preamble}\n\n` : "") + fillTemplate(step.prompt, session, workflow);
 
   if (step.type === "select_provider") {
-    const sections = [
-      {
-        title: "Options",
-        rows: workflow.providers.map((p) => ({
-          id: p.id,
-          title: p.name,
-          description: workflow.providerRowDescription || workflow.providerListItem
-            ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: p })
-            : describeEntity(p),
-        })),
-      },
-    ];
-    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)`, "Choose", sections);
+    const { rows, truncated } = capRows(
+      workflow.providers.map((p) => ({
+        id: p.id,
+        title: p.name,
+        description: workflow.providerRowDescription || workflow.providerListItem
+          ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: p })
+          : describeEntity(p),
+      })),
+      `business "${workflow.id}"`,
+      "select_provider"
+    );
+    const sections = [{ title: "Options", rows }];
+    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
     return;
   }
 
   if (step.type === "select_hotel") {
-    const sections = [
-      {
-        title: "Hotels",
-        rows: workflow.hotels.map((h) => ({
-          id: h.id,
-          title: h.name,
-          description: [h.location, h.rating].filter(Boolean).join(" · "),
-        })),
-      },
-    ];
-    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)`, "Choose", sections);
+    const { rows, truncated } = capRows(
+      workflow.hotels.map((h) => ({
+        id: h.id,
+        title: h.name,
+        description: [h.location, h.rating].filter(Boolean).join(" · "),
+      })),
+      `business "${workflow.id}"`,
+      "select_hotel"
+    );
+    const sections = [{ title: "Hotels", rows }];
+    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
     return;
   }
 
   if (step.type === "select_room") {
     const rooms = session.selectedHotel?.rooms || [];
-    const sections = [
-      {
-        title: "Rooms",
-        rows: rooms.map((r) => ({
-          id: r.id,
-          title: r.name,
-          description: workflow.providerRowDescription || workflow.providerListItem
-            ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: r })
-            : describeEntity(r),
-        })),
-      },
-    ];
-    await sendWhatsAppList(tenantId, waId, prompt, "Choose", sections);
+    const { rows, truncated } = capRows(
+      rooms.map((r) => ({
+        id: r.id,
+        title: r.name,
+        description: workflow.providerRowDescription || workflow.providerListItem
+          ? fillTemplate(workflow.providerRowDescription || workflow.providerListItem, { data: {}, selectedProvider: r })
+          : describeEntity(r),
+      })),
+      `business "${workflow.id}"`,
+      "select_room"
+    );
+    const sections = [{ title: "Rooms", rows }];
+    await sendWhatsAppList(tenantId, waId, `${prompt}${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
     return;
   }
 
@@ -344,8 +394,9 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session) {
         step.options.map((o) => ({ id: o, title: o }))
       );
     } else {
-      const sections = [{ title: "Options", rows: step.options.map((o) => ({ id: o, title: o })) }];
-      await sendWhatsAppList(tenantId, waId, prompt, "Choose", sections);
+      const { rows, truncated } = capRows(step.options.map((o) => ({ id: o, title: o })), `business "${workflow.id}"`, "select_option");
+      const sections = [{ title: "Options", rows }];
+      await sendWhatsAppList(tenantId, waId, `${prompt}${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
     }
     return;
   }
@@ -389,21 +440,41 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session) {
 // button/list id (real WhatsApp) or plain text/number (curl testing via
 // /api/simulate-whatsapp). Returns an error string to re-prompt on, or null
 // if the input was accepted and the session should advance.
+// A row past MAX_LIST_ROWS in a truncated list can't be tapped — matching
+// by id/index alone would make it permanently unreachable. Tries an exact
+// case-insensitive name match first; if that misses, a substring match is
+// only trusted when it's unambiguous (matches exactly one entry) — same
+// "don't guess when it's genuinely unclear" discipline nameIsGroundedInText
+// already applies elsewhere, rather than silently picking the first
+// partial match and risking the wrong provider/hotel/room.
+function findByName(entries, text, nameOf) {
+  const q = text.trim().toLowerCase();
+  if (!q) return null;
+  const exact = entries.find((e) => nameOf(e).toLowerCase() === q);
+  if (exact) return exact;
+  const partial = entries.filter((e) => nameOf(e).toLowerCase().includes(q));
+  return partial.length === 1 ? partial[0] : null;
+}
+
 function applyStepInput(tenantId, workflow, step, session, text) {
   if (step.type === "select_provider") {
     const byId = workflow.providers.find((p) => p.id === text);
-    const byIndex = workflow.providers[parseInt(text, 10) - 1];
-    const provider = byId || byIndex;
-    if (!provider) return "Sorry, I didn't get that.";
+    const index = parseListIndex(text);
+    const byIndex = index ? workflow.providers[index - 1] : undefined;
+    const byName = findByName(workflow.providers, text, (p) => p.name);
+    const provider = byId || byIndex || byName;
+    if (!provider) return "Sorry, I didn't recognize that provider — please tap one from the list, or type their name.";
     session.selectedProvider = provider;
     return null;
   }
 
   if (step.type === "select_hotel") {
     const byId = workflow.hotels.find((h) => h.id === text);
-    const byIndex = workflow.hotels[parseInt(text, 10) - 1];
-    const hotel = byId || byIndex;
-    if (!hotel) return "Sorry, I didn't get that.";
+    const index = parseListIndex(text);
+    const byIndex = index ? workflow.hotels[index - 1] : undefined;
+    const byName = findByName(workflow.hotels, text, (h) => h.name);
+    const hotel = byId || byIndex || byName;
+    if (!hotel) return "Sorry, I didn't recognize that hotel — please tap one from the list, or type its name.";
     session.selectedHotel = hotel;
     return null;
   }
@@ -411,9 +482,11 @@ function applyStepInput(tenantId, workflow, step, session, text) {
   if (step.type === "select_room") {
     const rooms = session.selectedHotel?.rooms || [];
     const byId = rooms.find((r) => r.id === text);
-    const byIndex = rooms[parseInt(text, 10) - 1];
-    const room = byId || byIndex;
-    if (!room) return "Sorry, I didn't get that.";
+    const index = parseListIndex(text);
+    const byIndex = index ? rooms[index - 1] : undefined;
+    const byName = findByName(rooms, text, (r) => r.name);
+    const room = byId || byIndex || byName;
+    if (!room) return "Sorry, I didn't recognize that room — please tap one from the list, or type its name.";
     session.selectedProvider = room; // rooms reuse the same "provider" concept for templates/records
     return null;
   }
@@ -424,7 +497,7 @@ function applyStepInput(tenantId, workflow, step, session, text) {
       return null;
     }
     const match = step.options.find((o) => o === text || o.toLowerCase() === text.toLowerCase());
-    if (!match) return "Sorry, I didn't get that.";
+    if (!match) return "Sorry, that's not one of the options — please tap one from the list.";
     session.data[step.field] = match;
     return null;
   }
@@ -436,9 +509,10 @@ function applyStepInput(tenantId, workflow, step, session, text) {
     // shown, silently picking the wrong day.
     const options = filteredDateOptions(tenantId, workflow, session, step);
     const byIdOrTitle = options.find((o) => o.id === text.toLowerCase() || o.title.toLowerCase() === text.toLowerCase());
-    const byIndex = options[parseInt(text, 10) - 1];
+    const dateIndex = parseListIndex(text);
+    const byIndex = dateIndex ? options[dateIndex - 1] : undefined;
     const match = byIdOrTitle || byIndex;
-    if (!match) return "Sorry, I didn't get that.";
+    if (!match) return "Sorry, I didn't recognize that date — please tap one from the list.";
     session.data[step.field] = match.id;
     session.data[`${step.field}Label`] = match.label;
     session.data[`${step.field}Iso`] = match.iso;
@@ -451,7 +525,8 @@ function applyStepInput(tenantId, workflow, step, session, text) {
     const blockedRanges = blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
     const slots = timeSlotsFor(workflow, session.data[step.dateField], excludeSlots, blockedRanges);
     const byText = slots.find((s) => s.toLowerCase() === text.toLowerCase());
-    const byIndex = slots[parseInt(text, 10) - 1];
+    const slotIndex = parseListIndex(text);
+    const byIndex = slotIndex ? slots[slotIndex - 1] : undefined;
     const match = byText || byIndex;
     if (!match) return "Sorry, that slot isn't available — someone may have just taken it.";
     session.data[step.field] = match;
@@ -644,17 +719,25 @@ async function beginWorkflow(tenantId, waId, session, workflowId, workflows, ori
   session.supportAttempts = 0;
   session.confusionCount = 0; // Item 9 — a successful classification means they're no longer stuck
 
-  await sendWhatsAppText(tenantId, waId, `Got it! Based on your message, it looks like you need ${workflow.matchLabel}.`);
+  // Found live: this used to fire up to 4 separate WhatsApp messages (and
+  // push notifications) for what reads, cognitively, as one bot turn —
+  // "got it" + "noted" + a specialty suggestion + the actual step prompt.
+  // Folded into a single preamble prepended to the step prompt's own body
+  // instead (sendStepPrompt/sendConfirmProviderCard both support one) —
+  // WhatsApp list/button bodies support multi-line text just fine, so
+  // nothing about what's communicated is lost, just how many bubbles it
+  // costs the customer to read it.
+  const preambleLines = [`Got it! Based on your message, it looks like you need ${workflow.matchLabel}.`];
 
   const extracted = await extractContext(originalText, workflow);
   const filled = autoFillFromContext(session, workflow, extracted, originalText || "");
   if (filled.length > 0) {
-    await sendWhatsAppText(tenantId, waId, `And I've already noted: ${filled.join(", ")} — no need to repeat that.`);
+    preambleLines.push(`And I've already noted: ${filled.join(", ")} — no need to repeat that.`);
   }
 
   const step = currentStep(workflow, session);
   if (session.subStage === "CONFIRM_PROVIDER") {
-    await sendConfirmProviderCard(tenantId, waId, workflow, step, session);
+    await sendConfirmProviderCard(tenantId, waId, workflow, step, session, preambleLines.join("\n\n"));
   } else {
     // Only relevant when the provider is still an open question — if
     // auto-fill (or the confirm-card flow above) already resolved one,
@@ -662,10 +745,10 @@ async function beginWorkflow(tenantId, waId, session, workflowId, workflows, ori
     if (step.type === "select_provider" && !session.selectedProvider) {
       const suggestion = suggestSpecialtyProvider(originalText || "", workflow);
       if (suggestion) {
-        await sendWhatsAppText(tenantId, waId, `Based on what you described, ${suggestion.name} (${suggestion.attribute}) might be a good fit — but here are all the options:`);
+        preambleLines.push(`Based on what you described, ${suggestion.name} (${suggestion.attribute}) might be a good fit — but here are all the options:`);
       }
     }
-    await sendStepPrompt(tenantId, waId, workflow, step, session);
+    await sendStepPrompt(tenantId, waId, workflow, step, session, preambleLines.join("\n\n"));
   }
 }
 
@@ -964,6 +1047,26 @@ async function cancelActiveBooking(tenantId, waId, workflows) {
   return { booking, refundResult };
 }
 
+// Found live: every cancellation message in this file only ever checked
+// `refundResult.refunded` to decide whether to mention money — but
+// refundIfPaid() (paymentRefunds.js) returns `refunded: false` for THREE
+// different reasons: no payment ever existed, the refund policy computed
+// 0%, or the automatic Razorpay call genuinely failed (that last case
+// alone sets `.error`). All three produced the identical silent-about-
+// money cancellation text. A customer who paid a deposit and had the
+// automatic refund fail has no way to know from the bot's own reply that
+// they need to follow up — this is the one place the codebase's "no
+// silent failures" principle stopped at the log line and never reached
+// the customer. Centralized here so every cancellation path (the
+// hardcoded CANCEL command, the DETECTING-stage intent handler,
+// review_confirm's Cancel button, and the orchestrator's CANCEL action)
+// reports refund status identically.
+function refundStatusNote(refundResult) {
+  if (refundResult?.refunded) return ` A refund of ₹${refundResult.amount / 100} has been issued.`;
+  if (refundResult?.error) return " We couldn't process your refund automatically — our team has been notified and will follow up on it.";
+  return "";
+}
+
 // Item 9 — loop detection. Before this, a customer who sent unmatched or
 // off-script replies (typos, noise, a request the classifier genuinely
 // couldn't place) got the exact same "I couldn't understand that" +
@@ -1104,7 +1207,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     if (hasActive) {
       const cancelResult = await cancelActiveBooking(tenantId, waId, workflows);
       sessions.delete(mapKey(tenantId, waId));
-      const refundNote = cancelResult?.refundResult?.refunded ? ` A refund of ₹${cancelResult.refundResult.amount / 100} has been issued.` : "";
+      const refundNote = refundStatusNote(cancelResult?.refundResult);
       await sendWhatsAppText(tenantId, waId,
         `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`
       );
@@ -1310,15 +1413,34 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
     if (choice === "cancel") {
       const cancelResult = await cancelActiveBooking(tenantId, waId, workflows); // persist the cancellation to the DB
       sessions.delete(mapKey(tenantId, waId));
-      const refundNote = cancelResult?.refundResult?.refunded ? ` A refund of ₹${cancelResult.refundResult.amount / 100} has been issued.` : "";
+      const refundNote = refundStatusNote(cancelResult?.refundResult);
       await sendWhatsAppText(tenantId, waId, `❌ Booking cancelled.${refundNote} Send a message anytime to start a new one.`);
       return;
     }
     if (isPriceObjection(trimmed)) {
       await sendWhatsAppText(tenantId, waId, "Totally understand — the fee shown is what this provider charges. Tap Cancel if you'd rather not proceed, or Confirm to go ahead.");
-    } else {
-      await sendWhatsAppText(tenantId, waId, "Please tap Confirm, Edit Details, or Cancel.");
+      await sendStepPrompt(tenantId, waId, workflow, step, session);
+      return;
     }
+
+    // Found live: "actually make it 3pm instead" at review_confirm fell
+    // straight to the flat "Please tap Confirm, Edit Details, or Cancel" —
+    // Edit Details only reaches the ONE step marked editTarget (customer
+    // details), never provider/date/time, which sit earlier in the step
+    // list. The orchestrator already exists specifically to handle "change
+    // an earlier answer" (planNextAction -> GO_TO_STEP) and already works
+    // correctly here — describeSteps()/STEP_DESCRIPTIONS has a real entry
+    // for review_confirm, and GO_TO_STEP's own bounds check already allows
+    // jumping back to any step at or before the current one. It was just
+    // never CALLED from this branch — handleRunning's generic fallback
+    // below calls it for every OTHER step type, but review_confirm returns
+    // before ever reaching that code. Same call, same executor, just wired
+    // in here too.
+    if (await executeOrchestratedPlan(tenantId, waId, session, workflow, await planNextAction(trimmed, workflow, session), trimmed, workflows)) return;
+
+    if (await maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed)) return;
+
+    await sendWhatsAppText(tenantId, waId, "Please tap Confirm, Edit Details, or Cancel.");
     await sendStepPrompt(tenantId, waId, workflow, step, session);
     return;
   }
@@ -1396,7 +1518,7 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
   if (plan.action === ACTIONS.CANCEL) {
     const cancelResult = await cancelActiveBooking(tenantId, waId, workflows); // persist the cancellation to the DB before clearing the session
     sessions.delete(mapKey(tenantId, waId));
-    const refundNote = cancelResult?.refundResult?.refunded ? ` A refund of ₹${cancelResult.refundResult.amount / 100} has been issued.` : "";
+    const refundNote = refundStatusNote(cancelResult?.refundResult);
     await sendWhatsAppText(tenantId, waId, `❌ No problem — I've cancelled that booking.${refundNote} Message me anytime to start a new one.`);
     return true;
   }
@@ -1547,7 +1669,23 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
   if (!trimmed) return;
 
   if (isRateLimited(waId)) {
-    log("WARN", `Rate limit hit for ${waId} — dropping message without replying.`);
+    // Found live: total silence here was the one deliberately-silent path
+    // left in an otherwise "always reply" codebase — a customer double-
+    // tapping out of impatience, or genuinely venting quickly, got nothing
+    // back with no way to know why. A one-time-per-window notice closes
+    // that without amplifying the flood (shouldNotifyRateLimit caps it to
+    // once — every other message in the same burst stays truly silent,
+    // same as before).
+    if (shouldNotifyRateLimit(waId)) {
+      log("WARN", `Rate limit hit for ${waId} — sending a one-time notice, then staying silent for the rest of this window.`);
+      try {
+        await sendWhatsAppText(tenantId, waId, "You're sending messages a bit fast — give me a second and try again shortly.");
+      } catch (err) {
+        log("WARN", `Rate-limit notice failed to send to ${waId}: ${err.message}`);
+      }
+    } else {
+      log("WARN", `Rate limit hit for ${waId} — already notified this window, dropping without replying.`);
+    }
     return;
   }
 
@@ -1565,6 +1703,39 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
     if (/^restart$/i.test(trimmed) || /^menu$/i.test(trimmed)) {
       sessions.delete(mapKey(tenantId, waId));
       await sendWhatsAppText(tenantId, waId, "🔄 Okay, starting over. What do you need?");
+      return;
+    }
+
+    // Found live: with no GROQ_API_KEY (or Groq down), "cancel" mid-booking
+    // had no reliable path at all. detectGeneralIntent() — the only thing
+    // that recognizes CANCEL_BOOKING as an intent — only ever runs in the
+    // DETECTING stage; once a customer is RUNNING through a workflow
+    // (selecting a provider/date/time, before reaching review_confirm), an
+    // unmatched "cancel" only ever reached ACTIONS.CANCEL through the
+    // orchestrator (planNextAction) — also a Groq call. Without one, typing
+    // "cancel" mid-booking just got re-prompted as an invalid answer,
+    // repeatedly, until 3 failed attempts escalated to human support.
+    // restart worked as an unintentional workaround, but nothing told the
+    // customer that. Hardcoded here, alongside restart/status/here, so
+    // abandoning an in-progress booking never depends on AI availability —
+    // same as those three already don't.
+    if (/^(cancel|stop|abort)$/i.test(trimmed)) {
+      const cancelResult = await cancelActiveBooking(tenantId, waId, workflows);
+      if (cancelResult) {
+        // A real, already-confirmed booking existed — cancel it for real
+        // (DB status, refund attempt, calendar sync), same as every other
+        // cancellation path.
+        sessions.delete(mapKey(tenantId, waId));
+        const refundNote = refundStatusNote(cancelResult.refundResult);
+        await sendWhatsAppText(tenantId, waId, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`);
+      } else if (session.stage === "RUNNING") {
+        // Nothing confirmed yet — just an in-progress flow to abandon.
+        // Nothing to refund or mark cancelled in the database.
+        sessions.delete(mapKey(tenantId, waId));
+        await sendWhatsAppText(tenantId, waId, "❌ No problem — cancelled. Message me anytime to start a new one.");
+      } else {
+        await sendWhatsAppText(tenantId, waId, "You don't have anything in progress to cancel. Message me anytime to start a new booking.");
+      }
       return;
     }
 

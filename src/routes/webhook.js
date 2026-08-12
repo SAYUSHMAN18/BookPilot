@@ -13,6 +13,7 @@ const { recordAudit } = require("../store/auditLog");
 const { publishBookingEvent } = require("../infra/publishBookingEvent");
 const { syncBookingCreated } = require("../engine/calendarSync");
 const { isVoiceEnabled, downloadWhatsAppMedia, transcribeAudio, synthesizeSpeech } = require("../infra/voice");
+const { translateForVoice } = require("../ai/translate");
 const {
   sendWhatsAppText,
   sendWhatsAppAudio,
@@ -63,7 +64,12 @@ async function handleVoiceMessage(tenantId, waId, message) {
     const replyText = endReplyCapture(waId);
     if (replyText && languageCode) {
       try {
-        const audio = await synthesizeSpeech(replyText, languageCode);
+        // Translate before speaking — see translate.js's own comment for
+        // why: without this, an English reply got spoken through a
+        // non-English voice model (English words in Hindi phonetics),
+        // which is worse than staying text-only.
+        const spokenText = await translateForVoice(replyText, languageCode);
+        const audio = await synthesizeSpeech(spokenText, languageCode);
         if (audio) await sendWhatsAppAudio(tenantId, waId, audio, "audio/mpeg");
       } catch (err) {
         log("ERROR", `Voice synthesis failed for ${waId}: ${err.message}`);
