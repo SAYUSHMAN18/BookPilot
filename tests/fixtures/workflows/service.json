@@ -3,11 +3,31 @@
   "label": "Automobile",
   "description": "all automobile servicing and spare parts",
   "matchLabel": "our services",
-  "keywords": ["car", "bike", "vehicle", "automobile", "service", "servicing", "oil change", "tyre", "tire", "puncture", "engine", "brake", "battery", "spare part", "spare parts"],
+  "keywords": [
+    "car",
+    "bike",
+    "vehicle",
+    "automobile",
+    "service",
+    "servicing",
+    "oil change",
+    "washing",
+    "tyre",
+    "tire",
+    "puncture",
+    "engine",
+    "brake",
+    "battery",
+    "spare part",
+    "spare parts"
+  ],
   "businessName": "QuickFix Auto Care",
   "businessAddress": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
   "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
-  "businessHours": { "start": "09:00", "end": "19:00" },
+  "businessHours": {
+    "start": "09:00",
+    "end": "19:00"
+  },
   "slotMinutes": 60,
   "bookingIdPrefix": "SVC",
   "providers": [
@@ -18,7 +38,7 @@
       "fee": 500,
       "address": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
       "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
-      "photo": "https://images.unsplash.com/photo-1580273916550-e323be2ae537?w=800&q=80"
+      "photo": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlsp4sSvFbnbukm9p8dqgyHxhZFL7O1v3zfpzf2oOXYIHw_2NYNC6juVqPr0OlmyrS-THuHDgwnyX7Pww40dKVxWEa6IZ6i90S79wx_tWy0BOIBeRKoyRa_PFbH9jlkTywCCsyXevoC2rs=w228-h286-n-k-no-nu"
     }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (from ₹{provider.fee})",

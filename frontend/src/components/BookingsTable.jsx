@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { StatusBadge, PaymentStatusBadge } from "./Badges";
 import { formatIST, whenGeneric } from "../lib/format";
-import { patch } from "../lib/api";
+import { patch, del } from "../lib/api";
 
 // Section 13 — one generic table for every workflow type rather than the
 // vanilla dashboard's per-workflow column config (PROFILES in
@@ -20,9 +20,29 @@ function bookingDetails(b) {
   return parts.join(" · ") || "—";
 }
 
-export default function BookingsTable({ bookings, onChanged, showBusinessColumn, workflowLabel, readOnly }) {
+export default function BookingsTable({ bookings, onChanged, showBusinessColumn, workflowLabel, readOnly, allowDelete }) {
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
+
+  // Admin-only, permanent — separate from every action above (all soft
+  // status transitions). Used to actually clear test/demo bookings, not a
+  // normal booking-lifecycle action, so it's gated by its own prop rather
+  // than tied to `readOnly` (the admin cross-business table passes
+  // readOnly=true for the existing per-booking actions, but still wants
+  // this one).
+  async function handleDelete(booking) {
+    if (!confirm(`Permanently delete booking ${booking.bookingId}? This cannot be undone.`)) return;
+    setBusyId(booking.id);
+    setError("");
+    try {
+      await del(`/api/dashboard/bookings/${booking.id}`);
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function runAction(id, action, extra) {
     setBusyId(id);
@@ -83,7 +103,7 @@ export default function BookingsTable({ bookings, onChanged, showBusinessColumn,
             <th>Payment</th>
             <th>Status</th>
             <th>Booked At (IST)</th>
-            {!readOnly && <th>Actions</th>}
+            {(!readOnly || allowDelete) && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -101,24 +121,24 @@ export default function BookingsTable({ bookings, onChanged, showBusinessColumn,
                 <td><PaymentStatusBadge status={b.paymentStatus} /></td>
                 <td><StatusBadge status={b.status} /></td>
                 <td>{formatIST(b.createdAt)}</td>
-                {!readOnly && (
+                {(!readOnly || allowDelete) && (
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {b.paymentStatus === "paid" && (
+                    {!readOnly && b.paymentStatus === "paid" && (
                       <button className="btn-secondary" disabled={busy} onClick={() => handleRefund(b)} style={{ padding: "3px 8px", fontSize: 12, marginRight: 4 }}>💰 Refund</button>
                     )}
-                    {actionable && b.visitTime && (
+                    {!readOnly && actionable && b.visitTime && (
                       b.status === "serving"
                         ? <button className="btn-secondary" disabled={busy} onClick={() => runAction(b.id, "complete")} style={{ padding: "3px 8px", fontSize: 12, marginRight: 4 }}>✅ Complete</button>
                         : <button className="btn-secondary" disabled={busy} onClick={() => runAction(b.id, "serve")} style={{ padding: "3px 8px", fontSize: 12, marginRight: 4 }}>▶️ Serve</button>
                     )}
-                    {actionable && (
+                    {!readOnly && actionable && (
                       <button className="btn-danger" disabled={busy} onClick={() => {
                         const note = window.prompt("Optional: reason for cancellation (sent to customer)") ?? "";
                         if (note === null) return;
                         runAction(b.id, "cancel", { note: note.trim() || undefined });
                       }} style={{ padding: "3px 8px", fontSize: 12, marginRight: 4 }}>❌ Cancel</button>
                     )}
-                    {actionable && b.visitTime && (
+                    {!readOnly && actionable && b.visitTime && (
                       <button className="btn-secondary" disabled={busy} onClick={() => {
                         const date = window.prompt("New date (YYYY-MM-DD):", b.visitDate || "");
                         if (!date) return;
@@ -127,13 +147,16 @@ export default function BookingsTable({ bookings, onChanged, showBusinessColumn,
                         runAction(b.id, "reschedule", { rescheduleDate: date, rescheduleTime: time, note });
                       }} style={{ padding: "3px 8px", fontSize: 12, marginRight: 4 }}>📅 Reschedule</button>
                     )}
-                    {actionable && b.visitTime && b.status !== "no_show" && (
+                    {!readOnly && actionable && b.visitTime && b.status !== "no_show" && (
                       <button className="btn-secondary" disabled={busy} onClick={() => {
                         if (!window.confirm("Mark this booking as a no-show?")) return;
                         runAction(b.id, "no_show");
                       }} style={{ padding: "3px 8px", fontSize: 12 }}>🚫 No-show</button>
                     )}
-                    {!actionable && !(b.paymentStatus === "paid") && <span style={{ fontSize: 12, color: "var(--muted)" }}>—</span>}
+                    {allowDelete && (
+                      <button className="btn-danger" disabled={busy} onClick={() => handleDelete(b)} style={{ padding: "3px 8px", fontSize: 12 }}>🗑️ Delete</button>
+                    )}
+                    {!readOnly && !actionable && !(b.paymentStatus === "paid") && <span style={{ fontSize: 12, color: "var(--muted)" }}>—</span>}
                   </td>
                 )}
               </tr>

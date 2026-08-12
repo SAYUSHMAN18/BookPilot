@@ -75,6 +75,31 @@ function freshApp({ webhookAppSecret } = {}) {
     "../../src/store/availabilityStore",
     "../../src/store/signupOtpStore",
     "../../src/store/authSessionStore",
+    // server.js was split into per-domain route files (src/routes/*.js) —
+    // each one does its own `require("../store/x")` at module scope, same
+    // shape as every other module in this list, so each needs the same
+    // busting or it holds the first freshApp() call's store references
+    // forever. auth.js is the one every OTHER router also imports
+    // requireAuth/requireApiKey from, so staleness here would silently
+    // affect every route's auth check, not just the auth routes themselves.
+    "../../src/routes/auth",
+    "../../src/routes/platformAdmin",
+    "../../src/routes/publicApi",
+    "../../src/routes/webhook",
+    "../../src/routes/dashboard",
+    "../../src/routes/marketing",
+    "../../src/infra/publishBookingEvent",
+    "../../src/infra/asyncHandler",
+    // Same stale-module-scope-db-reference bug already found and fixed in
+    // billing.js/analytics.js/calendarSync.js/paymentRefunds.js/reminders.js
+    // — tenantWorkflowStore.js does `const { db } = require("./db")` at
+    // module scope, so it silently keeps using the FIRST freshApp() call's
+    // db connection on every later freshApp() in the same test file unless
+    // busted here too. Went undetected until now because every read AND
+    // write for a given test both go through this same module, so a stale
+    // (but internally self-consistent) db never produced a visible
+    // assertion failure — only cross-file isolation checks would expose it.
+    "../../src/store/tenantWorkflowStore",
     "../../src/infra/rateLimit",
     "../../src/engine/workflowEngine",
     "../../src/engine/loadWorkflows",
@@ -101,7 +126,17 @@ function freshApp({ webhookAppSecret } = {}) {
     }
   }
 
-  return require("../../server");
+  const app = require("../../server");
+  // Tenant id=1 ("the default tenant", created explicitly by db.js's own
+  // bootstrap — see its comment) is used directly by several test files
+  // (bookings.test.js, loopDetection.test.js, webhook.test.js) via
+  // simulate-whatsapp/webhook conversations against tenantId: 1, without
+  // going through signup at all. Production no longer auto-seeds ANY
+  // tenant with the workflows/*.json demo catalog, so this fixture-seeds
+  // just tenant 1 here instead of repeating the same call in every one of
+  // those files. Idempotent — a no-op for tests that don't touch tenant 1.
+  require("../../src/store/tenantWorkflowStore").seedDefaultsForTenant(1);
+  return app;
 }
 
 // New plan, Section 2 — signup no longer grants instant dashboard access:
@@ -117,6 +152,7 @@ function freshApp({ webhookAppSecret } = {}) {
 async function signupAndActivate(app, request, { businessName, email, password = "password123", ownerName } = {}) {
   const { createOtp } = require("../../src/store/signupOtpStore");
   const tenantStore = require("../../src/store/tenantStore");
+  const tenantWorkflowStore = require("../../src/store/tenantWorkflowStore");
   const otp = createOtp(email);
   const resp = await request(app).post("/api/signup").send({ businessName, ownerName, email, password, otp });
   if (resp.status !== 201) {
@@ -124,6 +160,13 @@ async function signupAndActivate(app, request, { businessName, email, password =
   }
   const tenantId = resp.body.user.tenantId;
   tenantStore.setStatus(tenantId, "active");
+  // Production signup no longer auto-seeds the workflows/*.json demo
+  // catalog (a real tenant lists their own businesses by hand now) — but
+  // most of this suite's tests are exercising booking/workflow flows, not
+  // signup itself, so they still need a working catalog to book against.
+  // Seeded directly here rather than via the HTTP layer, same reasoning as
+  // bypassing the platform_admin activation endpoint above.
+  tenantWorkflowStore.seedDefaultsForTenant(tenantId);
   return { cookie: resp.headers["set-cookie"], tenantId };
 }
 

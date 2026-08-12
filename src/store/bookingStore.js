@@ -41,6 +41,7 @@ const insertStmt = db.prepare(`
 `);
 
 const updateStatusStmt = db.prepare("UPDATE bookings SET status = ? WHERE id = ? AND tenant_id = ?");
+const removeStmt = db.prepare("DELETE FROM bookings WHERE id = ? AND tenant_id = ?");
 // Section 9 — a denormalized convenience mirror of the payments table's
 // latest state (not_required | pending | paid | failed | refunded |
 // partially_refunded), kept in sync alongside the payments table itself
@@ -214,6 +215,15 @@ const bookings = {
   /** @param {number} tenantId @param {string} bookingId @returns {Booking|undefined} */
   getByBookingId(tenantId, bookingId) {
     return rowToBooking(getByBookingIdStmt.get(bookingId, tenantId));
+  },
+
+  // Hard delete — unlike every status transition above (cancel/no_show/etc,
+  // all soft: the row stays for history), this actually removes the row.
+  // Admin-only at the route level (server.js) — for permanently clearing
+  // test/demo data, not a normal booking-lifecycle action.
+  /** @param {number} tenantId @param {number|bigint} id @returns {boolean} true if a row was actually deleted */
+  remove(tenantId, id) {
+    return removeStmt.run(id, tenantId).changes > 0;
   },
 
   // What STATUS/HERE act on — the customer's latest booking, active or not

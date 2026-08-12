@@ -196,9 +196,14 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .avatars span {
   width: 34px; height: 34px; border-radius: 50%; background: var(--card); border: 2px solid var(--bg);
   box-shadow: var(--shadow-sm); display: flex; align-items: center; justify-content: center; font-size: 15px;
-  margin-left: -10px; position: relative; z-index: calc(10 - var(--i));
+  margin-left: -10px; position: relative;
 }
 .avatars span:first-child { margin-left: 0; }
+.avatars span:nth-child(1) { z-index: 5; }
+.avatars span:nth-child(2) { z-index: 4; }
+.avatars span:nth-child(3) { z-index: 3; }
+.avatars span:nth-child(4) { z-index: 2; }
+.avatars span:nth-child(5) { z-index: 1; }
 
 /* --- phone mockup --- */
 .hero-visual { position: relative; display: flex; justify-content: center; }

@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { get, post, patch } from "../lib/api";
 
+// A random, copy-pasteable temporary password — one less thing to invent
+// when adding someone. Shown in plain text right here (same "shown once"
+// pattern API key creation already uses) so it can be handed to the new
+// login's owner; they're expected to change it after first sign-in.
+function generatePassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
 export default function ManageTeamPanel({ refreshKey, providers, currentUserEmail }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
@@ -45,7 +54,10 @@ export default function ManageTeamPanel({ refreshKey, providers, currentUserEmai
       {adding && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14, background: "var(--bg)", padding: 12, borderRadius: "var(--radius-sm)" }}>
           <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input placeholder="Temporary password" type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input placeholder="Temporary password" type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={{ flex: 1 }} />
+            <button type="button" className="btn-secondary" onClick={() => setForm({ ...form, password: generatePassword() })}>🎲 Generate</button>
+          </div>
           <input placeholder="Display name (optional)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             <option value="provider">Provider</option>

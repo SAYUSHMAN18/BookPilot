@@ -10,7 +10,14 @@ const { groqChatCompletion } = require("./groqClient");
 function keywordClassify(text, workflows) {
   const q = text.toLowerCase();
   for (const workflow of Object.values(workflows)) {
-    if (workflow.keywords.some((k) => q.includes(k))) {
+    // Found live: a business created through the admin UI has no keywords[]
+    // at all — it's not even a field that form exposes, only reachable by
+    // hand-editing the raw JSON — so `.some()` on undefined threw a
+    // TypeError the moment a tenant had 2+ such businesses and a customer
+    // hit a reclassifiable step (couldBeADifferentBusiness below hits the
+    // exact same gap). No keywords just means this workflow never matches
+    // via the fallback path, same as an empty list would.
+    if ((workflow.keywords || []).some((k) => q.includes(k))) {
       return { workflowId: workflow.id, source: "keyword-fallback" };
     }
   }
@@ -79,18 +86,33 @@ async function classifyBusiness(text, workflows) {
 }
 
 // Cheap, synchronous pre-check used before paying for a classifyBusiness()
-// Groq call mid-flow: is there ANY keyword hint this message is about a
-// business OTHER than the one already locked in? If not, skip the call
-// entirely — a mistyped date or an out-of-range answer has no keyword
-// overlap with any other workflow, so the Groq call would almost always
-// just confirm "no switch" at the cost of latency and quota. Conservative
-// by design: any ambiguity (a keyword DOES match something) still goes to
-// the real classifier rather than this guessing on its own.
+// Groq call mid-flow: is there ANY hint this message is about a business
+// OTHER than the one already locked in? If not, skip the call entirely —
+// a mistyped date or an out-of-range answer has no overlap with any other
+// workflow, so the Groq call would almost always just confirm "no switch"
+// at the cost of latency and quota. Conservative by design: any ambiguity
+// (a match on ANYTHING below) still goes to the real classifier rather
+// than this guessing on its own.
+//
+// Found live (real bug, real WhatsApp number): typing another business's
+// own id/name verbatim mid-flow — exactly what a customer does after
+// seeing it in an earlier list/menu — never matched here, because this
+// only ever checked `keywords` (free-text description terms like "car
+// service, auto repair"), never the id ("automobile-service") or label
+// ("Automobile Service") a customer might just as easily type back. The
+// customer stayed stuck in the wrong business's current step instead of
+// switching. Checking id/label too closes that gap without waiting on the
+// keywords fix alone (see the derive-from-description default in
+// server.js's POST /api/dashboard/workflows) — either one matching is
+// enough to trigger the real classifier.
 function couldBeADifferentBusiness(text, workflows, currentWorkflowId) {
   const q = text.toLowerCase();
-  return Object.values(workflows).some(
-    (w) => w.id !== currentWorkflowId && w.keywords.some((k) => q.includes(k))
-  );
+  return Object.values(workflows).some((w) => {
+    if (w.id === currentWorkflowId) return false;
+    if (q.includes(w.id.toLowerCase())) return true;
+    if (w.label && q.includes(w.label.toLowerCase())) return true;
+    return (w.keywords || []).some((k) => q.includes(k));
+  });
 }
 
 module.exports = { classifyBusiness, couldBeADifferentBusiness };

@@ -70,7 +70,7 @@ export default function AdminView({ providers, refreshKey, bump, currentUserEmai
           {(search || biz || status || date) && <button className="btn-link" onClick={() => { setSearch(""); setBiz(""); setStatus(""); setDate(""); }}>× Clear all</button>}
         </div>
         {error && <div className="error-banner">{error}</div>}
-        <BookingsTable bookings={filtered} onChanged={() => { load(); bump(); }} showBusinessColumn workflowLabel={workflowLabel} readOnly />
+        <BookingsTable bookings={filtered} onChanged={() => { load(); bump(); }} showBusinessColumn workflowLabel={workflowLabel} readOnly allowDelete />
       </div>
 
       <AnalyticsPanel refreshKey={refreshKey} />

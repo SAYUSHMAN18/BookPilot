@@ -1,11 +1,22 @@
 const fs = require("fs");
 const path = require("path");
 
-const WORKFLOWS_DIR = path.join(__dirname, "..", "..", "workflows");
+// No longer a production data source — nothing in server.js seeds a new
+// tenant from this any more (a tenant lists its own real businesses by
+// hand from the dashboard, stored per-tenant in the tenant_workflows
+// table, never as files). What's left here is purely a test fixture:
+// tests/http/_setup.js calls seedDefaultsForTenant() directly so
+// booking-flow tests have a known, complete catalog to exercise —
+// including workflows/fixture shapes (hotel.json's date-range booking)
+// nothing else in this project's own test suite happens to cover. Lives
+// under tests/fixtures/ for exactly that reason, not at the repo root
+// where it used to read as active production content.
+const WORKFLOWS_DIR = path.join(__dirname, "..", "..", "tests", "fixtures", "workflows");
 
 // This is the Dynamic Workflow Engine's data source: every *.json file in
-// workflows/ becomes a bookable business type. Adding a new industry (e.g.
-// "restaurant") means adding restaurant.json here — no code changes.
+// tests/fixtures/workflows/ becomes a fixture business type. Adding a new
+// shape of test fixture (e.g. "restaurant") means adding restaurant.json
+// here — no code changes.
 function loadWorkflows() {
   const workflows = {};
   const files = fs.readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith(".json"));

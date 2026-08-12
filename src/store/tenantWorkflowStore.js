@@ -49,15 +49,13 @@ const tenantWorkflows = {
     removeStmt.run(tenantId, workflowId);
   },
 
-  // Called once, right after a tenant is created (self-signup or
-  // platform_admin's POST /api/platform/tenants) — copies the read-only
-  // workflows/*.json starter catalog in as that tenant's OWN rows, so a
-  // brand new dashboard isn't empty on first login (matching the product's
-  // existing "here's a working demo, go customize it" onboarding), while
-  // every tenant's copy is independently editable from every other's.
-  // Idempotent: a no-op if the tenant already has any workflow rows, so
-  // it's also safe to call as a startup backfill for tenants that existed
-  // before this table did.
+  // No longer called anywhere in server.js — a brand new tenant now starts
+  // with zero businesses; its admin adds real ones by hand from the
+  // dashboard instead of getting a fake demo catalog to notice and clean
+  // up. Kept as a test fixture: tests/http/_setup.js's signupAndActivate()
+  // calls this directly so booking-flow tests still have a working
+  // business to exercise, without that being real product behavior.
+  // Idempotent: a no-op if the tenant already has any workflow rows.
   seedDefaultsForTenant(tenantId) {
     const { n } = countForTenantStmt.get(tenantId);
     if (n > 0) return;
@@ -68,15 +66,17 @@ const tenantWorkflows = {
     }
   },
 
-  // Item 7 — the setup checklist's "customize your first business" signal.
-  // A brand new tenant starts with an UNTOUCHED copy of the demo catalog
-  // (created_at === updated_at on every row, from seedDefaultsForTenant's
-  // single-pass insert) — true once any row has been edited (upsert bumps
-  // only updated_at) or the count has drifted from the seeded default
-  // (a workflow added or deleted), either way real signal that this
-  // tenant's business no longer IS the generic demo.
+  // The setup checklist's "customize your first business" signal. A brand
+  // new tenant now starts with zero workflow rows (nothing is auto-seeded
+  // any more — see server.js's comment by ensureDemoTenant()), so simply
+  // having ANY row is real signal the admin added a business of their own.
+  // Still checks `edited` too, purely for the legacy case of a tenant that
+  // still carries rows from before auto-seeding was removed: an untouched
+  // leftover demo catalog with nothing added/removed and nothing edited
+  // shouldn't itself count as "customized".
   hasCustomizations(tenantId) {
     const { n: total } = countForTenantStmt.get(tenantId);
+    if (total === 0) return false;
     const { n: edited } = editedCountStmt.get(tenantId);
     const defaultCount = Object.keys(loadWorkflows()).length;
     return edited > 0 || total !== defaultCount;

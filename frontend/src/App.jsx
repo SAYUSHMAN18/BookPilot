@@ -23,7 +23,17 @@ export default function App() {
     if (user === undefined || user === null || pending || isPlatformAdmin) return;
     get("/api/dashboard/providers").then((list) => {
       setProviders(list);
-      if (list.length) setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
+      if (list.length) {
+        setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
+      } else if (user.role === "admin") {
+        // A brand new tenant starts with zero businesses (nothing is
+        // auto-seeded any more) — the Provider view has nothing to show
+        // for an admin until at least one exists, so land them on Admin
+        // (Manage Businesses) instead of a dead-end "Loading providers…"
+        // screen. A real provider-role account can never hit this: it's
+        // always pinned to one already-existing workflowId+providerId.
+        setMode("admin");
+      }
     });
   }, [user, pending, isPlatformAdmin]);
 

@@ -116,6 +116,38 @@ function fillTemplate(template, session, workflow) {
   });
 }
 
+// Found live: a business created with the current admin UI's default
+// template has no confirmationTemplate at all (it's only reachable through
+// the raw JSON editor, not a structured field) — fillTemplate(undefined,...)
+// returns "", and sendWhatsAppText with an empty body gets flatly rejected
+// by the Graph API ("text.body is required"), so the booking is created
+// but the customer gets no confirmation at all and just sees silence. The
+// "Add Business" default template (frontend/src/components/
+// WorkflowEditorModal.jsx's BLANK_TEMPLATE) now always includes a real
+// confirmationTemplate, but a hand-edited raw-JSON workflow can still omit
+// one — this generates a reasonable confirmation from whatever the session
+// actually collected, so a booking NEVER finishes in total silence.
+function defaultConfirmationMessage(session, workflow) {
+  const lines = ["✅ Booking confirmed!", "", `ID: ${session.bookingId}`];
+  if (session.selectedProvider) lines.push(`With: ${session.selectedProvider.name}`);
+  else if (session.selectedHotel) lines.push(`Hotel: ${session.selectedHotel.name}`);
+  if (session.data.visitDateLabel || session.data.checkInDateLabel) {
+    lines.push(`Date: ${session.data.visitDateLabel || session.data.checkInDateLabel}`);
+  }
+  if (session.data.visitTime) lines.push(`Time: ${session.data.visitTime}`);
+  if (session.data.customerName) lines.push(`For: ${session.data.customerName}`);
+  if (session.selectedProvider?.fee != null) lines.push(`Fee: ₹${session.selectedProvider.fee}`);
+  if (session.bookingCode) lines.push(`Booking Code: ${session.bookingCode}`);
+  lines.push("", "Reply STATUS anytime to check your booking.");
+  return lines.join("\n");
+}
+
+function confirmationMessageFor(session, workflow) {
+  return workflow.confirmationTemplate
+    ? fillTemplate(workflow.confirmationTemplate, session, workflow)
+    : defaultConfirmationMessage(session, workflow);
+}
+
 // A confirmation is more useful with a face/place attached — hotels carry
 // their photo on `selectedHotel` (the room itself has no separate photo),
 // every other workflow carries it directly on `selectedProvider`. Sent as
@@ -849,7 +881,7 @@ async function advanceOrFinish(tenantId, waId, session, workflow) {
     await sendPaymentRequest(tenantId, waId, workflow, session, createdBooking, paymentRequirement);
   } else {
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
-    await sendWhatsAppText(tenantId, waId, fillTemplate(workflow.confirmationTemplate, session, workflow));
+    await sendWhatsAppText(tenantId, waId, confirmationMessageFor(session, workflow));
     // Section 10 — sync happens once the booking is actually `booked`,
     // never at `payment_pending` (a payment that's never completed
     // shouldn't leave a phantom event on the provider's calendar). The
@@ -877,7 +909,7 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
     log("ERROR", `Booking ${booking.bookingId} requires payment but Razorpay isn't configured (RAZORPAY_KEY_ID/SECRET unset) — proceeding as a normal confirmed booking instead of blocking the customer.`);
     bookings.updateStatus(tenantId, booking.id, "booked");
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
-    await sendWhatsAppText(tenantId, waId, fillTemplate(workflow.confirmationTemplate, session, workflow));
+    await sendWhatsAppText(tenantId, waId, confirmationMessageFor(session, workflow));
     await syncBookingCreated(tenantId, booking, workflow);
     publishBookingEvent(tenantId, "booking.updated", { ...booking, status: "booked" });
     return;
@@ -899,13 +931,13 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
     await sendWhatsAppText(
       tenantId,
       waId,
-      `${fillTemplate(workflow.confirmationTemplate, session, workflow)}\n\n💳 A deposit of ₹${rupees} is required to confirm this booking. Pay here (secure, via Razorpay):\n${order.paymentUrl}\n\nYour slot is held for you — this booking is confirmed automatically the moment payment goes through.`
+      `${confirmationMessageFor(session, workflow)}\n\n💳 A deposit of ₹${rupees} is required to confirm this booking. Pay here (secure, via Razorpay):\n${order.paymentUrl}\n\nYour slot is held for you — this booking is confirmed automatically the moment payment goes through.`
     );
   } catch (err) {
     log("ERROR", `Failed to create Razorpay payment link for booking ${booking.bookingId}: ${err.message}. Proceeding as a normal confirmed booking instead of blocking the customer.`);
     bookings.updateStatus(tenantId, booking.id, "booked");
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
-    await sendWhatsAppText(tenantId, waId, fillTemplate(workflow.confirmationTemplate, session, workflow));
+    await sendWhatsAppText(tenantId, waId, confirmationMessageFor(session, workflow));
     await syncBookingCreated(tenantId, booking, workflow);
     publishBookingEvent(tenantId, "booking.updated", { ...booking, status: "booked" });
   }

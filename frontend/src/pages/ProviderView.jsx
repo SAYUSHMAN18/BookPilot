@@ -49,7 +49,15 @@ export default function ProviderView({ provider, providers, refreshKey, bump }) 
     cancelled: bookings.filter((b) => b.status === "cancelled").length,
   }), [bookings, today]);
 
-  if (!provider) return <div className="card"><div className="empty">Loading providers…</div></div>;
+  if (!provider) {
+    // Reached only very briefly while the initial GET /api/dashboard/
+    // providers is still in flight (App.jsx switches an admin account
+    // straight to Admin mode once it resolves to zero providers, so this
+    // empty-list case doesn't linger here) — genuinely no providers to
+    // pick from is not the same as "still loading", but there's no way to
+    // tell them apart from this component's own props alone.
+    return <div className="card"><div className="empty">{providers.length === 0 ? "No businesses set up yet — add one from Admin → Manage Businesses." : "Loading…"}</div></div>;
+  }
 
   return (
     <>

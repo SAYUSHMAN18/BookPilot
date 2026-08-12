@@ -609,11 +609,12 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_workflow ON knowledge_document
 ensureColumn("knowledge_documents", "tenant_id", "INTEGER NOT NULL", "1");
 
 // Workflow template marketplace. A template is a frozen copy of a
-// workflow's JSON config — installing one writes a NEW workflows/*.json
-// under a fresh id, so editing the installed business never mutates the
-// template it came from (and vice versa). Deliberately a copy, not a
-// reference: a business that silently changed because someone edited a
-// shared upstream template would be a nasty surprise mid-booking-season.
+// workflow's JSON config — installing one deep-copies it into the
+// installer's own tenant_workflows row under a fresh id, so editing the
+// installed business never mutates the template it came from (and vice
+// versa). Deliberately a copy, not a reference: a business that silently
+// changed because someone edited a shared upstream template would be a
+// nasty surprise mid-booking-season.
 db.exec(`
   CREATE TABLE IF NOT EXISTS workflow_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -634,19 +635,19 @@ db.exec(`
 // is never mutated by, or exposed as belonging to, any one tenant.
 
 // Item 5 — tenant-owned workflows. Business definitions used to live only
-// in workflows/*.json — a single set of files on disk, loaded once at boot
-// into one in-memory object every tenant's dashboard and webhook traffic
-// read AND wrote through equally. That meant any tenant's admin could
-// view, edit, or delete any OTHER tenant's business config just by
-// knowing (or guessing) a workflow id like "hair" — a real cross-tenant
-// isolation gap, not a theoretical one, since every new tenant used to
-// start from — and so shared — that exact same global "hair"/"hotel"/etc.
-// set. This table makes a workflow row-owned by exactly one tenant, the
-// same pattern every other per-tenant table here already uses.
-// workflows/*.json still exists, but now only as the read-only starter
-// catalog copied into a brand new tenant at signup
-// (src/store/tenantWorkflowStore.js's seedDefaultsForTenant) — no
-// request-handling code reads or writes those files directly anymore.
+// in a single set of JSON files on disk, loaded once at boot into one
+// in-memory object every tenant's dashboard and webhook traffic read AND
+// wrote through equally. That meant any tenant's admin could view, edit,
+// or delete any OTHER tenant's business config just by knowing (or
+// guessing) a workflow id like "hair" — a real cross-tenant isolation gap,
+// not a theoretical one, since every new tenant used to start from — and
+// so shared — that exact same global "hair"/"hotel"/etc. set. This table
+// makes a workflow row-owned by exactly one tenant, the same pattern every
+// other per-tenant table here already uses. A real tenant's businesses now
+// live ONLY here — a business the admin dashboard creates or a customer's
+// WhatsApp conversation books against is always a tenant_workflows row,
+// never a file. The old JSON files (tests/fixtures/workflows/) are pure
+// test fixtures now — nothing in request-handling code reads them.
 db.exec(`
   CREATE TABLE IF NOT EXISTS tenant_workflows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -778,4 +779,4 @@ db.exec(`
 db.exec(`CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);`);
 
-module.exports = { db, DB_FILE };
+module.exports = { db, DB_FILE, DATA_DIR };

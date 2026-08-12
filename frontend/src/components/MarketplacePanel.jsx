@@ -73,6 +73,7 @@ export default function MarketplacePanel({ workflows, refreshKey, onInstalled })
       {installTarget && (
         <InstallModal
           template={installTarget}
+          existingIds={Object.keys(workflows)}
           onClose={() => setInstallTarget(null)}
           onInstalled={() => { setInstallTarget(null); onInstalled(); }}
         />
@@ -140,18 +141,32 @@ function PublishModal({ workflows, onClose, onPublished }) {
   );
 }
 
-function InstallModal({ template, onClose, onInstalled }) {
-  const [newId, setNewId] = useState("");
-  const [newLabel, setNewLabel] = useState("");
+// Slugify+de-dupe kept in sync with WorkflowEditorModal.jsx's own copy —
+// same reasoning (auto-derive the technical ID from a plain name instead
+// of making someone type a lowercase-dashes-only value by hand).
+function slugify(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function dedupeId(base, existingIds) {
+  const safeBase = base || "business";
+  if (!existingIds.includes(safeBase)) return safeBase;
+  for (let n = 2; ; n++) {
+    if (!existingIds.includes(`${safeBase}-${n}`)) return `${safeBase}-${n}`;
+  }
+}
+
+function InstallModal({ template, existingIds, onClose, onInstalled }) {
+  const [newLabel, setNewLabel] = useState(template.name || "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function handleInstall() {
     setError("");
-    if (!newId.trim()) return setError("A new business ID is required.");
+    if (!newLabel.trim()) return setError("A name for the new business is required.");
     setBusy(true);
     try {
-      await post(`/api/dashboard/templates/${template.id}/install`, { newId: newId.trim(), newLabel: newLabel.trim() || undefined });
+      const newId = dedupeId(slugify(newLabel), existingIds);
+      await post(`/api/dashboard/templates/${template.id}/install`, { newId, newLabel: newLabel.trim() });
       onInstalled();
     } catch (err) {
       setError(err.message);
@@ -169,11 +184,7 @@ function InstallModal({ template, onClose, onInstalled }) {
         </div>
         {error && <div className="error-banner">{error}</div>}
         <div>
-          <label className="form-label">New Business ID</label>
-          <input className="form-input" placeholder="e.g. spa2 (lowercase, no spaces)" value={newId} onChange={(e) => setNewId(e.target.value)} />
-        </div>
-        <div>
-          <label className="form-label">New Label (optional — defaults to the template's own)</label>
+          <label className="form-label">Name for your new business</label>
           <input className="form-input" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

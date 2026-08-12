@@ -76,6 +76,7 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
       {editorState !== null && (
         <WorkflowEditorModal
           workflow={Object.keys(editorState).length ? editorState : null}
+          existingIds={Object.keys(workflows)}
           onClose={() => setEditorState(null)}
           onSaved={handleSaved}
         />

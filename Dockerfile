@@ -35,10 +35,11 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # Backend source + static assets actually served (server.js references
-# each of these — see its express.static() calls).
+# each of these — see its express.static() calls). No workflows/ here —
+# that was the old auto-seeded demo catalog; it's a test fixture now
+# (tests/fixtures/workflows/), not something the running server reads.
 COPY server.js ./
 COPY src/ ./src/
-COPY workflows/ ./workflows/
 COPY public/marketing/ ./public/marketing/
 COPY --from=frontend-builder /build/public/app ./public/app
 
