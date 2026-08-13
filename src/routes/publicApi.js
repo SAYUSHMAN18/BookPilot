@@ -1,5 +1,6 @@
 const path = require("path");
 const express = require("express");
+const { asyncHandler } = require("../infra/asyncHandler");
 const bookings = require("../store/bookingStore");
 const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const { getAvailableSlots } = require("../engine/workflowEngine");
@@ -36,28 +37,28 @@ router.get("/openapi.yaml", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "..", "public", "openapi.yaml"));
 });
 
-router.get("/api/v1/availability", requireApiKey, (req, res) => {
+router.get("/api/v1/availability", requireApiKey, asyncHandler(async (req, res) => {
   const { workflowId, providerId, date } = req.query;
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
     return res.status(400).json({ error: "workflowId, providerId, and date (YYYY-MM-DD) are required query params." });
   }
-  const workflow = tenantWorkflowStore.get(req.apiTenantId, workflowId);
+  const workflow = await tenantWorkflowStore.get(req.apiTenantId, workflowId);
   if (!workflow) return res.status(404).json({ error: "Unknown workflowId." });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be in YYYY-MM-DD format." });
 
-  const slots = getAvailableSlots(req.apiTenantId, workflow, providerId, date);
+  const slots = await getAvailableSlots(req.apiTenantId, workflow, providerId, date);
   res.json({ workflowId, providerId, date, slots });
-});
+}));
 
-router.get("/api/v1/bookings/:bookingId", requireApiKey, (req, res) => {
+router.get("/api/v1/bookings/:bookingId", requireApiKey, asyncHandler(async (req, res) => {
   // The tenant-issued bookingId (e.g. "APT-20260101-XY12"), not this app's
   // internal numeric row id — the same identifier a customer's own
   // confirmation message already shows them, since this route exists for a
   // tenant's own site to look up a booking a customer already has.
-  const booking = bookings.getByBookingId(req.apiTenantId, req.params.bookingId);
+  const booking = await bookings.getByBookingId(req.apiTenantId, req.params.bookingId);
   if (!booking) return res.status(404).json({ error: "Booking not found." });
   const { waId: _omit, ...publicBooking } = booking; // the customer's phone number stays internal-only, even to the tenant's own integration
   res.json(publicBooking);
-});
+}));
 
 module.exports = { router };

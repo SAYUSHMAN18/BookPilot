@@ -11,7 +11,7 @@ async function adminSession(app, email = "avail-admin@example.com") {
 }
 
 test("GET availability is empty for a fresh provider, then reflects a POSTed block", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app);
 
   const empty = await request(app).get("/api/dashboard/availability?workflowId=hair&providerId=p1").set("Cookie", cookie);
@@ -31,7 +31,7 @@ test("GET availability is empty for a fresh provider, then reflects a POSTed blo
 });
 
 test("POST availability validates date format and rejects an unknown workflowId", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app);
 
   const badDate = await request(app).post("/api/dashboard/availability").set("Cookie", cookie).send({ workflowId: "hair", providerId: "p1", date: "not-a-date" });
@@ -42,7 +42,7 @@ test("POST availability validates date format and rejects an unknown workflowId"
 });
 
 test("DELETE availability removes the block, and a second delete 404s", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app);
   const created = await request(app)
     .post("/api/dashboard/availability")
@@ -59,7 +59,7 @@ test("DELETE availability removes the block, and a second delete 404s", async ()
 });
 
 test("a provider can only delete their own availability block, never another provider's", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie: adminCookie } = await adminSession(app);
   await request(app).post("/api/dashboard/availability").set("Cookie", adminCookie).send({ workflowId: "hair", providerId: "p2", date: "2026-09-06" });
   const list = await request(app).get("/api/dashboard/availability?workflowId=hair&providerId=p2").set("Cookie", adminCookie);
@@ -73,7 +73,7 @@ test("a provider can only delete their own availability block, never another pro
 });
 
 test("unauthenticated requests to every availability route are rejected", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   assert.equal((await request(app).get("/api/dashboard/availability?workflowId=hair&providerId=p1")).status, 401);
   assert.equal((await request(app).post("/api/dashboard/availability").send({ workflowId: "hair", providerId: "p1", date: "2026-09-01" })).status, 401);
   assert.equal((await request(app).delete("/api/dashboard/availability/1")).status, 401);

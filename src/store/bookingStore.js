@@ -10,7 +10,7 @@
 // before; extending this same treatment to them is real, independent,
 // incremental follow-up work, not something this one file's annotations
 // depend on.
-const { db } = require("./db");
+const { pool, query } = require("./db");
 /** @typedef {import("../types").Booking} Booking */
 
 // Each booking is its own row (auto-increment `id`), keyed by `wa_id` as a
@@ -22,11 +22,16 @@ const { db } = require("./db");
 // Section 8 — every read/write here now takes `tenantId` and filters or
 // stamps by it. This isn't optional scoping the way an extra query param
 // would be: `getById`/`updateStatus`/`updateWithMeta`/`clearFeedbackRequest`
-// all filter `WHERE id = ? AND tenant_id = ?` rather than just `id = ?`,
+// all filter `WHERE id = $x AND tenant_id = $y` rather than just `id = $x`,
 // specifically so a provider from Tenant A can never act on a booking that
 // happens to share an id with one of Tenant B's rows just by guessing or
 // probing ids — the DB query itself is the isolation boundary, not a
 // caller remembering to check afterward.
+//
+// Every method here is now async (Postgres over `pg`, not node:sqlite's
+// synchronous DatabaseSync) — every call site elsewhere in the codebase
+// needs `await` added (Stage 3 of the Postgres migration this file is
+// part of), not just this file.
 
 const columns = [
   "tenant_id", "wa_id", "booking_id", "booking_code", "workflow_id", "provider_id", "provider_name",
@@ -34,59 +39,6 @@ const columns = [
   "check_in_iso", "nights", "customer_name", "age", "gender", "reason", "status", "created_at",
   "payment_status",
 ];
-
-const insertStmt = db.prepare(`
-  INSERT INTO bookings (${columns.join(", ")})
-  VALUES (${columns.map(() => "?").join(", ")})
-`);
-
-const updateStatusStmt = db.prepare("UPDATE bookings SET status = ? WHERE id = ? AND tenant_id = ?");
-const removeStmt = db.prepare("DELETE FROM bookings WHERE id = ? AND tenant_id = ?");
-// Section 9 — a denormalized convenience mirror of the payments table's
-// latest state (not_required | pending | paid | failed | refunded |
-// partially_refunded), kept in sync alongside the payments table itself
-// so the dashboard's booking list can show payment status without a join
-// for every row. The `payments` table (src/store/paymentStore.js) stays
-// the actual source of truth/audit trail — this column is a read
-// convenience, never consulted for a real payment decision.
-const updatePaymentStatusStmt = db.prepare("UPDATE bookings SET payment_status = ? WHERE id = ? AND tenant_id = ?");
-// visit_date/visit_time/visit_date_label use COALESCE — unlike every other
-// field here, which this call always overwrites outright (see comment
-// below) — because most callers (cancel/serve/complete) never pass them
-// and must leave the actual appointment slot untouched. Only reschedule
-// passes new values, which is also why this UPDATE (not just bookingStore
-// .create()'s INSERT) can hit the same UNIQUE(workflow_id, provider_id,
-// visit_date, visit_time) index and needs the identical SlotTakenError
-// translation below.
-const updateWithMetaStmt = db.prepare(`
-  UPDATE bookings
-  SET status = ?, cancelled_by = ?, rescheduled_date = ?, rescheduled_time = ?, reschedule_note = ?, provider_note = ?, feedback_requested_at = ?,
-      visit_date = COALESCE(?, visit_date), visit_time = COALESCE(?, visit_time), visit_date_label = COALESCE(?, visit_date_label)
-  WHERE id = ? AND tenant_id = ?
-`);
-const clearFeedbackRequestStmt = db.prepare("UPDATE bookings SET feedback_requested_at = NULL WHERE id = ? AND tenant_id = ?");
-// New plan, Block 13 — one statement per reminder kind rather than a
-// single parameterized column name (node:sqlite, like most SQL drivers,
-// can't bind a column name as a placeholder).
-const markReminder24hSentStmt = db.prepare("UPDATE bookings SET reminder_24h_sent_at = ? WHERE id = ? AND tenant_id = ?");
-const markReminder2hSentStmt = db.prepare("UPDATE bookings SET reminder_2h_sent_at = ? WHERE id = ? AND tenant_id = ?");
-const getByIdStmt = db.prepare("SELECT * FROM bookings WHERE id = ? AND tenant_id = ?");
-// Section 14 — the tenant-issued bookingId (e.g. "APT-20260101-XY12"),
-// not the internal numeric row id above. This is what a customer's own
-// confirmation message shows them, so it's the natural lookup key for
-// the Public API's GET /api/v1/bookings/:bookingId.
-const getByBookingIdStmt = db.prepare("SELECT * FROM bookings WHERE booking_id = ? AND tenant_id = ?");
-
-const mostRecentForWaIdStmt = db.prepare("SELECT * FROM bookings WHERE tenant_id = ? AND wa_id = ? ORDER BY created_at DESC LIMIT 1");
-const mostRecentActiveStmt = db.prepare(
-  "SELECT * FROM bookings WHERE tenant_id = ? AND wa_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1"
-);
-const hasActiveForWaIdStmt = db.prepare("SELECT 1 FROM bookings WHERE tenant_id = ? AND wa_id = ? AND status != 'cancelled' LIMIT 1");
-const allStmt = db.prepare("SELECT * FROM bookings WHERE tenant_id = ? ORDER BY created_at DESC");
-// Platform-admin only (Section 8.5) — the one deliberate exception to
-// "every query filters by tenant_id." Never call this from a tenant-scoped
-// route.
-const allAcrossTenantsStmt = db.prepare("SELECT * FROM bookings ORDER BY created_at DESC");
 
 function rowToBooking(row) {
   if (!row) return undefined;
@@ -111,7 +63,7 @@ function rowToBooking(row) {
     gender: row.gender,
     reason: row.reason,
     status: row.status,
-    createdAt: row.created_at,
+    createdAt: Number(row.created_at),
     // Previously written but never read back out anywhere — found while
     // building Section 4, which needed provider_note/feedback_requested_at
     // exposed; fixed the same gap for the reschedule/cancel metadata that
@@ -121,13 +73,13 @@ function rowToBooking(row) {
     rescheduledTime: row.rescheduled_time,
     rescheduleNote: row.reschedule_note,
     providerNote: row.provider_note,
-    feedbackRequestedAt: row.feedback_requested_at,
+    feedbackRequestedAt: row.feedback_requested_at === null ? null : Number(row.feedback_requested_at),
     // Schema groundwork for Phase 2's payments feature (Section 9) — not
     // read or enforced anywhere yet. 'not_required' for every booking
     // today since no workflow actually declares requiresPayment.
     paymentStatus: row.payment_status,
-    reminder24hSentAt: row.reminder_24h_sent_at,
-    reminder2hSentAt: row.reminder_2h_sent_at,
+    reminder24hSentAt: row.reminder_24h_sent_at === null ? null : Number(row.reminder_24h_sent_at),
+    reminder2hSentAt: row.reminder_2h_sent_at === null ? null : Number(row.reminder_2h_sent_at),
   };
 }
 
@@ -142,7 +94,7 @@ class SlotTakenError extends Error {
   }
 }
 
-// Thrown by the trg_no_hotel_range_overlap trigger (src/db.js) — the
+// Thrown by the trg_no_hotel_range_overlap trigger (src/store/db.js) — the
 // date-range equivalent of SlotTakenError above, for hotel-style bookings
 // where "no double booking" can't be a plain UNIQUE index.
 class DateRangeConflictError extends Error {
@@ -155,44 +107,51 @@ class DateRangeConflictError extends Error {
 const bookings = {
   // Always inserts a new row — a customer's Nth booking never touches
   // their (N-1)th. Returns the created booking (with its new `id`).
+  // RETURNING * gets the full inserted row back in the same round trip,
+  // replacing the old sqlite version's separate insert-then-getById call.
   /**
    * @param {number} tenantId
    * @param {string} waId
    * @param {Partial<Booking>} booking
-   * @returns {Booking}
+   * @returns {Promise<Booking>}
    */
-  create(tenantId, waId, booking) {
+  async create(tenantId, waId, booking) {
+    const values = [
+      tenantId,
+      waId,
+      booking.bookingId,
+      booking.bookingCode ?? null,
+      booking.workflowId,
+      booking.providerId ?? null,
+      booking.providerName ?? null,
+      booking.hotelId ?? null,
+      booking.hotelName ?? null,
+      booking.visitDate ?? null,
+      booking.visitDateLabel ?? null,
+      booking.visitTime ?? null,
+      booking.checkInIso ?? null,
+      booking.nights ?? null,
+      booking.customerName ?? null,
+      booking.age ?? null,
+      booking.gender ?? null,
+      booking.reason ?? null,
+      booking.status,
+      booking.createdAt,
+      booking.paymentStatus ?? "not_required",
+    ];
     try {
-      const result = insertStmt.run(
-        tenantId,
-        waId,
-        booking.bookingId,
-        booking.bookingCode ?? null,
-        booking.workflowId,
-        booking.providerId ?? null,
-        booking.providerName ?? null,
-        booking.hotelId ?? null,
-        booking.hotelName ?? null,
-        booking.visitDate ?? null,
-        booking.visitDateLabel ?? null,
-        booking.visitTime ?? null,
-        booking.checkInIso ?? null,
-        booking.nights ?? null,
-        booking.customerName ?? null,
-        booking.age ?? null,
-        booking.gender ?? null,
-        booking.reason ?? null,
-        booking.status,
-        booking.createdAt,
-        booking.paymentStatus ?? "not_required"
+      const rows = await query(
+        `INSERT INTO bookings (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")}) RETURNING *`,
+        values
       );
-      return this.getById(tenantId, result.lastInsertRowid);
+      return rowToBooking(rows[0]);
     } catch (err) {
-      // node:sqlite reports the failing columns, not the index name, e.g.
-      // "UNIQUE constraint failed: bookings.provider_id, bookings.visit_date,
-      // bookings.visit_time" — any UNIQUE violation reaching here is the
-      // slot-uniqueness index (wa_id is no longer a unique column at all).
-      if (String(err.message).includes("UNIQUE constraint failed")) {
+      // Postgres reports a UNIQUE-violation as error code 23505 regardless
+      // of which unique index/constraint tripped — any 23505 reaching here
+      // is the slot-uniqueness index (wa_id is no longer a unique column
+      // at all). HOTEL_RANGE_CONFLICT is the literal message the
+      // trg_no_hotel_range_overlap trigger's RAISE EXCEPTION uses (db.js).
+      if (err.code === "23505") {
         throw new SlotTakenError();
       }
       if (String(err.message).includes("HOTEL_RANGE_CONFLICT")) {
@@ -202,65 +161,86 @@ const bookings = {
     }
   },
 
-  // id is `number | bigint` — node:sqlite's own insert result type for
-  // `lastInsertRowid` (the immediate caller, create() below), since a row
-  // id can in principle exceed Number.MAX_SAFE_INTEGER. This app's real
-  // row counts never approach that, but the type is honest about what
-  // SQLite itself allows, matching the actual node:sqlite return type.
-  /** @param {number} tenantId @param {number|bigint} id @returns {Booking|undefined} */
-  getById(tenantId, id) {
-    return rowToBooking(getByIdStmt.get(id, tenantId));
+  /** @param {number} tenantId @param {number} id @returns {Promise<Booking|undefined>} */
+  async getById(tenantId, id) {
+    const rows = await query("SELECT * FROM bookings WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+    return rowToBooking(rows[0]);
   },
 
-  /** @param {number} tenantId @param {string} bookingId @returns {Booking|undefined} */
-  getByBookingId(tenantId, bookingId) {
-    return rowToBooking(getByBookingIdStmt.get(bookingId, tenantId));
+  // Section 14 — the tenant-issued bookingId (e.g. "APT-20260101-XY12"),
+  // not the internal numeric row id above. This is what a customer's own
+  // confirmation message shows them, so it's the natural lookup key for
+  // the Public API's GET /api/v1/bookings/:bookingId.
+  /** @param {number} tenantId @param {string} bookingId @returns {Promise<Booking|undefined>} */
+  async getByBookingId(tenantId, bookingId) {
+    const rows = await query("SELECT * FROM bookings WHERE booking_id = $1 AND tenant_id = $2", [bookingId, tenantId]);
+    return rowToBooking(rows[0]);
   },
 
   // Hard delete — unlike every status transition above (cancel/no_show/etc,
   // all soft: the row stays for history), this actually removes the row.
-  // Admin-only at the route level (server.js) — for permanently clearing
+  // Admin-only at the route level (dashboard.js) — for permanently clearing
   // test/demo data, not a normal booking-lifecycle action.
-  /** @param {number} tenantId @param {number|bigint} id @returns {boolean} true if a row was actually deleted */
-  remove(tenantId, id) {
-    return removeStmt.run(id, tenantId).changes > 0;
+  /** @param {number} tenantId @param {number} id @returns {Promise<boolean>} true if a row was actually deleted */
+  async remove(tenantId, id) {
+    const result = await pool.query("DELETE FROM bookings WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+    return result.rowCount > 0;
   },
 
   // What STATUS/HERE act on — the customer's latest booking, active or not
   // (status itself communicates that). A customer with several bookings
   // gets the newest one for these commands; the dashboard is where the
   // full history is visible.
-  /** @param {number} tenantId @param {string} waId @returns {Booking|undefined} */
-  mostRecentForCustomer(tenantId, waId) {
-    return rowToBooking(mostRecentForWaIdStmt.get(tenantId, waId));
+  /** @param {number} tenantId @param {string} waId @returns {Promise<Booking|undefined>} */
+  async mostRecentForCustomer(tenantId, waId) {
+    const rows = await query(
+      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 ORDER BY created_at DESC LIMIT 1",
+      [tenantId, waId]
+    );
+    return rowToBooking(rows[0]);
   },
 
   // What STATUS/HERE/CANCEL should actually operate on. A cancelled
   // booking is history, not something to check into or cancel again —
   // using mostRecentForCustomer() for those made the bot report a
   // cancelled appointment as if it were upcoming.
-  /** @param {number} tenantId @param {string} waId @returns {Booking|undefined} */
-  activeForCustomer(tenantId, waId) {
-    return rowToBooking(mostRecentActiveStmt.get(tenantId, waId));
+  /** @param {number} tenantId @param {string} waId @returns {Promise<Booking|undefined>} */
+  async activeForCustomer(tenantId, waId) {
+    const rows = await query(
+      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1",
+      [tenantId, waId]
+    );
+    return rowToBooking(rows[0]);
   },
 
   // Excludes cancelled deliberately. This drives the "looks like you
   // already have a booking" nudge — counting cancelled ones meant a
   // customer who cancelled everything was still told they had a booking,
   // forever, with no way to make it stop.
-  /** @param {number} tenantId @param {string} waId @returns {boolean} */
-  hasActive(tenantId, waId) {
-    return !!hasActiveForWaIdStmt.get(tenantId, waId);
+  /** @param {number} tenantId @param {string} waId @returns {Promise<boolean>} */
+  async hasActive(tenantId, waId) {
+    const rows = await query(
+      "SELECT 1 FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != 'cancelled' LIMIT 1",
+      [tenantId, waId]
+    );
+    return rows.length > 0;
   },
 
   /** @param {number} tenantId @param {number} id @param {Booking["status"]} status */
-  updateStatus(tenantId, id, status) {
-    updateStatusStmt.run(status, id, tenantId);
+  async updateStatus(tenantId, id, status) {
+    await pool.query("UPDATE bookings SET status = $1 WHERE id = $2 AND tenant_id = $3", [status, id, tenantId]);
   },
 
+  // Section 9 — a denormalized convenience mirror of the payments table's
+  // latest state (not_required | pending | paid | failed | refunded |
+  // partially_refunded), kept in sync alongside the payments table itself
+  // so the dashboard's booking list can show payment status without a join
+  // for every row. The `payments` table (src/store/paymentStore.js) stays
+  // the actual source of truth/audit trail — this column is a read
+  // convenience, never consulted for a real payment decision.
   /** @param {number} tenantId @param {number} id @param {Booking["paymentStatus"]} paymentStatus */
-  updatePaymentStatus(tenantId, id, paymentStatus) {
-    updatePaymentStatusStmt.run(paymentStatus, id, tenantId);
+  async updatePaymentStatus(tenantId, id, paymentStatus) {
+    await pool.query("UPDATE bookings SET payment_status = $1 WHERE id = $2 AND tenant_id = $3", [paymentStatus, id, tenantId]);
   },
 
   // Provider-initiated cancel/reschedule/serve/complete. Stores who did it
@@ -269,35 +249,48 @@ const bookings = {
   // left alone) — this call always represents the provider setting the
   // booking's full new state in one action, so e.g. completing a booking
   // with a note also correctly clears any stale reschedule/cancel meta
-  // from an earlier action on the same row.
+  // from an earlier action on the same row. visit_date/visit_time/
+  // visit_date_label use COALESCE — unlike every other field here, which
+  // this call always overwrites outright — because most callers (cancel/
+  // serve/complete) never pass them and must leave the actual appointment
+  // slot untouched. Only reschedule passes new values, which is also why
+  // this UPDATE (not just create()'s INSERT) can hit the same
+  // UNIQUE(workflow_id, provider_id, visit_date, visit_time) index and
+  // needs the identical SlotTakenError translation.
   /**
    * @param {number} tenantId
    * @param {number} id
    * @param {Partial<Booking>} meta
-   * @returns {Booking|undefined}
+   * @returns {Promise<Booking|undefined>}
    */
-  updateWithMeta(tenantId, id, { status, cancelledBy, rescheduledDate, rescheduledTime, rescheduleNote, providerNote, feedbackRequestedAt, visitDate, visitTime, visitDateLabel }) {
+  async updateWithMeta(tenantId, id, { status, cancelledBy, rescheduledDate, rescheduledTime, rescheduleNote, providerNote, feedbackRequestedAt, visitDate, visitTime, visitDateLabel }) {
     try {
-      const result = updateWithMetaStmt.run(
-        status,
-        cancelledBy || null,
-        rescheduledDate || null,
-        rescheduledTime || null,
-        rescheduleNote || null,
-        providerNote || null,
-        feedbackRequestedAt || null,
-        visitDate || null,
-        visitTime || null,
-        visitDateLabel || null,
-        id,
-        tenantId
+      const result = await pool.query(
+        `UPDATE bookings
+         SET status = $1, cancelled_by = $2, rescheduled_date = $3, rescheduled_time = $4, reschedule_note = $5, provider_note = $6, feedback_requested_at = $7,
+             visit_date = COALESCE($8, visit_date), visit_time = COALESCE($9, visit_time), visit_date_label = COALESCE($10, visit_date_label)
+         WHERE id = $11 AND tenant_id = $12`,
+        [
+          status,
+          cancelledBy || null,
+          rescheduledDate || null,
+          rescheduledTime || null,
+          rescheduleNote || null,
+          providerNote || null,
+          feedbackRequestedAt || null,
+          visitDate || null,
+          visitTime || null,
+          visitDateLabel || null,
+          id,
+          tenantId,
+        ]
       );
-      if (result.changes === 0) return undefined; // no row matched this id for this tenant
+      if (result.rowCount === 0) return undefined; // no row matched this id for this tenant
     } catch (err) {
       // Same UNIQUE(workflow_id, provider_id, visit_date, visit_time) index
       // create() enforces — a reschedule onto a slot someone else already
       // holds hits it here instead.
-      if (String(err.message).includes("UNIQUE constraint failed")) {
+      if (err.code === "23505") {
         throw new SlotTakenError();
       }
       throw err;
@@ -309,28 +302,32 @@ const bookings = {
   // once a reply has been captured, without touching status or any other
   // field the way updateWithMeta's blanket overwrite would.
   /** @param {number} tenantId @param {number} id */
-  clearFeedbackRequest(tenantId, id) {
-    clearFeedbackRequestStmt.run(id, tenantId);
+  async clearFeedbackRequest(tenantId, id) {
+    await pool.query("UPDATE bookings SET feedback_requested_at = NULL WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
   },
 
   // New plan, Block 13 — marks one specific reminder (never both at
   // once) as sent, so src/infra/reminders.js's periodic scan never sends
   // the same one twice.
   /** @param {number} tenantId @param {number} id @param {"24h"|"2h"} which */
-  markReminderSent(tenantId, id, which) {
-    const stmt = which === "24h" ? markReminder24hSentStmt : markReminder2hSentStmt;
-    stmt.run(Date.now(), id, tenantId);
+  async markReminderSent(tenantId, id, which) {
+    const column = which === "24h" ? "reminder_24h_sent_at" : "reminder_2h_sent_at";
+    await pool.query(`UPDATE bookings SET ${column} = $1 WHERE id = $2 AND tenant_id = $3`, [Date.now(), id, tenantId]);
   },
 
-  /** @param {number} tenantId @returns {Booking[]} */
-  values(tenantId) {
-    return allStmt.all(tenantId).map(rowToBooking);
+  /** @param {number} tenantId @returns {Promise<Booking[]>} */
+  async values(tenantId) {
+    const rows = await query("SELECT * FROM bookings WHERE tenant_id = $1 ORDER BY created_at DESC", [tenantId]);
+    return rows.map(rowToBooking);
   },
 
-  // Platform-admin only (Section 8.5) — see allAcrossTenantsStmt above.
-  /** @returns {Booking[]} */
-  valuesAllTenants() {
-    return allAcrossTenantsStmt.all().map(rowToBooking);
+  // Platform-admin only (Section 8.5) — the one deliberate exception to
+  // "every query filters by tenant_id." Never call this from a
+  // tenant-scoped route.
+  /** @returns {Promise<Booking[]>} */
+  async valuesAllTenants() {
+    const rows = await query("SELECT * FROM bookings ORDER BY created_at DESC", []);
+    return rows.map(rowToBooking);
   },
 };
 

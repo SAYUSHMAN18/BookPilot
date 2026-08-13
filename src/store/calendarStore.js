@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 const { encryptSecret, decryptSecret } = require("../infra/secretsEncryption");
 
 // Section 10 — one connection per (tenant, workflow, provider): a single
@@ -8,19 +8,6 @@ const { encryptSecret, decryptSecret } = require("../infra/secretsEncryption");
 // (booking_id, calendar_connection_id)) that lets a later sync pass know
 // "this booking already has an event, update it" instead of creating a
 // duplicate on every reschedule.
-const insertConnectionStmt = db.prepare(`
-  INSERT INTO calendar_connections (tenant_id, workflow_id, provider_id, calendar_type, refresh_token_encrypted, access_token_encrypted, access_token_expires_at, status, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, 'connected', ?)
-`);
-const getConnectionStmt = db.prepare(
-  "SELECT * FROM calendar_connections WHERE tenant_id = ? AND workflow_id = ? AND provider_id = ? AND status != 'disconnected' ORDER BY id DESC LIMIT 1"
-);
-const getConnectionByIdStmt = db.prepare("SELECT * FROM calendar_connections WHERE id = ? AND tenant_id = ?");
-const updateTokensStmt = db.prepare(
-  "UPDATE calendar_connections SET access_token_encrypted = ?, access_token_expires_at = ?, last_synced_at = ? WHERE id = ?"
-);
-const markStatusStmt = db.prepare("UPDATE calendar_connections SET status = ? WHERE id = ?");
-const disconnectStmt = db.prepare("UPDATE calendar_connections SET status = 'disconnected' WHERE id = ? AND tenant_id = ?");
 
 function rowToConnection(row) {
   if (!row) return undefined;
@@ -36,10 +23,10 @@ function rowToConnection(row) {
     // tokens exist outside the provider API call itself.
     refreshToken: decryptSecret(row.refresh_token_encrypted),
     accessToken: decryptSecret(row.access_token_encrypted),
-    accessTokenExpiresAt: row.access_token_expires_at,
+    accessTokenExpiresAt: row.access_token_expires_at === null ? null : Number(row.access_token_expires_at),
     status: row.status,
-    lastSyncedAt: row.last_synced_at,
-    createdAt: row.created_at,
+    lastSyncedAt: row.last_synced_at === null ? null : Number(row.last_synced_at),
+    createdAt: Number(row.created_at),
   };
 }
 
@@ -57,62 +44,71 @@ function toPublicView(connection) {
 }
 
 const calendarConnections = {
-  create(tenantId, workflowId, providerId, { calendarType, refreshToken, accessToken, accessTokenExpiresAt }) {
+  async create(tenantId, workflowId, providerId, { calendarType, refreshToken, accessToken, accessTokenExpiresAt }) {
     const now = Date.now();
-    const result = insertConnectionStmt.run(
-      tenantId, workflowId, providerId, calendarType,
-      encryptSecret(refreshToken), encryptSecret(accessToken), accessTokenExpiresAt || null, now
+    const rows = await query(
+      `INSERT INTO calendar_connections (tenant_id, workflow_id, provider_id, calendar_type, refresh_token_encrypted, access_token_encrypted, access_token_expires_at, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'connected', $8) RETURNING *`,
+      [tenantId, workflowId, providerId, calendarType, encryptSecret(refreshToken), encryptSecret(accessToken), accessTokenExpiresAt || null, now]
     );
-    return this.getById(tenantId, result.lastInsertRowid);
+    return rowToConnection(rows[0]);
   },
 
   // The one currently-active connection for a provider, if any — a
   // provider disconnecting and reconnecting leaves the old row as
   // 'disconnected' (an audit trail, not deleted) and this returns the
   // newest non-disconnected one.
-  getForProvider(tenantId, workflowId, providerId) {
-    return rowToConnection(getConnectionStmt.get(tenantId, workflowId, providerId));
+  async getForProvider(tenantId, workflowId, providerId) {
+    const rows = await query(
+      "SELECT * FROM calendar_connections WHERE tenant_id = $1 AND workflow_id = $2 AND provider_id = $3 AND status != 'disconnected' ORDER BY id DESC LIMIT 1",
+      [tenantId, workflowId, providerId]
+    );
+    return rowToConnection(rows[0]);
   },
 
-  getById(tenantId, id) {
-    return rowToConnection(getConnectionByIdStmt.get(id, tenantId));
+  async getById(tenantId, id) {
+    const rows = await query("SELECT * FROM calendar_connections WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+    return rowToConnection(rows[0]);
   },
 
-  updateTokens(id, { accessToken, accessTokenExpiresAt }) {
-    updateTokensStmt.run(encryptSecret(accessToken), accessTokenExpiresAt || null, Date.now(), id);
+  async updateTokens(id, { accessToken, accessTokenExpiresAt }) {
+    await pool.query(
+      "UPDATE calendar_connections SET access_token_encrypted = $1, access_token_expires_at = $2, last_synced_at = $3 WHERE id = $4",
+      [encryptSecret(accessToken), accessTokenExpiresAt || null, Date.now(), id]
+    );
   },
 
-  markNeedsReconnect(id) {
-    markStatusStmt.run("needs_reconnect", id);
+  async markNeedsReconnect(id) {
+    await pool.query("UPDATE calendar_connections SET status = $1 WHERE id = $2", ["needs_reconnect", id]);
   },
 
-  disconnect(tenantId, id) {
-    disconnectStmt.run(id, tenantId);
+  async disconnect(tenantId, id) {
+    await pool.query("UPDATE calendar_connections SET status = 'disconnected' WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
   },
 
   toPublicView,
 };
 
-const insertLinkStmt = db.prepare(
-  "INSERT OR REPLACE INTO calendar_event_links (booking_id, calendar_connection_id, external_event_id, created_at) VALUES (?, ?, ?, ?)"
-);
-const getLinkStmt = db.prepare("SELECT * FROM calendar_event_links WHERE booking_id = ? AND calendar_connection_id = ?");
-const deleteLinkStmt = db.prepare("DELETE FROM calendar_event_links WHERE booking_id = ? AND calendar_connection_id = ?");
-
-function rowToLink(row) {
-  if (!row) return undefined;
-  return { id: row.id, bookingId: row.booking_id, calendarConnectionId: row.calendar_connection_id, externalEventId: row.external_event_id, createdAt: row.created_at };
-}
-
 const calendarEventLinks = {
-  upsert(bookingId, calendarConnectionId, externalEventId) {
-    insertLinkStmt.run(bookingId, calendarConnectionId, externalEventId, Date.now());
+  // INSERT OR REPLACE (SQLite) -> INSERT ... ON CONFLICT ... DO UPDATE
+  // (Postgres), targeting the same unique (booking_id, calendar_connection_id)
+  // index db.js already defines.
+  async upsert(bookingId, calendarConnectionId, externalEventId) {
+    await pool.query(
+      `INSERT INTO calendar_event_links (booking_id, calendar_connection_id, external_event_id, created_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (booking_id, calendar_connection_id) DO UPDATE SET external_event_id = EXCLUDED.external_event_id, created_at = EXCLUDED.created_at`,
+      [bookingId, calendarConnectionId, externalEventId, Date.now()]
+    );
   },
-  get(bookingId, calendarConnectionId) {
-    return rowToLink(getLinkStmt.get(bookingId, calendarConnectionId));
+  async get(bookingId, calendarConnectionId) {
+    const rows = await query("SELECT * FROM calendar_event_links WHERE booking_id = $1 AND calendar_connection_id = $2", [bookingId, calendarConnectionId]);
+    const row = rows[0];
+    if (!row) return undefined;
+    return { id: row.id, bookingId: row.booking_id, calendarConnectionId: row.calendar_connection_id, externalEventId: row.external_event_id, createdAt: Number(row.created_at) };
   },
-  delete(bookingId, calendarConnectionId) {
-    deleteLinkStmt.run(bookingId, calendarConnectionId);
+  async delete(bookingId, calendarConnectionId) {
+    await pool.query("DELETE FROM calendar_event_links WHERE booking_id = $1 AND calendar_connection_id = $2", [bookingId, calendarConnectionId]);
   },
 };
 

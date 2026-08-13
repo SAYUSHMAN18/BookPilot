@@ -20,8 +20,9 @@ const paymentStore = require("../store/paymentStore");
 // enforcing which of those a given session is allowed to ask for. A
 // platform_admin's cross-tenant summary view (Section 8.5) is a
 // deliberately separate, much smaller aggregate — not this function.
-function computeAnalytics({ tenantId, workflowId = null, providerId = null, days = 30 } = {}) {
-  const all = bookings.values(tenantId).filter((b) => {
+async function computeAnalytics({ tenantId, workflowId = null, providerId = null, days = 30 } = {}) {
+  const allBookings = await bookings.values(tenantId);
+  const all = allBookings.filter((b) => {
     if (workflowId && b.workflowId !== workflowId) return false;
     if (providerId && b.providerId !== providerId) return false;
     return true;
@@ -101,8 +102,8 @@ function computeAnalytics({ tenantId, workflowId = null, providerId = null, days
   // than a separate scoped SQL query, consistent with this file's
   // "compute on read from what's already in memory" approach.
   const relevantBookingIds = new Set(all.map((b) => b.id));
-  const ratings = feedback
-    .listAll(tenantId)
+  const allFeedback = await feedback.listAll(tenantId);
+  const ratings = allFeedback
     .filter((f) => relevantBookingIds.has(f.bookingId) && f.rating !== null)
     .map((f) => f.rating);
   const avgRating = ratings.length > 0 ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10 : null;
@@ -115,7 +116,7 @@ function computeAnalytics({ tenantId, workflowId = null, providerId = null, days
   // provider view doesn't show revenue at all yet, only the tenant-wide
   // admin view does, so this scoping gap has no visible effect. Flagged
   // rather than silently assumed correct at finer scopes.
-  const { revenue, paidCount } = paymentStore.revenueForTenant(tenantId);
+  const { revenue, paidCount } = await paymentStore.revenueForTenant(tenantId);
 
   return {
     total: all.length,

@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 const bookings = require("./bookingStore");
 const { labelToMinutes } = require("../engine/dateSlots");
 
@@ -18,7 +18,7 @@ const ACTIVE_STATUSES = new Set(["booked", "arrived", "serving"]);
 // Position 0 means "you're next" (or being served now). Returns null when
 // position isn't meaningful — no time-slot booking (e.g. a hotel stay),
 // or the booking itself isn't in an active state.
-function computeQueuePosition(booking) {
+async function computeQueuePosition(booking) {
   if (!booking || !ACTIVE_STATUSES.has(booking.status) || !booking.visitTime || !booking.visitDate) return null;
   const myMinutes = labelToMinutes(booking.visitTime);
   if (myMinutes === null) return null;
@@ -27,7 +27,7 @@ function computeQueuePosition(booking) {
   // booking.tenantId (not a separate param) — every booking object already
   // carries the tenant it belongs to (bookingStore.js's rowToBooking), so
   // there's nothing to pass or get wrong here.
-  for (const other of bookings.values(booking.tenantId)) {
+  for (const other of await bookings.values(booking.tenantId)) {
     if (other.id === booking.id) continue;
     if (other.workflowId !== booking.workflowId || other.providerId !== booking.providerId) continue;
     if (other.visitDate !== booking.visitDate) continue;
@@ -43,19 +43,17 @@ function computeQueuePosition(booking) {
 // shifted because `changedBookingId` was marked done/cancelled — used to
 // decide who to send a threshold-crossing alert to after a status change,
 // without recomputing every booking in the database.
-function sameQueueBookings(tenantId, workflowId, providerId, date, excludeId) {
-  return bookings
-    .values(tenantId)
-    .filter((b) => b.workflowId === workflowId && b.providerId === providerId && b.visitDate === date && b.id !== excludeId && ACTIVE_STATUSES.has(b.status));
+async function sameQueueBookings(tenantId, workflowId, providerId, date, excludeId) {
+  const all = await bookings.values(tenantId);
+  return all.filter((b) => b.workflowId === workflowId && b.providerId === providerId && b.visitDate === date && b.id !== excludeId && ACTIVE_STATUSES.has(b.status));
 }
 
-const setAlertedStmt = db.prepare("UPDATE bookings SET alerted_next = 1 WHERE id = ? AND tenant_id = ?");
-const getAlertedStmt = db.prepare("SELECT alerted_next FROM bookings WHERE id = ? AND tenant_id = ?");
-function markAlerted(tenantId, bookingId) {
-  setAlertedStmt.run(bookingId, tenantId);
+async function markAlerted(tenantId, bookingId) {
+  await pool.query("UPDATE bookings SET alerted_next = true WHERE id = $1 AND tenant_id = $2", [bookingId, tenantId]);
 }
-function wasAlerted(tenantId, bookingId) {
-  return !!getAlertedStmt.get(bookingId, tenantId)?.alerted_next;
+async function wasAlerted(tenantId, bookingId) {
+  const rows = await query("SELECT alerted_next FROM bookings WHERE id = $1 AND tenant_id = $2", [bookingId, tenantId]);
+  return !!rows[0]?.alerted_next;
 }
 
 // Deliberately NOT tenant-scoped (customer_preferences has no tenant_id,
@@ -63,19 +61,17 @@ function wasAlerted(tenantId, bookingId) {
 // preference tied to the real person behind a phone number, not to any
 // one business they happen to be talking to. Not in the plan's explicit
 // Section 8.1 table list either.
-const getPrefStmt = db.prepare("SELECT * FROM customer_preferences WHERE wa_id = ?");
-const upsertPrefStmt = db.prepare(`
-  INSERT INTO customer_preferences (wa_id, alerts_opted_out, updated_at) VALUES (?, ?, ?)
-  ON CONFLICT(wa_id) DO UPDATE SET alerts_opted_out = excluded.alerts_opted_out, updated_at = excluded.updated_at
-`);
-
-function isOptedOutOfAlerts(waId) {
-  const row = getPrefStmt.get(waId);
-  return !!row?.alerts_opted_out;
+async function isOptedOutOfAlerts(waId) {
+  const rows = await query("SELECT * FROM customer_preferences WHERE wa_id = $1", [waId]);
+  return !!rows[0]?.alerts_opted_out;
 }
 
-function setAlertsOptedOut(waId, optedOut) {
-  upsertPrefStmt.run(waId, optedOut ? 1 : 0, Date.now());
+async function setAlertsOptedOut(waId, optedOut) {
+  await pool.query(
+    `INSERT INTO customer_preferences (wa_id, alerts_opted_out, updated_at) VALUES ($1, $2, $3)
+     ON CONFLICT(wa_id) DO UPDATE SET alerts_opted_out = excluded.alerts_opted_out, updated_at = excluded.updated_at`,
+    [waId, optedOut, Date.now()]
+  );
 }
 
 module.exports = {

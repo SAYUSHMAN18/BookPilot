@@ -18,9 +18,11 @@ const { extractContext } = require("../ai/extractContext");
 const { isRateLimited, shouldNotifyRateLimit } = require("../infra/rateLimit");
 const { recordResponseTime } = require("../infra/perf");
 const { isDayBlocked, blockedRangesForDay } = require("../store/availabilityStore");
-const { tryAnswerFactually, tryAnswerAboutBooking } = require("../ai/factualQA");
+const { tryAnswerFactually, tryAnswerAboutBooking, buildKnowledgeBase } = require("../ai/factualQA");
 const { planNextAction, ACTIONS } = require("../ai/orchestrator");
 const { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion, isPriceObjection, isPlainAcknowledgment } = require("../ai/intentDetector");
+const { groqChatCompletion } = require("../ai/groqClient");
+const { translateText, LANG_CODE_MAP } = require("../ai/translate");
 const supportRequests = require("../store/supportRequestStore");
 const { computeQueuePosition, isOptedOutOfAlerts, setAlertsOptedOut } = require("../store/queueStore");
 const feedbackStore = require("../store/feedbackStore");
@@ -38,7 +40,17 @@ const { isTerminal } = require("./bookingStateMachine");
 // every message so a server restart doesn't drop in-progress bookings.
 // Bookings (the data that needs real double-booking protection) live in
 // SQLite instead — see src/bookingStore.js.
-const sessions = loadSessions();
+// Populated by initSessions() (below), awaited once at process startup —
+// server.js/marketingServer.js's own bootstrap() calls it before mounting
+// any route, since Postgres (unlike node:sqlite) makes the initial load
+// itself async. Starts as an empty Map rather than undefined so any code
+// that happens to run before initSessions() resolves fails loudly (an
+// empty session set, not a crash on `undefined.has`) rather than in a way
+// that's confusing to trace back to a missing await somewhere in startup.
+let sessions = new Map();
+async function initSessions() {
+  sessions = await loadSessions();
+}
 
 // Persists exactly one customer's session (Section 5.2) — the in-memory
 // `sessions` Map is still the source of truth during a single process's
@@ -53,12 +65,12 @@ const sessions = loadSessions();
 // phone number can have an independent in-progress conversation with two
 // different tenants (each with their own WhatsApp number), and those must
 // never share or clobber one session.
-function persist(tenantId, waId) {
+async function persist(tenantId, waId) {
   const key = mapKey(tenantId, waId);
   if (sessions.has(key)) {
-    saveSession(tenantId, waId, sessions.get(key));
+    await saveSession(tenantId, waId, sessions.get(key));
   } else {
-    deleteSession(tenantId, waId);
+    await deleteSession(tenantId, waId);
   }
 }
 
@@ -185,13 +197,14 @@ function describeEntity(entity) {
 // ("p1" in medical.json) block an unrelated hair stylist's identical time
 // slot ("p1" in hair.json, a completely different business) — same bug as
 // the DB index below, just on the JS-side matching functions.
-function bookingsForProvider(tenantId, workflowId, providerId) {
-  return [...bookings.values(tenantId)].filter((b) => b.workflowId === workflowId && b.providerId === providerId && b.status !== "cancelled");
+async function bookingsForProvider(tenantId, workflowId, providerId) {
+  const all = await bookings.values(tenantId);
+  return all.filter((b) => b.workflowId === workflowId && b.providerId === providerId && b.status !== "cancelled");
 }
 
-function takenSlotsFor(tenantId, workflowId, providerId, dateIso) {
+async function takenSlotsFor(tenantId, workflowId, providerId, dateIso) {
   const taken = new Set();
-  for (const b of bookingsForProvider(tenantId, workflowId, providerId)) {
+  for (const b of await bookingsForProvider(tenantId, workflowId, providerId)) {
     if (b.visitDate === dateIso && b.visitTime) taken.add(b.visitTime);
   }
   return taken;
@@ -213,35 +226,37 @@ function dateStepUsesTimeSlots(workflow, dateField) {
   return workflow.steps.some((s) => s.type === "select_time_slot" && s.dateField === dateField);
 }
 
-function filteredDateOptions(tenantId, workflow, session, step) {
+async function filteredDateOptions(tenantId, workflow, session, step) {
   const providerId = session.selectedProvider?.id;
   const usesTimeSlots = dateStepUsesTimeSlots(workflow, step.field);
   const today = isoDate(new Date());
-  return dateOptions(step.days).filter((o) => {
-    if (isDayBlocked(tenantId, workflow.id, providerId, o.iso)) return false;
+  const options = [];
+  for (const o of dateOptions(step.days)) {
+    if (await isDayBlocked(tenantId, workflow.id, providerId, o.iso)) continue;
     if (usesTimeSlots && o.iso === today) {
-      const excludeSlots = takenSlotsFor(tenantId, workflow.id, providerId, o.iso);
-      const blockedRanges = blockedRangesForDay(tenantId, workflow.id, providerId, o.iso);
-      if (timeSlotsFor(workflow, o.iso, excludeSlots, blockedRanges).length === 0) return false;
+      const excludeSlots = await takenSlotsFor(tenantId, workflow.id, providerId, o.iso);
+      const blockedRanges = await blockedRangesForDay(tenantId, workflow.id, providerId, o.iso);
+      if (timeSlotsFor(workflow, o.iso, excludeSlots, blockedRanges).length === 0) continue;
     }
-    return true;
-  });
+    options.push(o);
+  }
+  return options;
 }
 
 // Section 14 — the exact same open-slot computation the conversational
 // select_time_slot step uses (see sendStepPrompt/applyStepInput above),
 // pulled out so the Public API's GET /api/v1/availability can reuse it
 // instead of a second, easily-drifting copy of the same logic.
-function getAvailableSlots(tenantId, workflow, providerId, dateIso) {
-  if (isDayBlocked(tenantId, workflow.id, providerId, dateIso)) return [];
-  const excludeSlots = takenSlotsFor(tenantId, workflow.id, providerId, dateIso);
-  const blockedRanges = blockedRangesForDay(tenantId, workflow.id, providerId, dateIso);
+async function getAvailableSlots(tenantId, workflow, providerId, dateIso) {
+  if (await isDayBlocked(tenantId, workflow.id, providerId, dateIso)) return [];
+  const excludeSlots = await takenSlotsFor(tenantId, workflow.id, providerId, dateIso);
+  const blockedRanges = await blockedRangesForDay(tenantId, workflow.id, providerId, dateIso);
   return timeSlotsFor(workflow, dateIso, excludeSlots, blockedRanges);
 }
 
-function hasDateRangeConflict(tenantId, workflowId, providerId, checkIn, nights) {
+async function hasDateRangeConflict(tenantId, workflowId, providerId, checkIn, nights) {
   const checkOut = new Date(checkIn.getTime() + nights * 24 * 60 * 60 * 1000);
-  for (const b of bookingsForProvider(tenantId, workflowId, providerId)) {
+  for (const b of await bookingsForProvider(tenantId, workflowId, providerId)) {
     if (!b.checkInIso || !b.nights) continue;
     const existingIn = parseIsoDate(b.checkInIso);
     const existingOut = new Date(existingIn.getTime() + b.nights * 24 * 60 * 60 * 1000);
@@ -279,17 +294,428 @@ function capRows(rows, ownerLabel, context) {
 }
 const TRUNCATION_HINT = "\n\n(Showing the first 10 — if you don't see the one you want, just type its name.)";
 
+// Special menu option ids — not real workflow ids, intercepted before the
+// normal matchWorkflowByIdOrIndex call in handleDetecting.
+const SPECIAL_OPT_AI_CHAT      = "__ai_chat";
+const SPECIAL_OPT_CALLBACK     = "__callback";
+const SPECIAL_OPT_VIEW_BOOKING = "__view_booking";
+const SPECIAL_OPT_LOCATION     = "__location";
+const SPECIAL_OPT_LANGUAGE     = "__language";
+const SPECIAL_OPT_WAITLIST     = "__waitlist";
+const SPECIAL_OPT_SEND_PHOTO   = "__send_photo";
+
+const LOCATION_QUERY_PHRASES = new Set([
+  "nearest", "location", "find branch", "nearest branch", "near me", "address", "branch",
+  "kahan hai", "kahan h", "pass wale", "aas paas", "aaspas",
+]);
+
+// Found live: every quick-action/menu string that needed a non-English
+// version was hand-written as a `session.lang === "hi" ? "...hindi..." :
+// "...english..."` ternary, scattered across a dozen call sites — and the
+// language PICKER lists 9 languages, but the actual reply text only ever
+// branched for Hindi specifically. A customer picking Tamil/Urdu/Bengali/
+// etc. got exactly one translated confirmation message, then the rest of
+// the conversation in English regardless — the feature looked far more
+// complete than it was. translate.js's translateText()/LANG_CODE_MAP were
+// already fully built for exactly this (same 2-letter codes session.lang
+// already uses) but never called from anywhere. This thin wrapper is what
+// every one of those call sites now uses instead of a hand-written
+// ternary — one real implementation covering all 9 listed languages,
+// not a hardcoded special case for one of them. Fails open (returns the
+// English text unchanged) if session.lang is unset/"en", GROQ_API_KEY is
+// missing, or the Groq call itself fails — same "never blocks the reply"
+// guarantee translateText() already documents.
+function t(session, text) {
+  return translateText(text, session?.lang);
+}
+
 // Shown when we genuinely can't tell what the customer wants (a greeting,
-// small talk, or anything that doesn't match a business) — a clickable menu
-// beats silently guessing a workflow.
-async function sendBusinessMenu(tenantId, waId, workflows) {
-  const { rows, truncated } = capRows(
-    Object.values(workflows).map((w) => ({ id: w.id, title: w.label, description: w.description })),
-    `tenant ${tenantId}`,
-    "business menu"
-  );
-  const sections = [{ title: "Services", rows }];
-  await sendWhatsAppList(tenantId, waId, `What would you like to book today?${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+// small talk, or anything that doesn't match a business) — a single, clean
+// clickable menu bubble divided into Services and Quick Actions sections.
+async function sendBusinessMenu(tenantId, waId, workflows, session) {
+  const isHindi = session?.lang === "hi";
+
+  const promptText = isHindi ? "आज आप क्या बुक करना चाहेंगे?" : "What would you like to book today?";
+  const chooseTitle = isHindi ? "चुनें" : "Choose";
+  const servicesTitle = isHindi ? "🏥 सेवाएं (Services)" : "🏥 Booking Services";
+  const quickTitle = isHindi ? "⚡ त्वरित विकल्प (Quick Actions)" : "⚡ Quick Actions";
+
+  // Section 1: Business services
+  const serviceRows = Object.values(workflows).map((w) => ({
+    id: w.id,
+    title: w.label,
+    description: w.description,
+  }));
+
+  // Section 2: Quick utility actions
+  const actionRows = [
+    {
+      id: SPECIAL_OPT_AI_CHAT,
+      title: isHindi ? "💬 AI चैट सहायता" : "💬 AI Assistant Chat",
+      description: isHindi ? "AI सहायक से सवाल पूछें" : "Ask questions & chat with AI",
+    },
+    {
+      id: SPECIAL_OPT_CALLBACK,
+      title: isHindi ? "📞 कॉल बैक अनुरोध" : "📞 Request Callback",
+      description: isHindi ? "टीम से कॉल बैक प्राप्त करें" : "Request a call from support",
+    },
+    {
+      id: SPECIAL_OPT_VIEW_BOOKING,
+      title: isHindi ? "📅 मेरी बुकिंग विवरण" : "📅 View My Booking",
+      description: isHindi ? "बुकिंग स्थिति और कतार जांचें" : "Check booking status & queue",
+    },
+    {
+      id: SPECIAL_OPT_LOCATION,
+      title: isHindi ? "📍 पास का स्थान खोजें" : "📍 Find Nearest Branch",
+      description: isHindi ? "निकटतम केंद्र का पता पाएं" : "Find nearby branch address & hours",
+    },
+    {
+      id: SPECIAL_OPT_LANGUAGE,
+      title: isHindi ? "🌐 भाषा बदलें (Language)" : "🌐 Switch Language",
+      description: isHindi ? "हिंदी / अंग्रेज़ी बदलें" : "Toggle English / Hindi",
+    },
+    {
+      id: SPECIAL_OPT_WAITLIST,
+      title: isHindi ? "⏳ वेटलिस्ट में जुड़ें" : "⏳ Join Priority Waitlist",
+      description: isHindi ? "स्लॉट खाली होने पर सूचना पाएं" : "Get notified for open slots",
+    },
+  ];
+
+  // WhatsApp lists hard-cap at 10 total rows across all sections
+  const serviceCap = Math.max(1, MAX_LIST_ROWS - actionRows.length);
+  const cappedServiceRows = serviceRows.slice(0, serviceCap);
+
+  const sections = [
+    { title: servicesTitle, rows: cappedServiceRows },
+    { title: quickTitle, rows: actionRows },
+  ];
+
+  // EXACTLY ONE SINGLE CLEAN BUBBLE
+  await sendWhatsAppList(tenantId, waId, promptText, chooseTitle, sections);
+}
+
+
+// ---------------------------------------------------------------------------
+// AI Chat handler — responds conversationally using Groq. Falls back to a
+// friendly apology when no GROQ_API_KEY is configured.
+// ---------------------------------------------------------------------------
+async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
+  if (!process.env.GROQ_API_KEY) {
+    await sendWhatsAppText(
+      tenantId, waId,
+      "🤖 The AI assistant isn't available right now (no API key configured). " +
+      "Please choose a service from the menu or reply RESTART to start over."
+    );
+    return;
+  }
+
+  // Build a knowledge base so the AI can answer business-specific questions.
+  let knowledgeBase = "";
+  try {
+    knowledgeBase = await buildKnowledgeBase(tenantId, workflows);
+  } catch (_) { /* best-effort */ }
+
+  const historyBlock = (session.history || []).length
+    ? `\n\nRECENT CONVERSATION (most recent last):\n${
+        session.history.map((h) => `Customer: ${h.text}\nBot: ${h.reply}`).join("\n")
+      }`
+    : "";
+
+  try {
+    const { data, elapsedMs } = await groqChatCompletion({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.7,
+      max_tokens: 250,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a friendly AI assistant for a booking platform. " +
+            "Answer the customer's question helpfully and concisely (2-3 sentences max). " +
+            "If they want to BOOK something, tell them to reply RESTART and choose a service. " +
+            (knowledgeBase
+              ? `Here is information about the available services:\n\n${knowledgeBase}`
+              : "No specific business data is available; answer generally.") +
+            historyBlock,
+        },
+        { role: "user", content: trimmed },
+      ],
+    });
+    log("INFO", `AI Chat Groq call took ${elapsedMs}ms`);
+    const reply = (data.choices?.[0]?.message?.content || "").trim();
+    await sendWhatsAppText(tenantId, waId, reply || "I'm not sure about that — try asking in a different way, or reply RESTART to go back to the menu.");
+  } catch (err) {
+    log("WARN", `AI Chat Groq call failed (${err.message}) — sending fallback.`);
+    await sendWhatsAppText(
+      tenantId, waId,
+      "😅 The AI assistant ran into an issue. Please try again in a moment, or reply RESTART to choose a service."
+    );
+  }
+  // Keep session in AI-chat sub-mode so follow-up messages stay here.
+  session.subStage = "AI_CHAT";
+}
+
+// ---------------------------------------------------------------------------
+// 1. AI View My Booking — Intelligent personalized booking summary & tips
+// ---------------------------------------------------------------------------
+async function handleAiViewBooking(tenantId, waId, session, workflows) {
+  const activeBooking = await bookings.activeForCustomer(tenantId, waId);
+
+  if (!activeBooking) {
+    const msg = await t(session, "📅 You don't have any active booking right now. Reply RESTART to choose a service and make a new booking!");
+    await sendWhatsAppText(tenantId, waId, msg);
+    return;
+  }
+
+  const queueAhead = await computeQueuePosition(activeBooking);
+  const queueInfo = queueAhead !== null ? `Queue position: ${queueAhead} people ahead` : "Scheduled appointment";
+  const details = [
+    `Booking ID: ${activeBooking.bookingId}`,
+    `Status: ${activeBooking.status}`,
+    activeBooking.providerName ? `Provider/Doctor: ${activeBooking.providerName}` : null,
+    activeBooking.visitDateLabel ? `Date: ${activeBooking.visitDateLabel}` : null,
+    activeBooking.visitTime ? `Time: ${activeBooking.visitTime}` : null,
+    queueInfo,
+  ].filter(Boolean).join("\n");
+
+  if (!process.env.GROQ_API_KEY) {
+    await sendWhatsAppText(tenantId, waId, `📅 *Your Booking Details*\n\n${details}`);
+    return;
+  }
+
+  try {
+    // Found live: this only ever checked for "hi" specifically, defaulting
+    // EVERY other selected language (Tamil, Urdu, Bengali, Telugu,
+    // Marathi, Punjabi...) straight to English — same gap as the
+    // hardcoded ternaries, just here it's picking the GENERATION language
+    // for a live Groq call rather than a fixed string. LANG_CODE_MAP
+    // (translate.js) already has the full name for all 9 languages the
+    // picker actually lists.
+    const targetLang = LANG_CODE_MAP[session.lang] || "English";
+    const { data } = await groqChatCompletion({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.3,
+      max_tokens: 200,
+      messages: [
+        {
+          role: "system",
+          content: `Summarize the booking details concisely in ${targetLang} with a warm, helpful tone and 1 short preparation tip for the visit.`,
+        },
+        { role: "user", content: details },
+      ],
+    });
+    const summary = (data.choices?.[0]?.message?.content || "").trim();
+    await sendWhatsAppText(tenantId, waId, summary || `📅 *Your Booking Details*\n\n${details}`);
+  } catch (err) {
+    await sendWhatsAppText(tenantId, waId, `📅 *Your Booking Details*\n\n${details}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2. AI Find Nearest Branch — AI location matcher
+// ---------------------------------------------------------------------------
+async function handleAiLocationLookup(tenantId, waId, trimmed, session, workflows) {
+  const branchList = [];
+  for (const w of Object.values(workflows)) {
+    if (w.providers) {
+      for (const p of w.providers) {
+        if (p.address || p.name) branchList.push(`${p.name} (${w.label}): ${p.address || "Main Branch"}`);
+      }
+    }
+    if (w.hotels) {
+      for (const h of w.hotels) {
+        if (h.location || h.name) branchList.push(`${h.name}: ${h.location}`);
+      }
+    }
+  }
+
+  if (branchList.length === 0) {
+    await sendWhatsAppText(tenantId, waId, "📍 Our main branch is available online. Reply RESTART to view available services.");
+    return;
+  }
+
+  if (!process.env.GROQ_API_KEY) {
+    await sendWhatsAppText(tenantId, waId, `📍 *Available Locations & Branches*\n\n${branchList.join("\n")}`);
+    return;
+  }
+
+  try {
+    const targetLang = LANG_CODE_MAP[session.lang] || "English"; // same all-9-languages fix as handleAiViewBooking above
+    const { data } = await groqChatCompletion({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.2,
+      max_tokens: 200,
+      messages: [
+        {
+          role: "system",
+          content: `You are a helpful location assistant. Based on customer input "${trimmed}", recommend the best matching branch from the list in ${targetLang}. List hours and address if known.\n\nBranches:\n${branchList.join("\n")}`,
+        },
+        { role: "user", content: trimmed },
+      ],
+    });
+    const reply = (data.choices?.[0]?.message?.content || "").trim();
+    await sendWhatsAppText(tenantId, waId, reply || `📍 *Available Locations*\n\n${branchList.join("\n")}`);
+  } catch {
+    await sendWhatsAppText(tenantId, waId, `📍 *Available Locations*\n\n${branchList.join("\n")}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Language Selection — two-step interactive flow
+// ---------------------------------------------------------------------------
+
+// Step 1: Show the language picker (WhatsApp list with options).
+async function sendLanguagePicker(tenantId, waId, session) {
+  const currentLang = session.lang || "en";
+  const promptText = currentLang === "hi"
+    ? "🌐 कृपया अपनी पसंदीदा भाषा चुनें:"
+    : "🌐 Please choose your preferred language:";
+
+  const rows = [
+    { id: "__lang_en", title: "🇬🇧 English",   description: "Communicate in English" },
+    { id: "__lang_hi", title: "🇮🇳 हिंदी (Hindi)", description: "हिंदी में संवाद करें" },
+    { id: "__lang_hinglish", title: "🇮🇳 Hinglish", description: "Mix of Hindi + English" },
+    { id: "__lang_ur", title: "🇵🇰 اردو (Urdu)",  description: "اردو میں بات کریں" },
+    { id: "__lang_bn", title: "🇮🇳 বাংলা (Bengali)", description: "বাংলায় কথা বলুন" },
+    { id: "__lang_ta", title: "🇮🇳 தமிழ் (Tamil)", description: "தமிழில் பேசுங்கள்" },
+    { id: "__lang_te", title: "🇮🇳 తెలుగు (Telugu)", description: "తెలుగులో మాట్లాడండి" },
+    { id: "__lang_mr", title: "🇮🇳 मराठी (Marathi)", description: "मराठीत बोला" },
+    { id: "__lang_pa", title: "🇮🇳 ਪੰਜਾਬੀ (Punjabi)", description: "ਪੰਜਾਬੀ ਵਿੱਚ ਗੱਲ ਕਰੋ" },
+  ];
+
+  const sections = [{ title: "Available Languages", rows }];
+  await sendWhatsAppList(tenantId, waId, promptText, "Select", sections);
+  session.subStage = "AWAITING_LANGUAGE_PICK";
+}
+
+// Step 2: Detect explicit language name or __lang_xx button id.
+const LANGUAGE_QUERY_PHRASES = new Set([
+  "language", "lang", "change language", "switch language", "bhasha", "bhasha badlo",
+  "dusri bhasha", "another language", "kisi aur bhasha",
+]);
+
+function detectAndSetLanguage(trimmed, session) {
+  const lc = trimmed.toLowerCase();
+
+  const langButtonMatch = lc.match(/^__lang_(\w+)$/);
+  if (langButtonMatch) {
+    const code = langButtonMatch[1] === "hinglish" ? "hi" : langButtonMatch[1];
+    session.lang = code;
+    return code;
+  }
+
+  if (/\b(hindi|hindi\s*me|hindi\s*mein)\b/i.test(lc))   { session.lang = "hi"; return "hi"; }
+  if (/\b(hinglish)\b/i.test(lc))                         { session.lang = "hi"; return "hi"; }
+  if (/\b(urdu|urdu\s*me|urdu\s*mein)\b/i.test(lc))       { session.lang = "ur"; return "ur"; }
+  if (/\b(english|english\s*me|english\s*mein|angrezi)\b/i.test(lc)) { session.lang = "en"; return "en"; }
+  if (/\b(bengali|bangla)\b/i.test(lc))                   { session.lang = "bn"; return "bn"; }
+  if (/\b(tamil)\b/i.test(lc))                            { session.lang = "ta"; return "ta"; }
+  if (/\b(telugu)\b/i.test(lc))                           { session.lang = "te"; return "te"; }
+  if (/\b(marathi)\b/i.test(lc))                          { session.lang = "mr"; return "mr"; }
+  if (/\b(punjabi|panjabi)\b/i.test(lc))                   { session.lang = "pa"; return "pa"; }
+
+  // Found live: this used to be a substring-anywhere regex including bare
+  // generic words like "lang" and phrases like "kisi aur" ("someone
+  // else") — both common enough to show up inside a completely unrelated
+  // message ("book kisi aur din" = "book on some other day") and wrongly
+  // hijack it into showing the language picker instead of whatever the
+  // customer actually meant. Whole-message match only — these are meant
+  // to catch a customer's OWN request to change language, not any message
+  // that happens to contain one of these words.
+  if (LANGUAGE_QUERY_PHRASES.has(lc) || lc === SPECIAL_OPT_LANGUAGE) {
+    return "SHOW_PICKER";
+  }
+
+  return null;
+}
+
+async function sendLanguageSwitchConfirmation(tenantId, waId, session) {
+  const lang = session.lang || "en";
+  const messages = {
+    hi: "🌐 *भाषा बदल दी गई है: हिंदी*\n\nनमस्ते! अब मैं आपसे हिंदी में संवाद करूँगा। मुख्य मेनू पर जाने के लिए RESTART लिखें।",
+    ur: "🌐 *زبان تبدیل کر دی گئی ہے: اردو*\n\nہیلو! اب میں آپ سے اردو میں بات کروں گا۔ مین مینو کے لیے RESTART لکھیں۔",
+    bn: "🌐 *ভাষা পরিবর্তন করা হয়েছে: বাংলা*\n\nহ্যালো! আমি এখন আপনার সাথে বাংলায় কথা বলব। মূল মেনুর জন্য RESTART লিখুন।",
+    ta: "🌐 *மொழி மாற்றப்பட்டது: தமிழ்*\n\nவணக்கம்! முதன்மை மெனுவிற்கு RESTART என தட்டச்சு செய்யவும்.",
+    te: "🌐 *భాష మార్చబడింది: తెలుగు*\n\nనమస్కారం! ప్రధాన మెనూ కోసం RESTART అని టైప్ చేయండి.",
+    mr: "🌐 *भाषा बदलली आहे: मराठी*\n\nनमस्कार! मुख्य मेनूसाठी RESTART टाइप करा.",
+    pa: "🌐 *ਭਾਸ਼ਾ ਬਦਲੀ ਗਈ: ਪੰਜਾਬੀ*\n\nਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ! ਮੁੱਖ ਮੇਨੂ ਲਈ RESTART ਲਿਖੋ।",
+    en: "🌐 *Language Switched to English*\n\nHello! I will now communicate in English. Reply RESTART anytime for the main menu.",
+  };
+  const msg = messages[lang] || messages.en;
+  await sendWhatsAppText(tenantId, waId, msg);
+}
+
+async function handleLanguageToggle(tenantId, waId, session) {
+  await sendLanguagePicker(tenantId, waId, session);
+}
+
+// ---------------------------------------------------------------------------
+// 4. AI Join Waitlist & Smart Time Recommender
+// ---------------------------------------------------------------------------
+async function handleAiWaitlist(tenantId, waId, trimmed, session, workflows) {
+  const activeBooking = await bookings.activeForCustomer(tenantId, waId);
+  const workflowId = activeBooking?.workflowId || session.workflowId || Object.keys(workflows)[0] || null;
+
+  await supportRequests.create(tenantId, waId, workflowId, `Waitlist Request: ${trimmed}`);
+  dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: "Waitlist entry added" });
+
+  // Found live: this promised "we will notify you immediately if a slot
+  // opens up" — nothing in this codebase actually watches for a slot
+  // freeing up and notifies a waitlisted customer; this just files a
+  // support_requests row the same way a callback request does, for a
+  // human to act on. That's a real, working escalation path, but the old
+  // copy claimed an automatic capability that doesn't exist — a customer
+  // who takes "immediately" literally and never hears back has no way to
+  // know the bot overpromised. Worded to match what actually happens.
+  const msg = await t(session, "⏳ *Added to the waitlist!*\n\nWe've noted your interest — our team will follow up if a slot becomes available.");
+  await sendWhatsAppText(tenantId, waId, msg);
+}
+
+// ---------------------------------------------------------------------------
+// 5. AI Send Photo — Image media reference handler
+// ---------------------------------------------------------------------------
+// Found live: webhook.js's text extraction never reads message.image, so
+// a real WhatsApp photo attachment never reaches handleIncomingMessage at
+// all (text ends up "", nothing is called) — this can only ever work for
+// a pasted image URL, never a native camera/gallery upload, despite the
+// menu calling it "Send Photo." Worse, the old version treated ANY reply
+// while awaiting a photo — including "never mind" or an actual (silently
+// dropped) photo attachment — as a successfully received photo. Properly
+// wiring up real attachment capture would mean downloading the media via
+// the same Graph API flow voice notes already use and threading a new
+// parameter through handleIncomingMessage's whole call chain (webhook.js,
+// /api/simulate-whatsapp, /api/demo/chat) — real, separate scope, not a
+// quiet addition here. Until then, this is honest about what it actually
+// does: accepts a pasted image URL, and tells the customer plainly when
+// what they sent isn't one, rather than pretending to have captured it.
+const IMAGE_URL_RE = /https?:\/\/\S*\.(?:png|jpe?g|webp)(?:\?\S*)?$/i;
+
+async function handleAiPhotoUpload(tenantId, waId, trimmed, session, workflows) {
+  if (session.subStage === "AWAITING_PHOTO") {
+    if (IMAGE_URL_RE.test(trimmed.trim())) {
+      session.photoUrl = trimmed.trim();
+      session.subStage = null;
+      const msg = await t(session, "📸 *Photo link received!*\n\nYour reference photo has been linked to your session. Our provider will review it during your appointment!");
+      await sendWhatsAppText(tenantId, waId, msg);
+      return;
+    }
+    // Not a link — including a real photo attachment, which this bot
+    // can't read yet. Don't claim to have received anything; say so and
+    // give them a way out.
+    const retry = await t(session, "I can only accept a photo as a link right now (not a direct upload) — paste an image URL, or reply SKIP to continue without one.");
+    if (/^skip$/i.test(trimmed.trim())) {
+      session.subStage = null;
+      const skipMsg = await t(session, "No problem — continuing without a reference photo.");
+      await sendWhatsAppText(tenantId, waId, skipMsg);
+      return;
+    }
+    await sendWhatsAppText(tenantId, waId, retry);
+    return;
+  }
+
+  session.subStage = "AWAITING_PHOTO";
+  const promptMsg = await t(session, "📸 Please share a photo link for reference (e.g. hairstyle preference, skin concern, or vehicle issue) — or reply SKIP to continue without one:");
+  await sendWhatsAppText(tenantId, waId, promptMsg);
 }
 
 // Found live: `parseInt(text, 10)` on a free-text reply silently succeeds
@@ -350,7 +776,7 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble 
       "select_provider"
     );
     const sections = [{ title: "Options", rows }];
-    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+    await sendWhatsAppList(tenantId, waId, await t(session, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`), "Choose", sections);
     return;
   }
 
@@ -365,7 +791,7 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble 
       "select_hotel"
     );
     const sections = [{ title: "Hotels", rows }];
-    await sendWhatsAppList(tenantId, waId, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+    await sendWhatsAppList(tenantId, waId, await t(session, `${prompt} (Reply "restart" anytime to start over.)${truncated ? TRUNCATION_HINT : ""}`), "Choose", sections);
     return;
   }
 
@@ -383,48 +809,48 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble 
       "select_room"
     );
     const sections = [{ title: "Rooms", rows }];
-    await sendWhatsAppList(tenantId, waId, `${prompt}${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+    await sendWhatsAppList(tenantId, waId, await t(session, `${prompt}${truncated ? TRUNCATION_HINT : ""}`), "Choose", sections);
     return;
   }
 
   if (step.type === "select_option") {
     if (step.options.length <= 3) {
       await sendWhatsAppButtons(tenantId, waId,
-        prompt,
+        await t(session, prompt),
         step.options.map((o) => ({ id: o, title: o }))
       );
     } else {
       const { rows, truncated } = capRows(step.options.map((o) => ({ id: o, title: o })), `business "${workflow.id}"`, "select_option");
       const sections = [{ title: "Options", rows }];
-      await sendWhatsAppList(tenantId, waId, `${prompt}${truncated ? TRUNCATION_HINT : ""}`, "Choose", sections);
+      await sendWhatsAppList(tenantId, waId, await t(session, `${prompt}${truncated ? TRUNCATION_HINT : ""}`), "Choose", sections);
     }
     return;
   }
 
   if (step.type === "select_date") {
-    const options = filteredDateOptions(tenantId, workflow, session, step);
+    const options = await filteredDateOptions(tenantId, workflow, session, step);
     const sections = [{ title: "Dates", rows: options.map((o) => ({ id: o.id, title: o.title })) }];
-    await sendWhatsAppList(tenantId, waId, prompt, "Choose", sections);
+    await sendWhatsAppList(tenantId, waId, await t(session, prompt), "Choose", sections);
     return;
   }
 
   if (step.type === "select_time_slot") {
     const dateIso = session.data[`${step.dateField}Iso`];
-    const excludeSlots = takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
-    const blockedRanges = blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+    const excludeSlots = await takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+    const blockedRanges = await blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
     const slots = timeSlotsFor(workflow, session.data[step.dateField], excludeSlots, blockedRanges);
     if (slots.length === 0) {
-      await sendWhatsAppText(tenantId, waId, "No more slots available for that day. Reply \"restart\" to try a different date.");
+      await sendWhatsAppText(tenantId, waId, await t(session, "No more slots available for that day. Reply \"restart\" to try a different date."));
       return;
     }
     const sections = [{ title: "Available Slots", rows: slots.map((s) => ({ id: s, title: s })) }];
-    await sendWhatsAppList(tenantId, waId, prompt, "Choose", sections);
+    await sendWhatsAppList(tenantId, waId, await t(session, prompt), "Choose", sections);
     return;
   }
 
   if (step.type === "review_confirm") {
     const body = `${prompt}\n\n${fillTemplate(step.template, session, workflow)}`;
-    await sendWhatsAppButtons(tenantId, waId, body, [
+    await sendWhatsAppButtons(tenantId, waId, await t(session, body), [
       { id: "confirm", title: "✅ Confirm" },
       { id: "edit", title: "✏️ Edit Details" },
       { id: "cancel", title: "❌ Cancel" },
@@ -433,7 +859,7 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble 
   }
 
   // text_input
-  await sendWhatsAppText(tenantId, waId, prompt);
+  await sendWhatsAppText(tenantId, waId, await t(session, prompt));
 }
 
 // Processes the user's reply to the *current* step. Accepts either a tapped
@@ -456,7 +882,7 @@ function findByName(entries, text, nameOf) {
   return partial.length === 1 ? partial[0] : null;
 }
 
-function applyStepInput(tenantId, workflow, step, session, text) {
+async function applyStepInput(tenantId, workflow, step, session, text) {
   if (step.type === "select_provider") {
     const byId = workflow.providers.find((p) => p.id === text);
     const index = parseListIndex(text);
@@ -507,7 +933,7 @@ function applyStepInput(tenantId, workflow, step, session, text) {
     // shared source of truth for both) — otherwise a numeric reply ("3")
     // indexes into a different, unfiltered list than what was actually
     // shown, silently picking the wrong day.
-    const options = filteredDateOptions(tenantId, workflow, session, step);
+    const options = await filteredDateOptions(tenantId, workflow, session, step);
     const byIdOrTitle = options.find((o) => o.id === text.toLowerCase() || o.title.toLowerCase() === text.toLowerCase());
     const dateIndex = parseListIndex(text);
     const byIndex = dateIndex ? options[dateIndex - 1] : undefined;
@@ -521,8 +947,8 @@ function applyStepInput(tenantId, workflow, step, session, text) {
 
   if (step.type === "select_time_slot") {
     const dateIso = session.data[`${step.dateField}Iso`];
-    const excludeSlots = takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
-    const blockedRanges = blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+    const excludeSlots = await takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+    const blockedRanges = await blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
     const slots = timeSlotsFor(workflow, session.data[step.dateField], excludeSlots, blockedRanges);
     const byText = slots.find((s) => s.toLowerCase() === text.toLowerCase());
     const slotIndex = parseListIndex(text);
@@ -763,7 +1189,7 @@ function publishBookingEvent(tenantId, type, booking) {
 
 function generateBookingId(workflow, session) {
   if (workflow.bookingIdPrefix) {
-    const dateIso = session.data.visitDateIso || session.data.checkInDateIso || new Date().toISOString().slice(0, 10);
+    const dateIso = session.data.visitDateIso || session.data.checkInDateIso || isoDate(new Date());
     const datePart = dateIso.replace(/-/g, "");
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
     return `${workflow.bookingIdPrefix}-${datePart}-${rand}`;
@@ -798,7 +1224,7 @@ function resolvePaymentRequirement(workflow, session) {
 
 // Returns the created booking (needed by the Section 9 payment gate right
 // after this call, to attach a payments row to the new booking's real id).
-function recordBooking(tenantId, waId, workflow, session, initialStatus = "booked") {
+async function recordBooking(tenantId, waId, workflow, session, initialStatus = "booked") {
   // .create() always inserts a new row — a customer's Nth booking never
   // overwrites their (N-1)th (real gap, previously an upsert-by-wa_id).
   return bookings.create(tenantId, waId, {
@@ -832,8 +1258,8 @@ async function rejectIfSlotUnavailable(tenantId, waId, session, workflow) {
   if (!slotStep) return false;
 
   const dateIso = session.data[`${slotStep.dateField}Iso`];
-  const taken = takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
-  const blockedRanges = blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+  const taken = await takenSlotsFor(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
+  const blockedRanges = await blockedRangesForDay(tenantId, workflow.id, session.selectedProvider?.id, dateIso);
   const chosenSlot = session.data[slotStep.field];
   const chosenMinutes = labelToMinutes(chosenSlot);
   const isBlocked = chosenMinutes !== null && blockedRanges.some((r) => chosenMinutes >= r.startMin && chosenMinutes < r.endMin);
@@ -885,7 +1311,7 @@ async function rejectIfDateRangeInvalid(tenantId, waId, session, workflow) {
   session.data[`${startField}Iso`] = isoDate(parsedStart);
   session.data[`${startField}Label`] = formatLongDate(parsedStart);
 
-  if (hasDateRangeConflict(tenantId, workflow.id, session.selectedProvider?.id, parsedStart, nights)) {
+  if (await hasDateRangeConflict(tenantId, workflow.id, session.selectedProvider?.id, parsedStart, nights)) {
     session.stepIndex = startStepIdx >= 0 ? startStepIdx : session.stepIndex;
     await sendWhatsAppText(tenantId, waId,
       `Sorry, ${session.selectedProvider?.name || "that room"} is already booked for part of that period. Please choose a different date.`
@@ -897,6 +1323,18 @@ async function rejectIfDateRangeInvalid(tenantId, waId, session, workflow) {
   return false;
 }
 
+// Whether `step` already has a real answer on `session` — true only after
+// a GO_TO_STEP rewind re-answers its target and advanceOrFinish walks
+// forward again; never true on a normal first pass (see the skipAnsweredSteps
+// comment in executeOrchestratedPlan's GO_TO_STEP branch for why that
+// distinction matters).
+function isStepAlreadyAnswered(step, session) {
+  if (step.type === "select_provider" || step.type === "select_room") return !!session.selectedProvider;
+  if (step.type === "select_hotel") return !!session.selectedHotel;
+  if (step.field) return session.data[step.field] !== undefined;
+  return false; // review_confirm (no field) always re-shows
+}
+
 async function advanceOrFinish(tenantId, waId, session, workflow) {
   const justAnsweredStep = currentStep(workflow, session);
   session.stepIndex += 1;
@@ -904,6 +1342,13 @@ async function advanceOrFinish(tenantId, waId, session, workflow) {
 
   if (workflow.dateRangeAvailability && justAnsweredStep.field === workflow.dateRangeAvailability.nightsField) {
     if (await rejectIfDateRangeInvalid(tenantId, waId, session, workflow)) return;
+  }
+
+  if (session.skipAnsweredSteps) {
+    session.skipAnsweredSteps = false; // one-shot — see GO_TO_STEP's own comment
+    while (session.stepIndex < workflow.steps.length && isStepAlreadyAnswered(workflow.steps[session.stepIndex], session)) {
+      session.stepIndex += 1;
+    }
   }
 
   if (session.stepIndex < workflow.steps.length) {
@@ -919,7 +1364,7 @@ async function advanceOrFinish(tenantId, waId, session, workflow) {
   const paymentRequirement = resolvePaymentRequirement(workflow, session);
   let createdBooking;
   try {
-    createdBooking = recordBooking(tenantId, waId, workflow, session, paymentRequirement ? "payment_pending" : "booked");
+    createdBooking = await recordBooking(tenantId, waId, workflow, session, paymentRequirement ? "payment_pending" : "booked");
   } catch (err) {
     // The DB's own UNIQUE index/trigger is the authoritative check for
     // both booking shapes — it catches a genuine race the JS pre-check
@@ -990,7 +1435,7 @@ async function advanceOrFinish(tenantId, waId, session, workflow) {
 async function sendPaymentRequest(tenantId, waId, workflow, session, booking, paymentRequirement) {
   if (!razorpay.isConfigured()) {
     log("ERROR", `Booking ${booking.bookingId} requires payment but Razorpay isn't configured (RAZORPAY_KEY_ID/SECRET unset) — proceeding as a normal confirmed booking instead of blocking the customer.`);
-    bookings.updateStatus(tenantId, booking.id, "booked");
+    await bookings.updateStatus(tenantId, booking.id, "booked");
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
     await sendWhatsAppText(tenantId, waId, confirmationMessageFor(session, workflow));
     await syncBookingCreated(tenantId, booking, workflow);
@@ -1006,8 +1451,8 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
       notes: { bookingId: booking.bookingId, tenantId: String(tenantId) },
       customerPhone: waId,
     });
-    paymentStore.create(tenantId, booking.id, { amount: paymentRequirement.amountPaise, currency: "INR", providerOrderId: order.orderId });
-    bookings.updatePaymentStatus(tenantId, booking.id, "pending");
+    await paymentStore.create(tenantId, booking.id, { amount: paymentRequirement.amountPaise, currency: "INR", providerOrderId: order.orderId });
+    await bookings.updatePaymentStatus(tenantId, booking.id, "pending");
 
     const rupees = (paymentRequirement.amountPaise / 100).toFixed(0);
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
@@ -1018,7 +1463,7 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
     );
   } catch (err) {
     log("ERROR", `Failed to create Razorpay payment link for booking ${booking.bookingId}: ${err.message}. Proceeding as a normal confirmed booking instead of blocking the customer.`);
-    bookings.updateStatus(tenantId, booking.id, "booked");
+    await bookings.updateStatus(tenantId, booking.id, "booked");
     await sendConfirmationPhoto(tenantId, waId, session, workflow);
     await sendWhatsAppText(tenantId, waId, confirmationMessageFor(session, workflow));
     await syncBookingCreated(tenantId, booking, workflow);
@@ -1035,9 +1480,9 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
 // provider-initiated path in server.js uses, so the refund percentage a
 // customer gets never depends on which side of the app cancelled it.
 async function cancelActiveBooking(tenantId, waId, workflows) {
-  const booking = bookings.activeForCustomer(tenantId, waId);
+  const booking = await bookings.activeForCustomer(tenantId, waId);
   if (!booking) return null;
-  bookings.updateStatus(tenantId, booking.id, "cancelled");
+  await bookings.updateStatus(tenantId, booking.id, "cancelled");
   const refundResult = await refundIfPaid(tenantId, booking, {
     initiatedBy: "customer",
     refundPolicy: workflows?.[booking.workflowId]?.refundPolicy,
@@ -1090,9 +1535,9 @@ async function maybeEscalateConfusion(tenantId, waId, session, workflows, trimme
   if (session.confusionCount < CONFUSION_ESCALATION_THRESHOLD) return false;
 
   session.confusionCount = 0; // one escalation per streak, not one per message from here on
-  const activeBooking = bookings.activeForCustomer(tenantId, waId);
+  const activeBooking = await bookings.activeForCustomer(tenantId, waId);
   const workflowId = activeBooking?.workflowId || session.workflowId || null;
-  supportRequests.create(tenantId, waId, workflowId, trimmed);
+  await supportRequests.create(tenantId, waId, workflowId, trimmed);
   log("INFO", `Support request logged for ${waId} after ${CONFUSION_ESCALATION_THRESHOLD} consecutive unclear replies (workflow=${workflowId || "unknown"}): "${trimmed}"`);
   dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: trimmed });
 
@@ -1117,7 +1562,104 @@ async function maybeEscalateConfusion(tenantId, waId, session, workflows, trimme
 // the full chain — a real quota/cost trade-off, not a free win, so it's
 // left as-is. What actually bounds this path's worst-case latency is
 // Section 0.1's per-call timeout, not parallelization.
+// ---------------------------------------------------------------------------
+// Global Special Actions Intercept — handles language, location, AI chat, etc.
+// ---------------------------------------------------------------------------
+async function handleGlobalSpecialActions(tenantId, waId, session, trimmed, workflows) {
+  const lc = trimmed.toLowerCase();
+
+  // 1. Language switch/detection
+  const requestedLang = detectAndSetLanguage(trimmed, session);
+  if (requestedLang) {
+    session.awaitingBusinessPick = false;
+    if (requestedLang === "SHOW_PICKER") {
+      await sendLanguagePicker(tenantId, waId, session);
+    } else {
+      await sendLanguageSwitchConfirmation(tenantId, waId, session);
+    }
+    return true;
+  }
+
+  // 2. Location lookup. Found live: the old version matched generic words
+  // like "address"/"branch"/"near me" as a substring ANYWHERE in the
+  // message — genuinely likely to appear inside a real booking answer
+  // ("car AC not cooling, need it fixed near me by evening" as a
+  // text_input reason, or a customer's own address as a text_input field)
+  // and hijack it into a location-lookup reply instead of accepting the
+  // answer. Whole-message match only, same fix as the language trigger
+  // above — this is for a customer asking "where are you", not any
+  // message that happens to contain a location-adjacent word.
+  const isLocationQuery = lc === SPECIAL_OPT_LOCATION || LOCATION_QUERY_PHRASES.has(lc);
+
+  if (isLocationQuery) {
+    session.awaitingBusinessPick = false;
+    await handleAiLocationLookup(tenantId, waId, trimmed, session, workflows);
+    return true;
+  }
+
+  // 3. AI Chat
+  if (lc === SPECIAL_OPT_AI_CHAT || lc === "chat" || lc === "chat with ai" || lc === "💬 ai chat" || lc === "💬 ai चैट") {
+    session.awaitingBusinessPick = false;
+    const greeting = await t(session, "🤖 You're now chatting with our AI assistant! Ask me anything about our services, pricing, or availability. Reply RESTART anytime to return to the main menu.");
+    await sendWhatsAppText(tenantId, waId, greeting);
+    session.subStage = "AI_CHAT";
+    return true;
+  }
+
+  // 4. Callback
+  if (lc === SPECIAL_OPT_CALLBACK || lc === "callback" || lc === "request callback" || lc === "📞 callback" || lc === "📞 कॉल बैक") {
+    session.awaitingBusinessPick = false;
+    await supportRequests.create(tenantId, waId, null, "Customer requested a callback via menu");
+    dashboardEvents.publish(tenantId, "support_request.created", { workflowId: null, waId, message: "Callback requested" });
+    log("INFO", `Callback request created for ${waId} (tenant=${tenantId})`);
+    const ack = await t(session, "📞 Got it! We've noted your callback request and someone from our team will reach out to you shortly.");
+    await sendWhatsAppText(tenantId, waId, ack);
+    return true;
+  }
+
+  // 5. View Booking
+  if (lc === SPECIAL_OPT_VIEW_BOOKING || lc === "my booking" || lc === "📅 my booking" || lc === "📅 मेरी बुकिंग") {
+    session.awaitingBusinessPick = false;
+    await handleAiViewBooking(tenantId, waId, session, workflows);
+    return true;
+  }
+
+  // 6. Waitlist
+  if (lc === SPECIAL_OPT_WAITLIST || lc === "join waitlist" || lc === "waitlist" || lc === "⏳ join waitlist" || lc === "⏳ वेटलिस्ट") {
+    session.awaitingBusinessPick = false;
+    await handleAiWaitlist(tenantId, waId, trimmed, session, workflows);
+    return true;
+  }
+
+  // 7. Send Photo
+  if (lc === SPECIAL_OPT_SEND_PHOTO || lc === "send photo" || lc === "photo" || lc === "📸 send photo") {
+    session.awaitingBusinessPick = false;
+    await handleAiPhotoUpload(tenantId, waId, trimmed, session, workflows);
+    return true;
+  }
+
+  return false;
+}
+
 async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
+  // Awaiting language pick from the interactive menu
+  if (session.subStage === "AWAITING_LANGUAGE_PICK") {
+    const lang = detectAndSetLanguage(trimmed, session);
+    session.subStage = null;
+    if (lang && lang !== "SHOW_PICKER") {
+      await sendLanguageSwitchConfirmation(tenantId, waId, session);
+    } else {
+      session.lang = "en";
+      await sendLanguageSwitchConfirmation(tenantId, waId, session);
+    }
+    return;
+  }
+
+  // Global Special Actions Intercept — works at ANY point
+  if (await handleGlobalSpecialActions(tenantId, waId, session, trimmed, workflows)) {
+    return;
+  }
+
   // Short-circuit: if we already showed the business menu and the customer
   // is directly tapping/typing a workflow id from it, skip the full intent
   // classification loop — they've already answered the question.
@@ -1127,6 +1669,18 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
       await beginWorkflow(tenantId, waId, session, picked.id, workflows, trimmed);
       return;
     }
+  }
+
+
+  // --- Ongoing AI chat / Photo upload sub-modes ---
+  if (session.subStage === "AI_CHAT") {
+    await handleAiChat(tenantId, waId, trimmed, session, workflows);
+    return;
+  }
+
+  if (session.subStage === "AWAITING_PHOTO") {
+    await handleAiPhotoUpload(tenantId, waId, trimmed, session, workflows);
+    return;
   }
 
   // Hardcoded, checked before any AI call — a direct "are you a bot?"
@@ -1143,28 +1697,20 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   // of exact phrasing. This replaces the old SUPPORT_REQUEST_RE /
   // ALREADY_BOOKED_RE regex block which silently failed for anything
   // slightly off (e.g. "CANCEL THAT" was misrouted to a hair booking).
-  const hasActive = bookings.hasActive(tenantId, waId);
+  const hasActive = await bookings.hasActive(tenantId, waId);
 
   // Handle simple greetings separately.
   // A greeting is not a booking request and should never fall through to
   // the "you already have a booking" fallback.
-  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar)[\s!,.?]*$/i.test(trimmed);
+  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar|raam\s*raam|ram\s*ram|kya\s*hal|kaise\s*ho|radhe\s*radhe|jai\s*shree\s*ram|pranam|sat\s*sri|adaab|khamma\s*ghani)[\s!,.?]*$/i.test(trimmed);
 
   if (isGreeting) {
     if (hasActive) {
-      await sendWhatsAppText(
-        tenantId,
-        waId,
-        "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else."
-      );
+      const msg = await t(session, "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else.");
+      await sendWhatsAppText(tenantId, waId, msg);
     } else {
-      await sendWhatsAppText(
-        tenantId,
-        waId,
-        "Hi! 👋 What would you like to book today?"
-      );
       session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows);
+      await sendBusinessMenu(tenantId, waId, workflows, session);
     }
 
     return;
@@ -1185,19 +1731,11 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   const intent = await detectGeneralIntent(trimmed, hasActive);
   if (intent === INTENTS.GREETING) {
     if (hasActive) {
-      await sendWhatsAppText(
-        tenantId,
-        waId,
-        "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else."
-      );
+      const msg = await t(session, "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else.");
+      await sendWhatsAppText(tenantId, waId, msg);
     } else {
       session.awaitingBusinessPick = true;
-      await sendWhatsAppText(
-        tenantId,
-        waId,
-        "Hi! 👋 What would you like to book today?"
-      );
-      await sendBusinessMenu(tenantId, waId, workflows);
+      await sendBusinessMenu(tenantId, waId, workflows, session);
     }
 
     return;
@@ -1232,8 +1770,21 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     // a follow-up about in the first place).
     const isBareStatusRequest = /^(status|kab\s*(hai|h)?|kitne\s*baje)[\s.?!]*$/i.test(trimmed);
     if (!isBareStatusRequest) {
-      const booking = bookings.activeForCustomer(tenantId, waId);
+      const booking = await bookings.activeForCustomer(tenantId, waId);
       if (booking) {
+        // Found live: "please reschedule my appointment to tomorrow at
+        // 3pm" matches STATUS_RE (via "my appointment") and, with no
+        // dedicated reschedule flow for customers (rescheduling only
+        // exists as a provider/dashboard action — src/routes/dashboard.js),
+        // silently fell through to tryAnswerAboutBooking, which just
+        // answered with the booking's EXISTING details — no
+        // acknowledgment the reschedule request itself went nowhere. An
+        // honest "can't self-serve this yet" beats a reply that looks
+        // like the request was handled.
+        if (/\bresched\w*/i.test(trimmed)) {
+          await sendWhatsAppText(tenantId, waId, await t(session, "I can't reschedule a booking automatically yet — reply CANCEL to cancel this one and book a new time, or contact us directly to move it."));
+          return;
+        }
         const answer = await tryAnswerAboutBooking(trimmed, booking, session.history);
         if (answer) {
           await sendWhatsAppText(tenantId, waId, answer);
@@ -1294,9 +1845,9 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     // Now it lands somewhere real: a support_requests row visible on the
     // dashboard, and a real contact number if the customer's business
     // configured one.
-    const activeBooking = bookings.activeForCustomer(tenantId, waId);
+    const activeBooking = await bookings.activeForCustomer(tenantId, waId);
     const workflowId = activeBooking?.workflowId || session.workflowId || null;
-    supportRequests.create(tenantId, waId, workflowId, trimmed);
+    await supportRequests.create(tenantId, waId, workflowId, trimmed);
     log("INFO", `Support request logged for ${waId} (workflow=${workflowId || "unknown"}): "${trimmed}"`);
     dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: trimmed });
 
@@ -1365,6 +1916,19 @@ function normalizeReviewChoice(text) {
 const RECLASSIFIABLE_STEP_TYPES = ["select_provider", "select_option", "select_date", "select_time_slot", "select_hotel", "select_room"];
 
 async function handleRunning(tenantId, waId, session, trimmed, workflows) {
+  // Found live: handleGlobalSpecialActions was ALSO wired in here at one
+  // point — a real regression risk. Its checks (especially the location
+  // query regex) match on substrings anywhere in free text, which is fine
+  // in handleDetecting (nothing specific is expected yet) but dangerous
+  // here: a customer's actual answer to the CURRENT step ("car AC not
+  // cooling, need it fixed near me by evening" as a text_input "reason")
+  // would get hijacked into a location-lookup reply instead of being
+  // accepted as their answer. Deliberately NOT called here — mid-flow,
+  // free text means "answering this step," not "issuing a global
+  // command." The few commands that genuinely must work at any point
+  // (restart/cancel/status/here) are exact-match only and already
+  // checked in handleIncomingMessage before stage dispatch, not through
+  // this broader, substring-matching intercept.
   const workflow = workflows[session.workflowId];
   const step = currentStep(workflow, session);
 
@@ -1445,7 +2009,7 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
     return;
   }
 
-  const error = applyStepInput(tenantId, workflow, step, session, trimmed);
+  const error = await applyStepInput(tenantId, workflow, step, session, trimmed);
 
   if (!error) {
     session.confusionCount = 0; // a valid step answer means they weren't actually stuck
@@ -1559,6 +2123,20 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
     if (target.type === "select_hotel") session.selectedHotel = null;
     session.stepIndex = plan.stepIndex;
     session.subStage = null;
+    // Found live: without this, changing ONE earlier answer (e.g. "actually
+    // make it 3pm") made the customer re-walk and re-answer every step
+    // BETWEEN the changed one and review_confirm too — re-typing their
+    // name, age, reason, all already on file and untouched by the change.
+    // advanceOrFinish() checks this flag exactly once, right after the
+    // rewound step is re-answered, to fast-forward past any step that
+    // already has a value — a one-shot signal, not a standing behavior
+    // change: a NORMAL first-time walk through the workflow never sets
+    // this, so an auto-filled-from-context field (extractContext, in
+    // beginWorkflow) still always gets shown for confirmation exactly as
+    // before — this only skips re-confirming what the customer already
+    // confirmed once, specifically because they just asked to change one
+    // OTHER thing, not this one.
+    session.skipAnsweredSteps = true;
     await sendWhatsAppText(tenantId, waId, "Sure — let's change that.");
     await sendStepPrompt(tenantId, waId, workflow, target, session);
     return true;
@@ -1568,18 +2146,19 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
 }
 
 async function handleStatusCommand(tenantId, waId) {
-  const booking = bookings.activeForCustomer(tenantId, waId);
+  const session = getSession(tenantId, waId);
+  const booking = await bookings.activeForCustomer(tenantId, waId);
   if (!booking) {
-    await sendWhatsAppText(tenantId, waId, "No active booking found. Send a message anytime describing what you'd like to book.");
+    await sendWhatsAppText(tenantId, waId, await t(session, "No active booking found. Send a message anytime describing what you'd like to book."));
     return;
   }
 
   // Hotel-style booking (a date range, not a single time slot).
   if (booking.checkInIso) {
     const checkOut = new Date(parseIsoDate(booking.checkInIso).getTime() + (booking.nights || 1) * 24 * 60 * 60 * 1000);
-    await sendWhatsAppText(tenantId, waId,
+    await sendWhatsAppText(tenantId, waId, await t(session,
       `🏨 ${booking.hotelName || ""} — ${booking.providerName}\nCheck-in: ${booking.checkInIso}\nCheck-out: ${isoDate(checkOut)}\n🧾 Booking ID: ${booking.bookingId}`
-    );
+    ));
     return;
   }
 
@@ -1589,24 +2168,24 @@ async function handleStatusCommand(tenantId, waId) {
   // avoid; this call site had drifted from that convention.
   const todayIso = isoDate(new Date());
   if (booking.visitDate && booking.visitDate !== todayIso) {
-    await sendWhatsAppText(tenantId, waId,
+    await sendWhatsAppText(tenantId, waId, await t(session,
       `Your next appointment is on ${booking.visitDateLabel || booking.visitDate} at ${booking.visitTime} with ${booking.providerName}. Reply HERE when you arrive on the day.`
-    );
+    ));
     return;
   }
 
   if (booking.status === "done") {
-    await sendWhatsAppText(tenantId, waId, `Your ${booking.visitTime} appointment with ${booking.providerName} is complete. Message me anytime to book another.`);
+    await sendWhatsAppText(tenantId, waId, await t(session, `Your ${booking.visitTime} appointment with ${booking.providerName} is complete. Message me anytime to book another.`));
     return;
   }
 
   if (booking.status === "serving") {
-    await sendWhatsAppText(tenantId, waId, `You're currently being seen by ${booking.providerName}.`);
+    await sendWhatsAppText(tenantId, waId, await t(session, `You're currently being seen by ${booking.providerName}.`));
     return;
   }
 
   if (booking.status === "arrived") {
-    await sendWhatsAppText(tenantId, waId, `You're checked in for your ${booking.visitTime} appointment with ${booking.providerName}. Please wait to be called.`);
+    await sendWhatsAppText(tenantId, waId, await t(session, `You're checked in for your ${booking.visitTime} appointment with ${booking.providerName}. Please wait to be called.`));
     return;
   }
 
@@ -1618,19 +2197,22 @@ async function handleStatusCommand(tenantId, waId) {
   // cancelled) bookings with an earlier TIME slot, recomputed fresh —
   // marking someone done immediately and correctly shifts everyone
   // behind them down by one on their very next check.
-  const ahead = computeQueuePosition(booking) ?? 0;
+  const ahead = (await computeQueuePosition(booking)) ?? 0;
   const positionLine =
     ahead === 0 ? "You're next!" : `You're approximately #${ahead + 1} in line today (${ahead} ahead of you).`;
 
-  await sendWhatsAppText(tenantId, waId,
-    `📍 Appointment: ${booking.visitTime} with ${booking.providerName}\n🧾 Booking ID: ${booking.bookingId}\n\n${positionLine} Reply HERE when you arrive at the clinic.`
-  );
+  // "at the clinic" used to be hardcoded here regardless of business type —
+  // read oddly for a salon/automobile-service/etc. booking. Left generic.
+  await sendWhatsAppText(tenantId, waId, await t(session,
+    `📍 Appointment: ${booking.visitTime} with ${booking.providerName}\n🧾 Booking ID: ${booking.bookingId}\n\n${positionLine} Reply HERE when you arrive.`
+  ));
 }
 
 async function handleHereCommand(tenantId, waId) {
-  const booking = bookings.activeForCustomer(tenantId, waId);
+  const session = getSession(tenantId, waId);
+  const booking = await bookings.activeForCustomer(tenantId, waId);
   if (!booking) {
-    await sendWhatsAppText(tenantId, waId, "No active booking found to check in.");
+    await sendWhatsAppText(tenantId, waId, await t(session, "No active booking found to check in."));
     return;
   }
   // Item 6 — this used to have NO status guard at all: activeForCustomer()
@@ -1647,12 +2229,12 @@ async function handleHereCommand(tenantId, waId) {
       booking.status === "serving" ? `You're currently being seen by ${booking.providerName}.` :
       booking.status === "done" ? `Your${booking.visitTime ? ` ${booking.visitTime}` : ""} appointment with ${booking.providerName} is already complete.` :
       `Your booking is already marked ${booking.status.replace("_", "-")}.`;
-    await sendWhatsAppText(tenantId, waId, message);
+    await sendWhatsAppText(tenantId, waId, await t(session, message));
     return;
   }
-  bookings.updateStatus(tenantId, booking.id, "arrived");
+  await bookings.updateStatus(tenantId, booking.id, "arrived");
   publishBookingEvent(tenantId, "booking.updated", { ...booking, status: "arrived" });
-  await sendWhatsAppText(tenantId, waId, `✅ Marked you as arrived${booking.visitTime ? ` for your ${booking.visitTime} appointment` : ""}. Please wait to be called.`);
+  await sendWhatsAppText(tenantId, waId, await t(session, `✅ Marked you as arrived${booking.visitTime ? ` for your ${booking.visitTime} appointment` : ""}. Please wait to be called.`));
 }
 
 // Section 8 — tenantId is now required, resolved by the caller BEFORE this
@@ -1664,7 +2246,7 @@ async function handleHereCommand(tenantId, waId) {
 // tenant on its own — every store call inside it needs one explicitly,
 // which is exactly the point: there is no code path here that can
 // silently operate across tenants.
-async function handleIncomingMessage(tenantId, waId, text, workflows) {
+async function processMessage(tenantId, waId, text, workflows) {
   const trimmed = (text || "").trim();
   if (!trimmed) return;
 
@@ -1727,14 +2309,14 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
         // cancellation path.
         sessions.delete(mapKey(tenantId, waId));
         const refundNote = refundStatusNote(cancelResult.refundResult);
-        await sendWhatsAppText(tenantId, waId, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`);
+        await sendWhatsAppText(tenantId, waId, await t(session, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`));
       } else if (session.stage === "RUNNING") {
         // Nothing confirmed yet — just an in-progress flow to abandon.
         // Nothing to refund or mark cancelled in the database.
         sessions.delete(mapKey(tenantId, waId));
-        await sendWhatsAppText(tenantId, waId, "❌ No problem — cancelled. Message me anytime to start a new one.");
+        await sendWhatsAppText(tenantId, waId, await t(session, "❌ No problem — cancelled. Message me anytime to start a new one."));
       } else {
-        await sendWhatsAppText(tenantId, waId, "You don't have anything in progress to cancel. Message me anytime to start a new booking.");
+        await sendWhatsAppText(tenantId, waId, await t(session, "You don't have anything in progress to cancel. Message me anytime to start a new booking."));
       }
       return;
     }
@@ -1757,12 +2339,12 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
     // queueStore.js) — a customer's alert preference is tied to their real
     // phone number, not to any one business.
     if (/^stop\s*alerts?$/i.test(trimmed)) {
-      setAlertsOptedOut(waId, true);
+      await setAlertsOptedOut(waId, true);
       await sendWhatsAppText(tenantId, waId, "Got it — you won't get \"you're next\" alerts anymore. Reply START ALERTS anytime to turn them back on.");
       return;
     }
     if (/^start\s*alerts?$/i.test(trimmed)) {
-      setAlertsOptedOut(waId, false);
+      await setAlertsOptedOut(waId, false);
       await sendWhatsAppText(tenantId, waId, "You'll get \"you're next\" alerts again.");
       return;
     }
@@ -1777,10 +2359,10 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
     // by design — clearing feedback_requested_at on capture is what makes
     // this "one nudge, then drop it" rather than treating every future
     // message as feedback forever.
-    const mostRecentBooking = bookings.mostRecentForCustomer(tenantId, waId);
+    const mostRecentBooking = await bookings.mostRecentForCustomer(tenantId, waId);
     if (mostRecentBooking?.status === "done" && mostRecentBooking.feedbackRequestedAt) {
-      feedbackStore.create(tenantId, mostRecentBooking.id, mostRecentBooking.workflowId, waId, trimmed);
-      bookings.clearFeedbackRequest(tenantId, mostRecentBooking.id);
+      await feedbackStore.create(tenantId, mostRecentBooking.id, mostRecentBooking.workflowId, waId, trimmed);
+      await bookings.clearFeedbackRequest(tenantId, mostRecentBooking.id);
       log("INFO", `Feedback captured for booking ${mostRecentBooking.bookingId}: "${trimmed}"`);
       dashboardEvents.publish(tenantId, "feedback.created", { workflowId: mostRecentBooking.workflowId, providerId: mostRecentBooking.providerId, bookingId: mostRecentBooking.bookingId, comment: trimmed });
       await sendWhatsAppText(tenantId, waId, "Thank you for the feedback! 🙏");
@@ -1803,11 +2385,32 @@ async function handleIncomingMessage(tenantId, waId, text, workflows) {
     // deleted — no history to remember across an intentional reset.
     if (sessions.has(mapKey(tenantId, waId))) recordHistoryTurn(session, trimmed, replyText);
 
-    persist(tenantId, waId);
+    await persist(tenantId, waId);
     const elapsedMs = Date.now() - startedAt;
     recordResponseTime(elapsedMs);
     log("INFO", `Reply cycle for ${waId} took ${elapsedMs}ms`);
   }
 }
 
-module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots };
+// Found live: processMessage() mutates the shared `session` object (e.g.
+// `session.stepIndex += 1`) synchronously before its first `await`. Two
+// messages arriving close together for the SAME customer — a rapid
+// double-tap, or WhatsApp's own at-least-once delivery retrying while the
+// first attempt is still mid-flight — read/write that same in-memory
+// object with no lock between them, which reproduced as a crash (a second
+// concurrent "confirm" reading `session.stepIndex` after the first had
+// already advanced it past the end of the workflow) and is a live
+// double-booking risk on other interleavings, not just a crash. This
+// chains each (tenant, waId)'s calls onto a per-conversation promise so
+// they always run one at a time, start to finish — a DIFFERENT customer's
+// message is never blocked by this, only same-conversation calls queue.
+const processingChains = new Map();
+function handleIncomingMessage(tenantId, waId, text, workflows) {
+  const key = mapKey(tenantId, waId);
+  const prior = processingChains.get(key) || Promise.resolve();
+  const next = prior.catch(() => {}).then(() => processMessage(tenantId, waId, text, workflows));
+  processingChains.set(key, next.catch(() => {}));
+  return next;
+}
+
+module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots, initSessions };

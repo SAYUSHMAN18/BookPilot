@@ -48,11 +48,11 @@ async function getValidAccessToken(connection) {
 
   try {
     const { accessToken, expiresAt } = await google.refreshAccessToken(connection.refreshToken);
-    calendarConnections.updateTokens(connection.id, { accessToken, accessTokenExpiresAt: expiresAt });
+    await calendarConnections.updateTokens(connection.id, { accessToken, accessTokenExpiresAt: expiresAt });
     return accessToken;
   } catch (err) {
     if (err.isInvalidGrant) {
-      calendarConnections.markNeedsReconnect(connection.id);
+      await calendarConnections.markNeedsReconnect(connection.id);
       log("WARN", `Calendar connection ${connection.id} needs reconnecting — refresh token was rejected (revoked or expired).`);
     }
     throw err;
@@ -72,7 +72,7 @@ function eventDescriptionFor(booking) {
 
 async function syncBookingCreated(tenantId, booking, workflow) {
   if (!booking.visitTime) return; // hotel stay — out of scope, see file header
-  const connection = calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
+  const connection = await calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
   if (!connection || connection.status !== "connected") return;
 
   const window = eventWindow(booking, workflow);
@@ -86,7 +86,7 @@ async function syncBookingCreated(tenantId, booking, workflow) {
       description: eventDescriptionFor(booking),
       ...window,
     });
-    calendarEventLinks.upsert(booking.id, connection.id, externalEventId);
+    await calendarEventLinks.upsert(booking.id, connection.id, externalEventId);
   } catch (err) {
     log("ERROR", `Calendar sync (create) failed for booking ${booking.bookingId}: ${err.message}`);
   }
@@ -94,10 +94,10 @@ async function syncBookingCreated(tenantId, booking, workflow) {
 
 async function syncBookingRescheduled(tenantId, booking, workflow) {
   if (!booking.visitTime) return;
-  const connection = calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
+  const connection = await calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
   if (!connection || connection.status !== "connected") return;
 
-  const link = calendarEventLinks.get(booking.id, connection.id);
+  const link = await calendarEventLinks.get(booking.id, connection.id);
   if (!link) {
     // No existing event (connected after the booking was made, or the
     // original create sync failed) — treat a reschedule as a fresh create
@@ -124,16 +124,16 @@ async function syncBookingRescheduled(tenantId, booking, workflow) {
 
 async function syncBookingCancelled(tenantId, booking) {
   if (!booking.visitTime) return;
-  const connection = calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
+  const connection = await calendarConnections.getForProvider(tenantId, booking.workflowId, booking.providerId);
   if (!connection || connection.status !== "connected") return;
 
-  const link = calendarEventLinks.get(booking.id, connection.id);
+  const link = await calendarEventLinks.get(booking.id, connection.id);
   if (!link) return; // nothing was ever synced — nothing to remove
 
   try {
     const accessToken = await getValidAccessToken(connection);
     await google.deleteEvent(accessToken, { calendarId: connection.externalCalendarId || "primary", externalEventId: link.externalEventId });
-    calendarEventLinks.delete(booking.id, connection.id);
+    await calendarEventLinks.delete(booking.id, connection.id);
   } catch (err) {
     log("ERROR", `Calendar sync (cancel) failed for booking ${booking.bookingId}: ${err.message}`);
   }

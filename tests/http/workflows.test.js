@@ -15,7 +15,7 @@ async function adminSession(app, email, businessName) {
 }
 
 test("GET /api/dashboard/workflows returns the seeded demo catalog for a brand new tenant", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app, "owner@example.com", "Fresh Tenant Biz");
 
   const resp = await request(app).get("/api/dashboard/workflows").set("Cookie", cookie);
@@ -25,7 +25,7 @@ test("GET /api/dashboard/workflows returns the seeded demo catalog for a brand n
 });
 
 test("two tenants each editing a workflow with the SAME id never affects the other tenant's copy", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await adminSession(app, "a@example.com", "Tenant A Salon");
   const tenantB = await adminSession(app, "b@example.com", "Tenant B Salon");
 
@@ -49,7 +49,7 @@ test("two tenants each editing a workflow with the SAME id never affects the oth
 });
 
 test("DELETE /api/dashboard/workflows/:id only removes that tenant's own row, not another tenant's same-id workflow", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await adminSession(app, "delete-a@example.com", "Delete Tenant A");
   const tenantB = await adminSession(app, "delete-b@example.com", "Delete Tenant B");
 
@@ -64,7 +64,7 @@ test("DELETE /api/dashboard/workflows/:id only removes that tenant's own row, no
 });
 
 test("a workflow one tenant creates under a NEW id is invisible to another tenant, and neither can delete it by guessing the id", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await adminSession(app, "new-a@example.com", "New Workflow Tenant A");
   const tenantB = await adminSession(app, "new-b@example.com", "New Workflow Tenant B");
 

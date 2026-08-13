@@ -12,7 +12,7 @@ const { freshApp } = require("./_setup");
 const GIBBERISH = "zzxxqqweewqzzxx"; // matches no workflow's keywords, no command word
 
 test("3 consecutive unclassifiable messages escalate to a support request", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const supportRequests = require("../../src/store/supportRequestStore");
   const waId = "919000011111";
 
@@ -21,12 +21,12 @@ test("3 consecutive unclassifiable messages escalate to a support request", asyn
     assert.equal(resp.status, 200);
   }
 
-  const requests = supportRequests.listAll(1);
+  const requests = await supportRequests.listAll(1);
   assert.ok(requests.some((r) => r.waId === waId), "expected a support request to have been logged after 3 consecutive unclear replies");
 });
 
 test("only 2 consecutive unclassifiable messages do NOT escalate yet", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const supportRequests = require("../../src/store/supportRequestStore");
   const waId = "919000011112";
 
@@ -34,12 +34,12 @@ test("only 2 consecutive unclassifiable messages do NOT escalate yet", async () 
     await request(app).post("/api/simulate-whatsapp").send({ from: waId, text: GIBBERISH, tenantId: 1 });
   }
 
-  const requests = supportRequests.listAll(1);
+  const requests = await supportRequests.listAll(1);
   assert.ok(!requests.some((r) => r.waId === waId), "should not escalate before the 3rd consecutive unclear reply");
 });
 
 test("a successful classification in between resets the streak — no escalation", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const supportRequests = require("../../src/store/supportRequestStore");
   const waId = "919000011113";
 
@@ -50,6 +50,6 @@ test("a successful classification in between resets the streak — no escalation
   await request(app).post("/api/simulate-whatsapp").send({ from: waId, text: GIBBERISH, tenantId: 1 });
   await request(app).post("/api/simulate-whatsapp").send({ from: waId, text: GIBBERISH, tenantId: 1 });
 
-  const requests = supportRequests.listAll(1);
+  const requests = await supportRequests.listAll(1);
   assert.ok(!requests.some((r) => r.waId === waId), "the streak should have reset after the successful classification, so only 2 consecutive unclear replies follow it");
 });

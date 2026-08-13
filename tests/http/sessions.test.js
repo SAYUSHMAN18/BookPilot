@@ -9,7 +9,7 @@ const request = require("supertest");
 const { freshApp, signupAndActivate } = require("./_setup");
 
 test("GET /api/auth/sessions lists the caller's own sessions and correctly flags the current one", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await signupAndActivate(app, request, { businessName: "Sessions Biz", email: "sessions@example.com" });
 
   const resp = await request(app).get("/api/auth/sessions").set("Cookie", cookie);
@@ -19,7 +19,7 @@ test("GET /api/auth/sessions lists the caller's own sessions and correctly flags
 });
 
 test("logging in from a second \"device\" creates an independent second session — both listed, neither is the other's current", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie: cookieA } = await signupAndActivate(app, request, { businessName: "Two Device Biz", email: "twodevice@example.com" });
   const login2 = await request(app).post("/api/auth/login").send({ email: "twodevice@example.com", password: "password123" });
   const cookieB = login2.headers["set-cookie"];
@@ -38,7 +38,7 @@ test("logging in from a second \"device\" creates an independent second session 
 });
 
 test("DELETE /api/auth/sessions/:id revokes that session — its cookie stops working on the very next request", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie: cookieA } = await signupAndActivate(app, request, { businessName: "Revoke Biz", email: "revoke@example.com" });
   const login2 = await request(app).post("/api/auth/login").send({ email: "revoke@example.com", password: "password123" });
   const cookieB = login2.headers["set-cookie"];
@@ -60,7 +60,7 @@ test("DELETE /api/auth/sessions/:id revokes that session — its cookie stops wo
 });
 
 test("a user cannot revoke another user's session by guessing its id", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await signupAndActivate(app, request, { businessName: "Cross Revoke A", email: "cross-revoke-a@example.com" });
   const tenantB = await signupAndActivate(app, request, { businessName: "Cross Revoke B", email: "cross-revoke-b@example.com" });
 
@@ -77,7 +77,7 @@ test("a user cannot revoke another user's session by guessing its id", async () 
 });
 
 test("POST /api/auth/logout revokes the session server-side, not just the client-side cookie", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await signupAndActivate(app, request, { businessName: "Logout Revoke Biz", email: "logout-revoke@example.com" });
 
   const logout = await request(app).post("/api/auth/logout").set("Cookie", cookie);

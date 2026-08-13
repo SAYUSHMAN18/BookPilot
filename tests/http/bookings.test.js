@@ -13,7 +13,7 @@ async function adminSession(app, email = "admin@example.com") {
   return signupAndActivate(app, request, { businessName: "Booking HTTP Test Biz", email });
 }
 
-function seedBooking(bookingStore, tenantId, overrides = {}) {
+async function seedBooking(bookingStore, tenantId, overrides = {}) {
   return bookingStore.create(tenantId, "917838881412", {
     bookingId: `APT-TEST-${Math.random().toString(36).slice(2, 8)}`,
     workflowId: "medical",
@@ -30,11 +30,11 @@ function seedBooking(bookingStore, tenantId, overrides = {}) {
 }
 
 test("GET /api/dashboard/bookings requires workflowId+providerId and returns only that scope", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
   const { cookie, tenantId } = await adminSession(app);
-  seedBooking(bookingStore, tenantId, { visitTime: "10:00 am" });
-  seedBooking(bookingStore, tenantId, { providerId: "p2", providerName: "Dr. Neha Mehta", visitTime: "11:00 am" });
+  await seedBooking(bookingStore, tenantId, { visitTime: "10:00 am" });
+  await seedBooking(bookingStore, tenantId, { providerId: "p2", providerName: "Dr. Neha Mehta", visitTime: "11:00 am" });
 
   const missingParams = await request(app).get("/api/dashboard/bookings").set("Cookie", cookie);
   assert.equal(missingParams.status, 400);
@@ -46,11 +46,11 @@ test("GET /api/dashboard/bookings requires workflowId+providerId and returns onl
 });
 
 test("PATCH .../bookings/:id cancel: works once, rejects a second cancel, and refuses a completed booking", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
   const { cookie, tenantId } = await adminSession(app);
-  const booking = seedBooking(bookingStore, tenantId);
-  const doneBooking = seedBooking(bookingStore, tenantId, { status: "done", visitTime: "2:00 pm" });
+  const booking = await seedBooking(bookingStore, tenantId);
+  const doneBooking = await seedBooking(bookingStore, tenantId, { status: "done", visitTime: "2:00 pm" });
 
   const first = await request(app).patch(`/api/dashboard/bookings/${booking.id}`).set("Cookie", cookie).send({ action: "cancel" });
   assert.equal(first.status, 200);
@@ -64,11 +64,11 @@ test("PATCH .../bookings/:id cancel: works once, rejects a second cancel, and re
 });
 
 test("PATCH .../bookings/:id reschedule onto an already-taken slot returns 409 and changes nothing", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
   const { cookie, tenantId } = await adminSession(app);
-  const target = seedBooking(bookingStore, tenantId, { visitTime: "10:00 am" });
-  seedBooking(bookingStore, tenantId, { visitDate: "2026-09-02", visitTime: "3:00 pm" }); // the slot we'll collide into
+  const target = await seedBooking(bookingStore, tenantId, { visitTime: "10:00 am" });
+  await seedBooking(bookingStore, tenantId, { visitDate: "2026-09-02", visitTime: "3:00 pm" }); // the slot we'll collide into
 
   const conflict = await request(app)
     .patch(`/api/dashboard/bookings/${target.id}`)
@@ -83,10 +83,10 @@ test("PATCH .../bookings/:id reschedule onto an already-taken slot returns 409 a
 });
 
 test("a provider session can only PATCH their own bookings, never another provider's", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
   const { cookie: adminCookie, tenantId } = await adminSession(app);
-  const otherProvidersBooking = seedBooking(bookingStore, tenantId, { providerId: "p2", providerName: "Dr. Neha Mehta" });
+  const otherProvidersBooking = await seedBooking(bookingStore, tenantId, { providerId: "p2", providerName: "Dr. Neha Mehta" });
 
   await request(app).post("/api/dashboard/users").set("Cookie", adminCookie).send({ email: "provider1@example.com", password: "password123", role: "provider", name: "P1", workflowId: "medical", providerId: "p1" });
   const providerLogin = await request(app).post("/api/auth/login").send({ email: "provider1@example.com", password: "password123" });
@@ -99,13 +99,18 @@ test("a provider session can only PATCH their own bookings, never another provid
 });
 
 test("a full booking created via the real webhook-simulate conversation actually lands in the store, and stays invisible to an unrelated tenant's dashboard session", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
 
   // The date-picker only offers a rolling 7-day window from "today" — a
   // fixed hardcoded date would fall outside it depending on when this
-  // suite runs, so "tomorrow" is computed fresh each run instead.
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // suite runs, so "tomorrow" is computed fresh each run instead. Must use
+  // isoDate() (LOCAL date components), not .toISOString(), which converts
+  // to UTC first and rolls back to the wrong calendar day for any timezone
+  // ahead of UTC during that day's early morning hours — the exact bug
+  // businessHoursAwareness.test.js hit for real.
+  const { isoDate } = require("../../src/engine/dateSlots");
+  const tomorrow = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
   const steps = ["I need a haircut", "p1", tomorrow, "10:00 am", "HTTP Test Customer", "confirm"];
   const waId = "919000000555";
   for (const text of steps) {
@@ -118,7 +123,7 @@ test("a full booking created via the real webhook-simulate conversation actually
   // migration) — confirm the conversation actually produced a real row
   // there, driven entirely through the HTTP conversational pipeline, not
   // a direct store call.
-  const created = bookingStore.values(1).find((b) => b.waId === waId && b.workflowId === "hair");
+  const created = (await bookingStore.values(1)).find((b) => b.waId === waId && b.workflowId === "hair");
   assert.ok(created, "expected the simulated conversation to have created a real booking for tenant 1");
   assert.equal(created.customerName, "HTTP Test Customer");
 

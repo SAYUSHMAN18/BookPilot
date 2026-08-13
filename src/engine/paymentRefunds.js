@@ -63,7 +63,8 @@ function to24Hour(label) {
 // money can be returned automatically — see Section 9.8's manual-refund
 // dashboard action for the fallback when this can't complete on its own).
 async function refundIfPaid(tenantId, booking, { initiatedBy, refundPolicy }) {
-  const paidPayment = paymentStore.listForBooking(tenantId, booking.id).find((p) => p.status === "paid");
+  const paymentsForBooking = await paymentStore.listForBooking(tenantId, booking.id);
+  const paidPayment = paymentsForBooking.find((p) => p.status === "paid");
   if (!paidPayment) return { refunded: false };
 
   const percent = computeRefundPercent({ initiatedBy, refundPolicy, visitDateIso: booking.visitDate, visitTime: booking.visitTime });
@@ -76,8 +77,8 @@ async function refundIfPaid(tenantId, booking, { initiatedBy, refundPolicy }) {
   try {
     const refund = await razorpay.createRefund({ providerPaymentId: paidPayment.providerPaymentId, amount: refundAmount });
     const status = percent >= 100 ? "refunded" : "partially_refunded";
-    paymentStore.markRefunded(paidPayment.id, status, refund.status, refundAmount);
-    bookings.updatePaymentStatus(tenantId, booking.id, status);
+    await paymentStore.markRefunded(paidPayment.id, status, refund.status, refundAmount);
+    await bookings.updatePaymentStatus(tenantId, booking.id, status);
     log("INFO", `Refunded ₹${refundAmount / 100} (${percent}%) for booking ${booking.bookingId}, ${initiatedBy}-initiated cancellation.`);
     return { refunded: true, amount: refundAmount, percent };
   } catch (err) {

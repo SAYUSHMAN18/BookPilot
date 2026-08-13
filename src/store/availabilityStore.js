@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 
 // What a provider manually blocks off from their dashboard (a day off, a
 // lunch break, maintenance on a room) — separate from `bookings`, which is
@@ -10,15 +10,6 @@ const { db } = require("./db");
 // filter by (id, tenant_id) together so a provider from one tenant can
 // never read or delete a block belonging to another tenant just by
 // guessing/probing a numeric id.
-const insertStmt = db.prepare(
-  "INSERT INTO blocked_slots (tenant_id, workflow_id, provider_id, date, time, end_time, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-);
-const deleteByIdStmt = db.prepare("DELETE FROM blocked_slots WHERE id = ? AND tenant_id = ?");
-const getByIdStmt = db.prepare("SELECT * FROM blocked_slots WHERE id = ? AND tenant_id = ?");
-const listForProviderStmt = db.prepare(
-  "SELECT * FROM blocked_slots WHERE tenant_id = ? AND workflow_id = ? AND provider_id = ? ORDER BY date, time"
-);
-const listForDayStmt = db.prepare("SELECT * FROM blocked_slots WHERE tenant_id = ? AND workflow_id = ? AND provider_id = ? AND date = ?");
 
 function rowToBlock(row) {
   if (!row) return undefined;
@@ -31,7 +22,7 @@ function rowToBlock(row) {
     time: row.time, // null = whole day blocked; the range's start (24h "HH:MM") otherwise
     endTime: row.end_time, // null on a pre-range-support row = "just this one slot"
     reason: row.reason,
-    createdAt: row.created_at,
+    createdAt: Number(row.created_at),
   };
 }
 
@@ -47,27 +38,43 @@ function timeToMinutes(hhmm) {
   return h * 60 + m;
 }
 
-function blockSlot(tenantId, workflowId, providerId, dateIso, startTime, endTime, reason) {
-  insertStmt.run(tenantId, workflowId, providerId, dateIso, startTime || null, endTime || null, reason || null, Date.now());
+async function blockSlot(tenantId, workflowId, providerId, dateIso, startTime, endTime, reason) {
+  await pool.query(
+    "INSERT INTO blocked_slots (tenant_id, workflow_id, provider_id, date, time, end_time, reason, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    [tenantId, workflowId, providerId, dateIso, startTime || null, endTime || null, reason || null, Date.now()]
+  );
 }
 
-function unblockSlot(tenantId, id) {
-  deleteByIdStmt.run(id, tenantId);
+async function unblockSlot(tenantId, id) {
+  await pool.query("DELETE FROM blocked_slots WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
 }
 
 // Ownership check before delete — a provider must only ever be able to
 // remove their own blocks, never one belonging to another provider_id/
 // workflow_id/tenant just because they guessed a numeric id.
-function getBlockById(tenantId, id) {
-  return rowToBlock(getByIdStmt.get(id, tenantId));
+async function getBlockById(tenantId, id) {
+  const rows = await query("SELECT * FROM blocked_slots WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+  return rowToBlock(rows[0]);
 }
 
-function listBlocksForProvider(tenantId, workflowId, providerId) {
-  return listForProviderStmt.all(tenantId, workflowId, providerId).map(rowToBlock);
+async function listBlocksForProvider(tenantId, workflowId, providerId) {
+  const rows = await query(
+    "SELECT * FROM blocked_slots WHERE tenant_id = $1 AND workflow_id = $2 AND provider_id = $3 ORDER BY date, time",
+    [tenantId, workflowId, providerId]
+  );
+  return rows.map(rowToBlock);
 }
 
-function isDayBlocked(tenantId, workflowId, providerId, dateIso) {
-  return listForDayStmt.all(tenantId, workflowId, providerId, dateIso).some((row) => row.time === null);
+async function listForDay(tenantId, workflowId, providerId, dateIso) {
+  return query(
+    "SELECT * FROM blocked_slots WHERE tenant_id = $1 AND workflow_id = $2 AND provider_id = $3 AND date = $4",
+    [tenantId, workflowId, providerId, dateIso]
+  );
+}
+
+async function isDayBlocked(tenantId, workflowId, providerId, dateIso) {
+  const rows = await listForDay(tenantId, workflowId, providerId, dateIso);
+  return rows.some((row) => row.time === null);
 }
 
 // Minute-of-day ranges for everything blocked that day (excluding
@@ -75,9 +82,9 @@ function isDayBlocked(tenantId, workflowId, providerId, dateIso) {
 // with no end_time — created before ranges existed — is treated as a
 // single minute starting at its stored time, preserving "block exactly
 // this slot" as the intended meaning for old data.
-function blockedRangesForDay(tenantId, workflowId, providerId, dateIso) {
+async function blockedRangesForDay(tenantId, workflowId, providerId, dateIso) {
   const ranges = [];
-  for (const row of listForDayStmt.all(tenantId, workflowId, providerId, dateIso)) {
+  for (const row of await listForDay(tenantId, workflowId, providerId, dateIso)) {
     if (row.time === null) continue;
     const startMin = timeToMinutes(row.time);
     const endMin = row.end_time ? timeToMinutes(row.end_time) : startMin + 1;

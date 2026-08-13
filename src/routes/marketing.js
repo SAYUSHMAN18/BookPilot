@@ -12,5 +12,8 @@ router.get("/", (req, res) => {
 router.get("/signup", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "..", "public", "marketing", "signup.html"));
 });
+router.get("/plan-selection", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "..", "public", "marketing", "plan-selection.html"));
+});
 
 module.exports = { router };

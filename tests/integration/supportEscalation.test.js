@@ -1,8 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
 const { isBotIdentityQuestion, isExplicitComplaint, isPriceObjection } = require("../../src/ai/intentDetector");
 
@@ -26,25 +24,25 @@ test("1.7: isExplicitComplaint only true for actual frustration words", () => {
   assert.equal(isExplicitComplaint("CAN I SPEAK TO SUPPORT"), false);
 });
 
-test("1.4: support_requests table records an escalation and can be resolved", () => {
-  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-support-test-"));
+test("1.4: support_requests table records an escalation and can be resolved", async () => {
+  await createIsolatedTestDatabase();
   delete require.cache[require.resolve("../../src/store/db")];
   delete require.cache[require.resolve("../../src/store/supportRequestStore")];
   const supportRequests = require("../../src/store/supportRequestStore");
   const TENANT = 1; // the default tenant, created by db.js's own migration
 
-  const created = supportRequests.create(TENANT, "919888800000", "medical", "let me talk to someone please");
+  const created = await supportRequests.create(TENANT, "919888800000", "medical", "let me talk to someone please");
   assert.equal(created.waId, "919888800000");
   assert.equal(created.workflowId, "medical");
   assert.equal(created.resolved, false);
 
-  const forWorkflow = supportRequests.listForWorkflow(TENANT, "medical");
+  const forWorkflow = await supportRequests.listForWorkflow(TENANT, "medical");
   assert.equal(forWorkflow.length, 1);
   assert.equal(forWorkflow[0].id, created.id);
 
   // A different workflow's provider must not see this request.
-  assert.equal(supportRequests.listForWorkflow(TENANT, "hair").length, 0);
+  assert.equal((await supportRequests.listForWorkflow(TENANT, "hair")).length, 0);
 
-  const resolved = supportRequests.setResolved(TENANT, created.id, true);
+  const resolved = await supportRequests.setResolved(TENANT, created.id, true);
   assert.equal(resolved.resolved, true);
 });

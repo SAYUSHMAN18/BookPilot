@@ -12,7 +12,7 @@ async function adminSession(app, email, businessName) {
 }
 
 test("a brand new tenant's checklist starts not-dismissed with every item false", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app, "fresh@example.com", "Fresh Checklist Biz");
 
   const resp = await request(app).get("/api/dashboard/setup-checklist").set("Cookie", cookie);
@@ -24,7 +24,7 @@ test("a brand new tenant's checklist starts not-dismissed with every item false"
 });
 
 test("editing a workflow flips 'customize-business' to done, and only for that tenant", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await adminSession(app, "custom-a@example.com", "Customize Tenant A");
   const tenantB = await adminSession(app, "custom-b@example.com", "Customize Tenant B");
 
@@ -40,7 +40,7 @@ test("editing a workflow flips 'customize-business' to done, and only for that t
 });
 
 test("inviting a second team member flips 'invite-team' to done", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await adminSession(app, "team@example.com", "Team Checklist Biz");
 
   const before = await request(app).get("/api/dashboard/setup-checklist").set("Cookie", cookie);
@@ -55,14 +55,14 @@ test("inviting a second team member flips 'invite-team' to done", async () => {
 });
 
 test("a booking landing for the tenant flips 'first-booking' to done", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie, tenantId } = await adminSession(app, "booking@example.com", "Booking Checklist Biz");
   const bookingStore = require("../../src/store/bookingStore");
 
   const before = await request(app).get("/api/dashboard/setup-checklist").set("Cookie", cookie);
   assert.equal(before.body.items.find((i) => i.id === "first-booking").done, false);
 
-  bookingStore.create(tenantId, "919000009999", {
+  await bookingStore.create(tenantId, "919000009999", {
     bookingId: "APT-CHECKLIST-1", workflowId: "hair", providerId: "p1", providerName: "Test",
     visitDate: "2026-09-01", visitTime: "10:00 am", customerName: "Test", status: "booked", createdAt: Date.now(),
   });
@@ -72,7 +72,7 @@ test("a booking landing for the tenant flips 'first-booking' to done", async () 
 });
 
 test("POST /api/dashboard/setup-checklist/dismiss persists dismissal for that tenant only", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await adminSession(app, "dismiss-a@example.com", "Dismiss Tenant A");
   const tenantB = await adminSession(app, "dismiss-b@example.com", "Dismiss Tenant B");
 

@@ -1,0 +1,34 @@
+# Local/test Postgres — the same database engine dev, tests, and
+# production (Cloud SQL) all now run against, so a passing test suite
+# actually proves the production code path works (see README's data-layer
+# section on why this replaced node:sqlite, and why this project
+# deliberately does NOT keep a SQLite-for-tests/Postgres-for-prod dual
+# driver). Not used in production itself — Cloud SQL is the real target
+# there; this is purely for `npm test` / `npm run start:dashboard`
+# against a local instance.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bookpilot
+      POSTGRES_PASSWORD: bookpilot_dev_only
+      POSTGRES_DB: bookpilot
+    ports:
+      # Host port 5433, not 5432 — this machine already has a separate,
+      # unrelated native Postgres process bound to 5432 (found live: it
+      # silently intercepted every connection attempt here, since
+      # Windows/Docker port-forwarding doesn't error on a host-side
+      # conflict the way you'd expect — every "wrong password" was
+      # actually hitting the OTHER Postgres instance, not this container).
+      - "5433:5432"
+    volumes:
+      - bookpilot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  bookpilot_pgdata:

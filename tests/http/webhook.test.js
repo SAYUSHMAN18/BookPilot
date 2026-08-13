@@ -12,6 +12,11 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const request = require("supertest");
 const { freshApp } = require("./_setup");
+// isoDate() uses LOCAL date components — .toISOString().slice(0,10) converts
+// to UTC first and rolls back to the wrong calendar day for a timezone ahead
+// of UTC during that day's early morning hours (the exact bug
+// businessHoursAwareness.test.js hit for real).
+const { isoDate } = require("../../src/engine/dateSlots");
 
 const APP_SECRET = "test-whatsapp-app-secret";
 let msgCounter = 0;
@@ -58,14 +63,14 @@ async function sendWebhookMessage(app, { text, from, messageId }) {
 }
 
 test("POST /webhook rejects a missing signature with 403 when WHATSAPP_APP_SECRET is set", async () => {
-  const app = freshApp({ webhookAppSecret: APP_SECRET });
+  const app = await freshApp({ webhookAppSecret: APP_SECRET });
   const raw = JSON.stringify(webhookPayload({ messageId: nextMessageId(), text: "hello" }));
   const resp = await request(app).post("/webhook").set("Content-Type", "application/json").send(raw);
   assert.equal(resp.status, 403);
 });
 
 test("POST /webhook rejects a wrong/forged signature with 403", async () => {
-  const app = freshApp({ webhookAppSecret: APP_SECRET });
+  const app = await freshApp({ webhookAppSecret: APP_SECRET });
   const raw = JSON.stringify(webhookPayload({ messageId: nextMessageId(), text: "hello" }));
   const resp = await request(app)
     .post("/webhook")
@@ -76,10 +81,10 @@ test("POST /webhook rejects a wrong/forged signature with 403", async () => {
 });
 
 test("a correctly-signed webhook delivery, driven through a full conversation, produces a real booking", async () => {
-  const app = freshApp({ webhookAppSecret: APP_SECRET });
+  const app = await freshApp({ webhookAppSecret: APP_SECRET });
   const bookingStore = require("../../src/store/bookingStore");
   const from = "919000009999";
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const tomorrow = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
   for (const text of ["I need a haircut", "p1", tomorrow, "10:00 am", "Webhook Test Customer"]) {
     const resp = await sendWebhookMessage(app, { text, from });
@@ -88,16 +93,16 @@ test("a correctly-signed webhook delivery, driven through a full conversation, p
   const confirmResp = await sendWebhookMessage(app, { text: "confirm", from });
   assert.equal(confirmResp.status, 200);
 
-  const created = bookingStore.values(1).filter((b) => b.waId === from);
+  const created = (await bookingStore.values(1)).filter((b) => b.waId === from);
   assert.equal(created.length, 1, "expected exactly one booking created through the real signed webhook route");
   assert.equal(created[0].customerName, "Webhook Test Customer");
 });
 
 test("POST /webhook processes a duplicate message.id only once — replaying the confirming message does not double-book", async () => {
-  const app = freshApp({ webhookAppSecret: APP_SECRET });
+  const app = await freshApp({ webhookAppSecret: APP_SECRET });
   const bookingStore = require("../../src/store/bookingStore");
   const from = "919000008888";
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const tomorrow = isoDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
   for (const text of ["I need a haircut", "p1", tomorrow, "10:00 am", "Dedup Test Customer"]) {
     await sendWebhookMessage(app, { text, from });
@@ -105,26 +110,26 @@ test("POST /webhook processes a duplicate message.id only once — replaying the
 
   const confirmMessageId = nextMessageId();
   await sendWebhookMessage(app, { text: "confirm", from, messageId: confirmMessageId });
-  const afterFirst = bookingStore.values(1).filter((b) => b.waId === from).length;
+  const afterFirst = (await bookingStore.values(1)).filter((b) => b.waId === from).length;
   assert.equal(afterFirst, 1);
 
   // Re-deliver the EXACT same message.id — Meta's own documented
   // at-least-once retry behavior. src/infra/dedupe.js must make this a
   // no-op, not a second booking attempt against an already-booked slot.
   await sendWebhookMessage(app, { text: "confirm", from, messageId: confirmMessageId });
-  const afterReplay = bookingStore.values(1).filter((b) => b.waId === from).length;
+  const afterReplay = (await bookingStore.values(1)).filter((b) => b.waId === from).length;
   assert.equal(afterReplay, 1, "a replayed message.id must not create a second booking");
 });
 
 test("POST /webhook with no WHATSAPP_APP_SECRET configured skips signature verification (documented dev-mode behavior)", async () => {
-  const app = freshApp(); // no webhookAppSecret — matches a fresh/dev install
+  const app = await freshApp(); // no webhookAppSecret — matches a fresh/dev install
   const raw = JSON.stringify(webhookPayload({ messageId: nextMessageId(), text: "hello" }));
   const resp = await request(app).post("/webhook").set("Content-Type", "application/json").send(raw);
   assert.equal(resp.status, 200);
 });
 
 test("GET /webhook (Meta's verification handshake) echoes the challenge only when the verify token matches", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const wrong = await request(app).get("/webhook").query({ "hub.mode": "subscribe", "hub.verify_token": "wrong-token", "hub.challenge": "12345" });
   assert.equal(wrong.status, 403);
 

@@ -106,6 +106,7 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 32px rgba(79, 70, 229, 0.42); }
 .btn-outline { background: transparent; color: var(--ink); border-color: var(--border); }
 .btn-outline:hover { border-color: var(--brand); color: var(--brand); background: #f5f4ff; }
+.btn-group-stack { display: flex; flex-direction: column; gap: 8px; }
 .btn-ghost { background: transparent; color: var(--ink-soft); }
 .btn-ghost:hover { color: var(--brand); }
 

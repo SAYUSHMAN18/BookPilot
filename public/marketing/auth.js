@@ -1,8 +1,11 @@
 // New plan, Section 2 — two-step signup: POST /api/signup/request-otp
 // verifies the signer owns the email before POST /api/signup creates
-// anything, then the created tenant is "pending" until a platform admin
-// activates it (see server.js's /api/signup comment for why) — so
-// success here means "thanks, we'll be in touch," not "you're in."
+// anything. New plan, Stream 2 — the created tenant now lands at
+// "awaiting_payment", not "pending review" (see src/routes/auth.js's
+// /api/signup comment) — so a successful signup redirects straight to
+// plan-selection.html, not a static "we'll be in touch" message. The
+// session cookie POST /api/signup just set travels with that redirect
+// (same-origin navigation), so that page is already logged in.
 (() => {
   const form = document.getElementById("signupForm");
   const errorBanner = document.getElementById("errorBanner");
@@ -87,17 +90,9 @@
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data.error || "Something went wrong — please try again.");
 
-      // Account created and pending review — not an instant dashboard
-      // login, so replace the form with a clear next-step message rather
-      // than redirecting somewhere that will just bounce back to login.
-      form.hidden = true;
-      const wrap = form.parentElement;
-      const done = document.createElement("div");
-      done.className = "auth-card";
-      done.innerHTML =
-        "<h2>You're on the list! 🎉</h2>" +
-        "<p class=\"auth-sub\">Thanks for signing up — our team will review your account and reach out shortly to get you fully set up. You'll get an email once you're activated and ready to log in.</p>";
-      wrap.appendChild(done);
+      // Account created, session cookie set — straight to plan selection,
+      // the next real step, not a dead-end "thanks" message.
+      window.location.href = "/plan-selection";
     } catch (err) {
       showError(err.message);
       submitBtn.disabled = false;

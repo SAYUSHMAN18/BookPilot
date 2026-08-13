@@ -14,7 +14,7 @@ function daysAgo(n) {
 }
 
 test("a fresh tenant on the free plan starts at 0 usage with a 100-booking limit", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie } = await signupAndActivate(app, request, { businessName: "Billing Fresh Biz", email: "billing-fresh@example.com" });
 
   const resp = await request(app).get("/api/dashboard/billing").set("Cookie", cookie);
@@ -26,7 +26,7 @@ test("a fresh tenant on the free plan starts at 0 usage with a 100-booking limit
 });
 
 test("usage only counts THIS month's bookings, not older ones", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie, tenantId } = await signupAndActivate(app, request, { businessName: "Billing Month Biz", email: "billing-month@example.com" });
   const bookingStore = require("../../src/store/bookingStore");
 
@@ -42,16 +42,16 @@ test("usage only counts THIS month's bookings, not older ones", async () => {
     });
   }
 
-  seed({}); // this month
-  seed({}); // this month
-  seed({ createdAt: daysAgo(45) }); // last month — must not count
+  await seed({}); // this month
+  await seed({}); // this month
+  await seed({ createdAt: daysAgo(45) }); // last month — must not count
 
   const resp = await request(app).get("/api/dashboard/billing").set("Cookie", cookie);
   assert.equal(resp.body.bookingsThisMonth, 2);
 });
 
 test("softLimitExceeded flips true once bookings this month reach the plan's limit, but the plan's own limit is never enforced as a hard block", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie, tenantId } = await signupAndActivate(app, request, { businessName: "Billing Limit Biz", email: "billing-limit@example.com" });
   const bookingStore = require("../../src/store/bookingStore");
 
@@ -60,7 +60,7 @@ test("softLimitExceeded flips true once bookings this month reach the plan's lim
     // constraint (workflow_id, provider_id, visit_date, visit_time)
     // would otherwise reject anything past the first "same slot" insert;
     // this test is about counting usage, not exercising that constraint.
-    bookingStore.create(tenantId, "919000033334", {
+    await bookingStore.create(tenantId, "919000033334", {
       bookingId: `APT-LIMIT-${i}`, workflowId: "hair", providerId: "p1", providerName: "Test",
       visitDate: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`, visitTime: `${9 + Math.floor(i / 28)}:00 am`,
       customerName: "Test", status: "booked", createdAt: Date.now(),
@@ -79,10 +79,10 @@ test("softLimitExceeded flips true once bookings this month reach the plan's lim
 });
 
 test("growth and enterprise plans report unlimited usage regardless of booking count", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie, tenantId } = await signupAndActivate(app, request, { businessName: "Billing Unlimited Biz", email: "billing-unlimited@example.com" });
   const tenantStore = require("../../src/store/tenantStore");
-  tenantStore.setPlan(tenantId, "growth");
+  await tenantStore.setPlan(tenantId, "growth");
 
   const resp = await request(app).get("/api/dashboard/billing").set("Cookie", cookie);
   assert.equal(resp.body.plan, "growth");
@@ -91,14 +91,14 @@ test("growth and enterprise plans report unlimited usage regardless of booking c
 });
 
 test("PATCH /api/platform/tenants/:id/plan requires platform_admin and rejects an unknown plan", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie: adminCookie, tenantId } = await signupAndActivate(app, request, { businessName: "Plan Change Biz", email: "plan-change@example.com" });
 
   const forbidden = await request(app).patch(`/api/platform/tenants/${tenantId}/plan`).set("Cookie", adminCookie).send({ plan: "growth" });
   assert.equal(forbidden.status, 403, "a tenant admin must not be able to change its own plan");
 
   const users = require("../../src/store/userStore");
-  users.create({ email: "billing-platform@example.com", password: "password123", role: "platform_admin", tenantId: null });
+  await users.create({ email: "billing-platform@example.com", password: "password123", role: "platform_admin", tenantId: null });
   const platformLogin = await request(app).post("/api/auth/login").send({ email: "billing-platform@example.com", password: "password123" });
   const platformCookie = platformLogin.headers["set-cookie"];
 
@@ -114,13 +114,13 @@ test("PATCH /api/platform/tenants/:id/plan requires platform_admin and rejects a
 });
 
 test("billing usage is tenant-isolated — one tenant's booking volume never affects another's usage summary", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantA = await signupAndActivate(app, request, { businessName: "Billing Isolation A", email: "billing-iso-a@example.com" });
   const tenantB = await signupAndActivate(app, request, { businessName: "Billing Isolation B", email: "billing-iso-b@example.com" });
   const bookingStore = require("../../src/store/bookingStore");
 
   for (let i = 0; i < 10; i++) {
-    bookingStore.create(tenantA.tenantId, "919000033335", {
+    await bookingStore.create(tenantA.tenantId, "919000033335", {
       bookingId: `APT-ISO-${i}`, workflowId: "hair", providerId: "p1", providerName: "Test",
       visitDate: "2026-09-01", visitTime: `${9 + i}:00 am`, customerName: "Test", status: "booked", createdAt: Date.now(),
     });

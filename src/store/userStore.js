@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 const { hashPassword, verifyPassword } = require("../infra/auth");
 
 // Section 8 — email stays GLOBALLY unique (not unique-per-tenant). Two
@@ -13,17 +13,6 @@ const { hashPassword, verifyPassword } = require("../infra/auth");
 // yet. Once identity is established, every other function here that
 // manages a tenant's own team (list/create/setActive) IS tenant-filtered,
 // so one tenant's admin can never see or touch another tenant's accounts.
-const getByEmailStmt = db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE");
-const getByIdStmt = db.prepare("SELECT * FROM users WHERE id = ?");
-const listStmt = db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY role, name");
-const listAllTenantsStmt = db.prepare("SELECT * FROM users ORDER BY tenant_id, role, name");
-const insertStmt = db.prepare(`
-  INSERT INTO users (email, password_hash, role, name, workflow_id, provider_id, tenant_id, active, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-`);
-const countStmt = db.prepare("SELECT COUNT(*) AS n FROM users");
-const setActiveStmt = db.prepare("UPDATE users SET active = ? WHERE id = ? AND tenant_id = ?");
-const setPasswordStmt = db.prepare("UPDATE users SET password_hash = ? WHERE id = ?");
 
 class DuplicateEmailError extends Error {
   constructor(email) {
@@ -42,24 +31,30 @@ function rowToUser(row) {
     workflowId: row.workflow_id,
     providerId: row.provider_id,
     tenantId: row.tenant_id, // null only for role === 'platform_admin'
-    active: !!row.active,
-    createdAt: row.created_at,
+    active: row.active,
+    createdAt: Number(row.created_at),
   };
 }
 
 const users = {
-  findByEmail(email) {
-    return rowToUser(getByEmailStmt.get(email));
+  // SQLite's `COLLATE NOCASE` has no direct Postgres equivalent —
+  // LOWER(x) = LOWER($1) is the standard, extension-free way to do a
+  // case-insensitive exact match.
+  async findByEmail(email) {
+    const rows = await query("SELECT * FROM users WHERE LOWER(email) = LOWER($1)", [email]);
+    return rowToUser(rows[0]);
   },
 
-  getById(id) {
-    return rowToUser(getByIdStmt.get(id));
+  async getById(id) {
+    const rows = await query("SELECT * FROM users WHERE id = $1", [id]);
+    return rowToUser(rows[0]);
   },
 
   // Kept separate from findByEmail (which strips the hash) so login is the
   // only call site that ever touches password_hash.
-  verifyCredentials(email, password) {
-    const row = getByEmailStmt.get(email);
+  async verifyCredentials(email, password) {
+    const rows = await query("SELECT * FROM users WHERE LOWER(email) = LOWER($1)", [email]);
+    const row = rows[0];
     if (!row || !row.active) return null;
     if (!verifyPassword(password, row.password_hash)) return null;
     return rowToUser(row);
@@ -67,39 +62,37 @@ const users = {
 
   // tenantId is null for a platform_admin account (Section 8.5) — every
   // other role always belongs to exactly one tenant.
-  create({ email, password, role, name, workflowId, providerId, tenantId }) {
+  async create({ email, password, role, name, workflowId, providerId, tenantId }) {
     const normalizedEmail = email.trim().toLowerCase();
     try {
-      const result = insertStmt.run(
-        normalizedEmail,
-        hashPassword(password),
-        role,
-        name ?? null,
-        workflowId ?? null,
-        providerId ?? null,
-        tenantId ?? null,
-        Date.now()
+      const rows = await query(
+        `INSERT INTO users (email, password_hash, role, name, workflow_id, provider_id, tenant_id, active, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8) RETURNING *`,
+        [normalizedEmail, hashPassword(password), role, name ?? null, workflowId ?? null, providerId ?? null, tenantId ?? null, Date.now()]
       );
-      return rowToUser(getByIdStmt.get(result.lastInsertRowid));
+      return rowToUser(rows[0]);
     } catch (err) {
-      if (String(err.message).includes("UNIQUE constraint failed")) {
+      if (err.code === "23505") {
         throw new DuplicateEmailError(normalizedEmail);
       }
       throw err;
     }
   },
 
-  list(tenantId) {
-    return listStmt.all(tenantId).map(rowToUser);
+  async list(tenantId) {
+    const rows = await query("SELECT * FROM users WHERE tenant_id = $1 ORDER BY role, name", [tenantId]);
+    return rows.map(rowToUser);
   },
 
   // Platform-admin only (Section 8.5).
-  listAllTenants() {
-    return listAllTenantsStmt.all().map(rowToUser);
+  async listAllTenants() {
+    const rows = await query("SELECT * FROM users ORDER BY tenant_id, role, name", []);
+    return rows.map(rowToUser);
   },
 
-  count() {
-    return countStmt.get().n;
+  async count() {
+    const rows = await query("SELECT COUNT(*) AS n FROM users", []);
+    return Number(rows[0].n);
   },
 
   // Deactivating (not deleting) preserves the account's history in
@@ -107,9 +100,20 @@ const users = {
   // provider who left and came back doesn't need a brand-new account.
   // tenantId-filtered so an admin can only ever deactivate their own
   // tenant's accounts, never another tenant's by guessing a numeric id.
-  setActive(tenantId, id, active) {
-    setActiveStmt.run(active ? 1 : 0, id, tenantId);
-    return rowToUser(getByIdStmt.get(id));
+  //
+  // Found live: the UPDATE below is tenant-scoped (a cross-tenant id
+  // updates zero rows), but a NAIVE version would fetch the return value
+  // with an unscoped query — a cross-tenant PATCH would then silently
+  // no-op the write yet still return the TARGET tenant's full user record
+  // (email, name, role, workflowId/providerId) as a "successful" 200,
+  // instead of ever reaching the route's own 404 guard. Checking
+  // `rowCount` (whether the UPDATE actually touched a row — impossible
+  // unless id AND tenantId both matched) closes that: a cross-tenant id
+  // correctly returns undefined, same as a nonexistent one always did.
+  async setActive(tenantId, id, active) {
+    const result = await pool.query("UPDATE users SET active = $1 WHERE id = $2 AND tenant_id = $3", [active, id, tenantId]);
+    if (result.rowCount === 0) return undefined;
+    return this.getById(id);
   },
 
   // Section 6 — self-serve password reset lands here, same as the admin
@@ -119,9 +123,9 @@ const users = {
   // create() above. Not tenant-filtered — same category as getById/
   // findByEmail above: the reset token itself (src/store/passwordResetStore.js)
   // already proved identity before this is ever called.
-  setPassword(id, newPassword) {
-    setPasswordStmt.run(hashPassword(newPassword), id);
-    return rowToUser(getByIdStmt.get(id));
+  async setPassword(id, newPassword) {
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [hashPassword(newPassword), id]);
+    return this.getById(id);
   },
 };
 
@@ -133,14 +137,14 @@ const users = {
 // Bootstraps as the default tenant's (id 1) admin — a fresh install always
 // starts with exactly one tenant, same as the DB migration itself (see
 // src/store/db.js).
-function bootstrapAdminIfNeeded() {
-  if (users.count() > 0) return;
+async function bootstrapAdminIfNeeded() {
+  if ((await users.count()) > 0) return { bootstrapped: false };
   const email = process.env.ADMIN_BOOTSTRAP_EMAIL;
   const password = process.env.ADMIN_BOOTSTRAP_PASSWORD;
   if (!email || !password) {
     return { bootstrapped: false };
   }
-  users.create({ email, password, role: "admin", name: "Admin", tenantId: 1 });
+  await users.create({ email, password, role: "admin", name: "Admin", tenantId: 1 });
   return { bootstrapped: true, email };
 }
 
@@ -151,15 +155,15 @@ function bootstrapAdminIfNeeded() {
 // default tenant's admin from the block above may already exist), so
 // it's safe to leave PLATFORM_ADMIN_BOOTSTRAP_EMAIL/PASSWORD set
 // indefinitely without it ever re-creating or duplicating the account.
-const countPlatformAdminsStmt = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'platform_admin'");
-function bootstrapPlatformAdminIfNeeded() {
-  if (countPlatformAdminsStmt.get().n > 0) return { bootstrapped: false };
+async function bootstrapPlatformAdminIfNeeded() {
+  const rows = await query("SELECT COUNT(*) AS n FROM users WHERE role = 'platform_admin'", []);
+  if (Number(rows[0].n) > 0) return { bootstrapped: false };
   const email = process.env.PLATFORM_ADMIN_BOOTSTRAP_EMAIL;
   const password = process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD;
   if (!email || !password) {
     return { bootstrapped: false };
   }
-  users.create({ email, password, role: "platform_admin", name: "Platform Admin", tenantId: null });
+  await users.create({ email, password, role: "platform_admin", name: "Platform Admin", tenantId: null });
   return { bootstrapped: true, email };
 }
 

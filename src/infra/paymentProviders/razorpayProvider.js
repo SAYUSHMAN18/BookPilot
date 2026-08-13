@@ -158,6 +158,29 @@ function parseWebhookEvent(parsedBody) {
   return null;
 }
 
+// Plan-subscription checkout — deliberately built on the SAME Payment
+// Links call as createOrder() above, not Razorpay's separate Subscriptions
+// API (which would mean recurring mandates, a distinct set of webhook
+// events, and a second untested integration surface). This app doesn't yet
+// have a live Razorpay account to verify anything against — reusing the
+// one already-documented, already-working shape (see the big NOTE at the
+// top of this file) keeps the new billing/checkout route on a path that's
+// at least internally consistent with what's already here. Recurring
+// auto-renewal (charging the SAME card again next cycle without the
+// customer re-visiting a link) is real, separate work this intentionally
+// doesn't attempt yet — swap this function's body for the real
+// Subscriptions API later without touching any caller, since both return
+// the same { orderId, paymentUrl } shape.
+async function createSubscriptionCheckout({ tenantId, plan, amount, billingEmail, customerPhone }) {
+  return createOrder({
+    amount,
+    currency: "INR",
+    receipt: `sub-${tenantId}-${plan}-${Date.now()}`,
+    notes: { tenantId: String(tenantId), plan, billingEmail: billingEmail || "" },
+    customerPhone,
+  });
+}
+
 async function createRefund({ providerPaymentId, amount }) {
   const { keyId, keySecret } = credentials();
   if (!keyId || !keySecret) {
@@ -181,4 +204,4 @@ async function createRefund({ providerPaymentId, amount }) {
   return { refundId: data.id, status: data.status, raw: data };
 }
 
-module.exports = { isConfigured, createOrder, verifyWebhookSignature, parseWebhookEvent, createRefund };
+module.exports = { isConfigured, createOrder, createSubscriptionCheckout, verifyWebhookSignature, parseWebhookEvent, createRefund };

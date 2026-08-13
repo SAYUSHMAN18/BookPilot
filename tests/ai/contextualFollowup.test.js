@@ -9,6 +9,15 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
+// factualQA.js requires src/store/knowledgeStore (and transitively
+// src/store/db) at module scope — db.js throws immediately at require()
+// time if DATABASE_URL isn't already set. This file never actually reads
+// or writes a row (tryAnswerAboutBooking's DB-touching branch isn't
+// exercised here), so it doesn't need an isolated test database — it just
+// needs the real .env's DATABASE_URL present so requiring factualQA
+// doesn't throw. dotenv's config() only fills in keys that are absent, so
+// this is a no-op in any environment that already set DATABASE_URL itself.
+require("dotenv").config();
 const { tryAnswerAboutBooking } = require("../../src/ai/factualQA");
 
 test("tryAnswerAboutBooking: returns null (safe no-op) without GROQ_API_KEY, never throws", async () => {

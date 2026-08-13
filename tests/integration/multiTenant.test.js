@@ -7,49 +7,53 @@
 // layer every other test in this suite already verifies dashboard-
 // adjacent behavior at (see docs/ARCHITECTURE.md's note on why server.js
 // itself has no HTTP-level test harness yet).
-const { test } = require("node:test");
+const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
+const crypto = require("node:crypto");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-multitenant-test-"));
-process.env.SESSION_SECRET = "test-secret";
-process.env.APP_ENCRYPTION_KEY = require("crypto").randomBytes(32).toString("hex");
-for (const mod of [
-  "../../src/store/db", "../../src/store/tenantStore", "../../src/store/bookingStore",
-  "../../src/store/userStore", "../../src/store/sessionStore", "../../src/store/knowledgeStore",
-  "../../src/engine/workflowEngine", "../../src/engine/loadWorkflows",
-]) {
-  delete require.cache[require.resolve(mod)];
-}
-const tenants = require("../../src/store/tenantStore");
-const bookings = require("../../src/store/bookingStore");
-const users = require("../../src/store/userStore");
-const knowledge = require("../../src/store/knowledgeStore");
-const { handleIncomingMessage } = require("../../src/engine/workflowEngine");
-const { loadWorkflows } = require("../../src/engine/loadWorkflows");
-const workflows = loadWorkflows();
+let tenants, bookings, users, knowledge, query, handleIncomingMessage, workflows;
 
 // Tenant 1 ("Default") already exists from db.js's own migration.
 const tenantA = 1;
 let tenantB;
 
-test("setup: a second tenant is created with its own WhatsApp number", () => {
-  const t = tenants.create({ name: "Acme Salon", slug: "acme-salon" });
-  tenants.setWhatsAppCredentials(t.id, { phoneNumberId: "ACME-PHONE-ID", businessAccountId: "ACME-BA", accessToken: "acme-secret-token" });
-  tenants.setStatus(t.id, "active");
+before(async () => {
+  process.env.SESSION_SECRET = "test-secret";
+  process.env.APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
+  await createIsolatedTestDatabase();
+  for (const mod of [
+    "../../src/store/db", "../../src/store/tenantStore", "../../src/store/bookingStore",
+    "../../src/store/userStore", "../../src/store/sessionStore", "../../src/store/knowledgeStore",
+    "../../src/engine/workflowEngine", "../../src/engine/loadWorkflows",
+  ]) {
+    delete require.cache[require.resolve(mod)];
+  }
+  tenants = require("../../src/store/tenantStore");
+  bookings = require("../../src/store/bookingStore");
+  users = require("../../src/store/userStore");
+  knowledge = require("../../src/store/knowledgeStore");
+  ({ query } = require("../../src/store/db"));
+  ({ handleIncomingMessage } = require("../../src/engine/workflowEngine"));
+  const { loadWorkflows } = require("../../src/engine/loadWorkflows");
+  workflows = loadWorkflows();
+});
+
+test("setup: a second tenant is created with its own WhatsApp number", async () => {
+  const t = await tenants.create({ name: "Acme Salon", slug: "acme-salon" });
+  await tenants.setWhatsAppCredentials(t.id, { phoneNumberId: "ACME-PHONE-ID", businessAccountId: "ACME-BA", accessToken: "acme-secret-token" });
+  await tenants.setStatus(t.id, "active");
   tenantB = t.id;
   assert.notEqual(tenantB, tenantA);
 });
 
-test("bookings created under different tenants for the SAME phone number never mix", () => {
+test("bookings created under different tenants for the SAME phone number never mix", async () => {
   const sharedWaId = "919777000001"; // one real person messaging two different businesses
-  const bookingA = bookings.create(tenantA, sharedWaId, {
+  const bookingA = await bookings.create(tenantA, sharedWaId, {
     bookingId: "MT-A-1", workflowId: "medical", providerId: "p1", providerName: "Dr. Test",
     visitDate: "2099-06-01", visitTime: "9:00 am", customerName: "Shared Customer", status: "booked", createdAt: Date.now(),
   });
-  const bookingB = bookings.create(tenantB, sharedWaId, {
+  const bookingB = await bookings.create(tenantB, sharedWaId, {
     bookingId: "MT-B-1", workflowId: "hair", providerId: "p1", providerName: "Acme Stylist",
     visitDate: "2099-06-01", visitTime: "9:00 am", customerName: "Shared Customer", status: "booked", createdAt: Date.now(),
   });
@@ -59,50 +63,50 @@ test("bookings created under different tenants for the SAME phone number never m
   // slot index, since they're genuinely different businesses.
   assert.ok(bookingA.id && bookingB.id);
 
-  const tenantAsBookings = bookings.values(tenantA).map((b) => b.bookingId);
-  const tenantBsBookings = bookings.values(tenantB).map((b) => b.bookingId);
+  const tenantAsBookings = (await bookings.values(tenantA)).map((b) => b.bookingId);
+  const tenantBsBookings = (await bookings.values(tenantB)).map((b) => b.bookingId);
   assert.ok(tenantAsBookings.includes("MT-A-1"));
   assert.ok(!tenantAsBookings.includes("MT-B-1"), "Tenant A's booking list must never include Tenant B's booking");
   assert.ok(tenantBsBookings.includes("MT-B-1"));
   assert.ok(!tenantBsBookings.includes("MT-A-1"), "Tenant B's booking list must never include Tenant A's booking");
 });
 
-test("Tenant A cannot reach Tenant B's booking by id, even knowing the exact numeric id", () => {
-  const bookingB = bookings.values(tenantB).find((b) => b.bookingId === "MT-B-1");
+test("Tenant A cannot reach Tenant B's booking by id, even knowing the exact numeric id", async () => {
+  const bookingB = (await bookings.values(tenantB)).find((b) => b.bookingId === "MT-B-1");
   assert.ok(bookingB, "setup: Tenant B's booking must exist");
 
   // The core of the DoD's "including by guessing IDs" clause: Tenant A's
   // session queries with Tenant A's own tenantId, but the exact row id
   // that actually belongs to Tenant B.
-  const attemptedCrossTenantRead = bookings.getById(tenantA, bookingB.id);
+  const attemptedCrossTenantRead = await bookings.getById(tenantA, bookingB.id);
   assert.equal(attemptedCrossTenantRead, undefined, "a tenant must never be able to fetch another tenant's booking by id, full stop");
 
   // The rightful owner can, of course, still read it.
-  const legitimateRead = bookings.getById(tenantB, bookingB.id);
+  const legitimateRead = await bookings.getById(tenantB, bookingB.id);
   assert.ok(legitimateRead);
 });
 
-test("user accounts are isolated per tenant — an admin's team list never shows another tenant's users", () => {
-  const userA = users.create({ email: "admin-a@multitenant-test.example", password: "TestPass123", role: "admin", tenantId: tenantA });
-  const userB = users.create({ email: "admin-b@multitenant-test.example", password: "TestPass123", role: "admin", tenantId: tenantB });
+test("user accounts are isolated per tenant — an admin's team list never shows another tenant's users", async () => {
+  const userA = await users.create({ email: "admin-a@multitenant-test.example", password: "TestPass123", role: "admin", tenantId: tenantA });
+  const userB = await users.create({ email: "admin-b@multitenant-test.example", password: "TestPass123", role: "admin", tenantId: tenantB });
 
-  const tenantAsUsers = users.list(tenantA).map((u) => u.email);
-  const tenantBsUsers = users.list(tenantB).map((u) => u.email);
+  const tenantAsUsers = (await users.list(tenantA)).map((u) => u.email);
+  const tenantBsUsers = (await users.list(tenantB)).map((u) => u.email);
   assert.ok(tenantAsUsers.includes(userA.email));
   assert.ok(!tenantAsUsers.includes(userB.email), "Tenant A's team list must never include Tenant B's admin");
   assert.ok(tenantBsUsers.includes(userB.email));
   assert.ok(!tenantBsUsers.includes(userA.email), "Tenant B's team list must never include Tenant A's admin");
 });
 
-test("knowledge-base entries are isolated per tenant even for an identical workflow id", () => {
+test("knowledge-base entries are isolated per tenant even for an identical workflow id", async () => {
   // Both tenants happen to run a workflow literally called "medical" —
   // this is the exact scenario factualQA.js's buildKnowledgeBase() has to
   // get right: workflow ids are only unique WITHIN one tenant.
-  const docA = knowledge.create(tenantA, "medical", "Insurance", "We accept most major insurance providers.");
-  const docB = knowledge.create(tenantB, "medical", "Insurance", "We are a cash-only business, no insurance.");
+  const docA = await knowledge.create(tenantA, "medical", "Insurance", "We accept most major insurance providers.");
+  const docB = await knowledge.create(tenantB, "medical", "Insurance", "We are a cash-only business, no insurance.");
 
-  const forA = knowledge.listForWorkflow(tenantA, "medical");
-  const forB = knowledge.listForWorkflow(tenantB, "medical");
+  const forA = await knowledge.listForWorkflow(tenantA, "medical");
+  const forB = await knowledge.listForWorkflow(tenantB, "medical");
   assert.ok(forA.some((d) => d.id === docA.id));
   assert.ok(!forA.some((d) => d.id === docB.id), "Tenant A must never see Tenant B's knowledge-base entry for the same workflow id");
   assert.ok(forB.some((d) => d.id === docB.id));
@@ -119,8 +123,7 @@ test("the exact same phone number has two fully independent, non-colliding conve
   // Neither call should have thrown, and each tenant's session for this
   // wa_id is a genuinely separate row (proven directly against the DB
   // rather than inferring it from behavior alone).
-  const { db } = require("../../src/store/db");
-  const rows = db.prepare("SELECT tenant_id, wa_id FROM sessions WHERE wa_id = ?").all(sharedWaId);
+  const rows = await query("SELECT tenant_id, wa_id FROM sessions WHERE wa_id = $1", [sharedWaId]);
   const tenantIdsWithSessions = new Set(rows.map((r) => r.tenant_id));
   assert.ok(tenantIdsWithSessions.has(tenantA) || rows.length >= 0, "sanity: query ran");
   // At minimum, no crash and no shared single row silently overwritten —
@@ -129,14 +132,16 @@ test("the exact same phone number has two fully independent, non-colliding conve
   assert.ok(rows.length <= 2);
 });
 
-test("platform view: a platform admin's tenant list includes both tenants' summary stats", () => {
-  const allTenants = tenants.list();
-  const summaries = allTenants.map((t) => ({
-    id: t.id,
-    slug: t.slug,
-    status: t.status,
-    bookingCount: bookings.values(t.id).length,
-  }));
+test("platform view: a platform admin's tenant list includes both tenants' summary stats", async () => {
+  const allTenants = await tenants.list();
+  const summaries = await Promise.all(
+    allTenants.map(async (t) => ({
+      id: t.id,
+      slug: t.slug,
+      status: t.status,
+      bookingCount: (await bookings.values(t.id)).length,
+    }))
+  );
 
   const summaryA = summaries.find((s) => s.id === tenantA);
   const summaryB = summaries.find((s) => s.id === tenantB);
@@ -147,15 +152,15 @@ test("platform view: a platform admin's tenant list includes both tenants' summa
   assert.equal(summaryB.status, "active");
 });
 
-test("each tenant's WhatsApp credentials resolve independently and stay encrypted at rest", () => {
-  const fetchedB = tenants.getById(tenantB);
+test("each tenant's WhatsApp credentials resolve independently and stay encrypted at rest", async () => {
+  const fetchedB = await tenants.getById(tenantB);
   assert.equal(fetchedB.whatsappPhoneNumberId, "ACME-PHONE-ID");
   assert.equal(fetchedB.whatsappAccessToken, "acme-secret-token", "decrypted value should round-trip correctly");
 
   // Raw column must never be the plaintext token — that's the whole point
   // of src/infra/secretsEncryption.js.
-  const { db } = require("../../src/store/db");
-  const raw = db.prepare("SELECT whatsapp_access_token_encrypted FROM tenants WHERE id = ?").get(tenantB);
+  const raws = await query("SELECT whatsapp_access_token_encrypted FROM tenants WHERE id = $1", [tenantB]);
+  const raw = raws[0];
   assert.notEqual(raw.whatsapp_access_token_encrypted, "acme-secret-token");
   assert.ok(raw.whatsapp_access_token_encrypted.includes(":"), "expected the iv:authTag:ciphertext shape, not plaintext");
 });

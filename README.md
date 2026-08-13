@@ -556,7 +556,16 @@ Meta's webhook at it, running it, and running the test suite) now lives
 in [`docs/SETUP.md`](docs/SETUP.md) rather than duplicated here — one
 canonical setup doc instead of two that can drift out of sync with each
 other. The short version: `npm install`, `cp .env.example .env` and fill
-it in, `node server.js`.
+it in, then start **both** servers (see "How marketing, dashboard, and the
+bot actually run" above for what each one owns):
+
+```bash
+npm run start:dashboard   # server.js          — PORT (default 8081)
+npm run start:marketing   # marketingServer.js — MARKETING_PORT (default 8082)
+```
+
+You only need one running if you're just working on the other half of the
+product (see above) — `npm start` is a synonym for `npm run start:dashboard`.
 
 ---
 
@@ -760,20 +769,48 @@ The auto-seeded `workflows/*.json` demo catalog (haircut/hotel/makeup/medical/au
 `server.js` had grown to 2,512 lines and 82 route handlers, all in one file — every domain (marketing, dashboard API, the WhatsApp/payment webhooks, platform admin, the public API) tangled together with no boundary stronger than a comment. This splits it along exactly those lines, keeping this a single deployable app (one process, one port, one deploy — see "How marketing, dashboard, and the bot actually run" below for why that's the right call at this stage), not a service split.
 
 - **`server.js` is now 348 lines.** What's left: process-level crash safety, core middleware (request tracing, security headers, JSON body parsing), the boot sequence (demo tenant setup, env validation, admin/platform_admin bootstrap), mounting each router below, and the final health-check/404/error-handler/listen block. No route handlers live here any more.
-- **`src/routes/webhook.js`** — the bot itself: `/webhook` (Meta's WhatsApp webhook), `/api/payments/webhook` (Razorpay), `/api/simulate-whatsapp` (the dev testing tool), `/api/demo/chat` (the public marketing site's live widget). Exports a factory (`createWebhookRouter(demoTenantId)`) rather than a plain router, since the demo tenant id is resolved once at boot in `server.js` and threaded in, not recomputed per file.
-- **`src/routes/auth.js`** — session cookie handling, `requireAuth()`/`requireApiKey` (the two auth middlewares every other router imports), signup + OTP, login/logout, password reset, session list/revoke. The one router every other domain depends on.
-- **`src/routes/dashboard.js`** — every `/api/dashboard/*` route (bookings, businesses, team, billing, availability, calendar sync, knowledge base, templates, SSE live updates — all of it), plus serving the built React app at `/app`. Deliberately kept as one file rather than sub-split further — it's already one cohesive domain under one URL prefix, and splitting it again would be organizing for its own sake rather than for a real boundary.
-- **`src/routes/platformAdmin.js`** — `/api/platform/*`, the cross-tenant operator routes (tenant list/create/activate/suspend/plan/config).
-- **`src/routes/publicApi.js`** — `/api/v1/*` plus `/openapi.yaml`, the read-only API a tenant's own website can call with an API key.
-- **`src/routes/marketing.js`** — just the public marketing site's static file serving and its `/` and `/signup` HTML routes.
+- **`src/routes/webhook.js`** — the bot itself: `/webhook` (Meta's WhatsApp webhook), `/api/payments/webhook` (Razorpay), `/api/simulate-whatsapp` (the dev testing tool). Exports a factory (`createWebhookRouter()`), mounted only on the dashboard/bot server (`server.js`) — see "How marketing, dashboard, and the bot actually run" below for why the demo-chat route that used to live here moved out.
+- **`src/routes/demoChat.js`** — `/api/demo/chat`, the public marketing site's live-chat widget, split out of `webhook.js` so it can be mounted on the marketing server without also exposing `/webhook`/`/api/payments/webhook`/`/api/simulate-whatsapp` there. Exports `createDemoChatRouter(demoTenantId)`; mounted on *both* servers (harmless — it's unauthenticated by design and sandboxed to its own demo tenant either way, and keeping it on the dashboard server too means `tests/http/demoChat.test.js` didn't need to change).
+- **`src/infra/demoTenant.js`** — `ensureDemoTenant()`, pulled out of `server.js` since both servers now need to call it independently at their own startup (idempotent, so no coordination between the two processes is needed).
+- **`src/routes/auth.js`** — session cookie handling, `requireAuth()`/`requireApiKey` (the two auth middlewares every other router imports), signup + OTP, login/logout, password reset, session list/revoke. Mounted on *both* servers: the marketing server needs signup, the dashboard server needs login/session — splitting this router further wasn't worth it, since exposing login on the marketing domain too is harmless (stateless route logic against the same shared database, not a security boundary).
+- **`src/routes/dashboard.js`** — every `/api/dashboard/*` route (bookings, businesses, team, billing, availability, calendar sync, knowledge base, templates, SSE live updates — all of it), plus serving the built React app at `/app`. Dashboard-server-only. Deliberately kept as one file rather than sub-split further — it's already one cohesive domain under one URL prefix, and splitting it again would be organizing for its own sake rather than for a real boundary.
+- **`src/routes/platformAdmin.js`** — `/api/platform/*`, the cross-tenant operator routes (tenant list/create/activate/suspend/plan/config). Dashboard-server-only.
+- **`src/routes/publicApi.js`** — `/api/v1/*` plus `/openapi.yaml`, the read-only API a tenant's own website can call with an API key. Dashboard-server-only.
+- **`src/routes/marketing.js`** — just the public marketing site's static file serving and its `/` and `/signup` HTML routes. Marketing-server-only.
 - **`src/infra/asyncHandler.js`** and **`src/infra/publishBookingEvent.js`** — two small helpers used across multiple routers, pulled out once rather than duplicated.
 - **`tests/fixtures/workflows/`** (moved from the old top-level `workflows/`) — the retired demo catalog (hair/hotel/makeup/medical/service), now purely a test fixture (`tests/http/_setup.js` seeds from it directly) since nothing in production reads it any more. The `Dockerfile` had a stale `COPY workflows/ ./workflows/` line left over from before this move — removed, since it would have failed the next production build outright (the source path no longer exists) and production never needed that directory anyway.
-- **The recurring stale-module-reference bug** (found and fixed 5 times earlier this session in `billing.js`/`analytics.js`/`calendarSync.js`/`paymentRefunds.js`/`reminders.js`/`tenantWorkflowStore.js`) showed up again here, predictably: every new router file that does `const { requireAuth } = require("./auth")` at module scope needed adding to `tests/http/_setup.js`'s cache-bust list, the same as every store/engine module before it. All six new route files are in that list now.
+- **The recurring stale-module-reference bug** (found and fixed 5 times earlier this session in `billing.js`/`analytics.js`/`calendarSync.js`/`paymentRefunds.js`/`reminders.js`/`tenantWorkflowStore.js`, then again when `demoChat.js`/`demoTenant.js` were split out — see below) showed up again here, predictably: every new router file that does `const { requireAuth } = require("./auth")` at module scope needed adding to `tests/http/_setup.js`'s cache-bust list, the same as every store/engine module before it. Every new route file is in that list now.
 - **Live-verified after the full split**: full backend suite (212/214, 2 pre-existing skips) and typecheck pass; live-restarted the running server and drove a real end-to-end conversation through `/api/simulate-whatsapp` (provider → date → time → name → confirm) producing a real `status: "booked"` row; confirmed login, the platform admin tenant list, `/openapi.yaml`, the marketing homepage, and `/health` all respond correctly live, one request per newly-split router.
 
 ### How marketing, dashboard, and the bot actually run
 
-One Express process, one port, one deploy. The WhatsApp bot has no separate "site" of its own — Meta just POSTs to `/webhook` on whatever this server's public URL is; the marketing site and the `/app` dashboard are served from the same process alongside it. This is a normal, legitimate architecture for a product at this stage, not a shortcut to fix later — splitting into genuinely separate services (their own deploys, possibly their own domains) mainly buys independent scaling and branding, which isn't a real constraint yet, and does cost real complexity (cross-service auth, separate CI/CD, separate hosting). Wanting `app.yourdomain.com` to feel distinct from the marketing site at `yourdomain.com` doesn't require that split — it's a DNS/reverse-proxy decision pointing both at the same running server, no code changes needed.
+**Two Express processes, two ports, two deploys, sharing one SQLite database.** This is a deliberate split (not the original design — see the note at the end of this section for why it changed):
+
+- **`server.js`** — the dashboard/bot server. Owns login/signup, the `/app` dashboard (the built React SPA), the WhatsApp webhook, Razorpay payments, platform-admin, and the public API. This is the one with real tenant data and the one Meta's WhatsApp webhook POSTs to. Listens on `PORT` (default `8081`). Also runs every background job that touches the shared database — DB backups, the outbound WhatsApp send queue, appointment reminders — so those only ever run in this one process, never duplicated.
+- **`marketingServer.js`** — the marketing server. Owns only the public marketing site, the signup page, and the homepage's sandboxed live-chat demo widget (`/api/demo/chat` — hardcoded to a dedicated, permanently-sandboxed demo tenant that can never touch real tenant data, regardless of what a visitor sends it). Listens on `MARKETING_PORT` (default `8082`). Starts none of the background jobs above.
+
+**Domain mapping used in this codebase** (set this up in your DNS/reverse proxy — the app itself doesn't care about hostnames, only which process is listening on which port):
+
+| Domain | Points to | Process | Port |
+|---|---|---|---|
+| `app.bookpilot.com` | marketing site | `marketingServer.js` | `MARKETING_PORT` (8082) |
+| `bookpilot.com` | dashboard + bot | `server.js` | `PORT` (8081) |
+
+This is the reverse of the more common convention (root domain = marketing, `app.` subdomain = the product) — it's what was explicitly requested for this deployment. If that turns out to be a typo/reconsideration, swap the two rows: no code change needed either way, since the split itself doesn't hardcode either domain name — it's purely which reverse-proxy host header routes to which port.
+
+**Running both:**
+
+```bash
+# terminal 1 — dashboard + WhatsApp bot (bookpilot.com)
+npm run start:dashboard
+
+# terminal 2 — marketing site (app.bookpilot.com)
+npm run start:marketing
+```
+
+Either one alone is enough for focused work (bot/API development doesn't need the marketing server up; marketing-site work doesn't need the dashboard server up) — signup and demo-chat both work standalone against the marketing server since it bundles `auth.js` and `demoChat.js` itself. Both read the same `.env` and the same `DATA_DIR` (same underlying `data/bookpilot.db`), so a tenant created via the marketing server's signup page is immediately visible to the dashboard server, no sync step needed. In production, run them as two separate deployments/processes (two `pm2`/systemd units, two containers, whatever this install already uses) behind a reverse proxy that routes each domain to its own port.
+
+<sub>Until this split, both lived in one Express process on one port — a normal, legitimate architecture for a product at that stage, since a DNS/reverse-proxy rule alone can make `app.yourdomain.com` and `yourdomain.com` both point at the same single server with no code changes. This section documented that reasoning before; it's superseded now that the two are genuinely separate deploys, per an explicit request for independent processes.</sub>
 
 ## Roadmap (from the BookPilot AI PRD)
 

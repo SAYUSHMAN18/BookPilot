@@ -8,7 +8,7 @@ const request = require("supertest");
 const { freshApp } = require("./_setup");
 
 test("GET /openapi.yaml serves the real spec, unauthenticated, describing the actual Public API", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const resp = await request(app).get("/openapi.yaml");
   assert.equal(resp.status, 200);
   assert.match(resp.headers["content-type"], /yaml|text|octet-stream/);

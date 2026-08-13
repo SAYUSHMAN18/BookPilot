@@ -14,8 +14,8 @@ const tenantStore = require("../store/tenantStore");
 // what's expected to set real per-tenant credentials before a tenant goes
 // active; this fallback exists for upgrade continuity, not as the
 // intended steady state for a second tenant.
-function credentials(tenantId) {
-  const tenant = tenantId ? tenantStore.getById(tenantId) : null;
+async function credentials(tenantId) {
+  const tenant = tenantId ? await tenantStore.getById(tenantId) : null;
   if (tenant?.whatsappAccessToken && tenant?.whatsappPhoneNumberId) {
     return { token: tenant.whatsappAccessToken, phoneNumberId: tenant.whatsappPhoneNumberId };
   }
@@ -99,7 +99,7 @@ async function postToGraphApi(phoneNumberId, token, payload, to, describeSuccess
 // final confirmation. Falls back to logging when no WhatsApp creds are
 // configured yet, so the bot can be exercised locally without a live number.
 async function sendWhatsAppText(tenantId, to, body) {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
   captureReply(to, body);
 
   if (!token || !phoneNumberId) {
@@ -126,7 +126,7 @@ async function sendWhatsAppText(tenantId, to, body) {
 // optional and capped the same way any WhatsApp text is (4096 chars is
 // the platform limit; a caption is never remotely that long in practice).
 async function sendWhatsAppImage(tenantId, to, imageUrl, caption) {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
   if (caption) captureReply(to, caption);
 
   if (!token || !phoneNumberId) {
@@ -146,7 +146,7 @@ async function sendWhatsAppImage(tenantId, to, imageUrl, caption) {
 // Up to 3 tappable reply buttons. `buttons` is [{ id, title }] — id is what
 // comes back in the webhook payload when the customer taps it.
 async function sendWhatsAppButtons(tenantId, to, bodyText, buttons) {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
   const rendered = buttons.map((b, i) => `${i + 1}. ${b.title} [reply with: ${b.id}]`).join("\n");
   // Speak the prompt and the option titles, but not the machine-readable
   // reply ids — those are for tapping, not for listening to.
@@ -179,7 +179,7 @@ async function sendWhatsAppButtons(tenantId, to, bodyText, buttons) {
 // [{ title, rows: [{ id, title, description }] }] — id is what comes back
 // in the webhook payload when the customer taps that row.
 async function sendWhatsAppList(tenantId, to, bodyText, buttonLabel, sections) {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
   const rendered = sections
     .flatMap((s) => s.rows)
     .map((r, i) => `${i + 1}. ${r.title}${r.description ? " — " + r.description : ""} [reply with: ${r.id}]`)
@@ -224,7 +224,7 @@ async function sendWhatsAppList(tenantId, to, bodyText, buttonLabel, sections) {
 // Best-effort by design: every caller ALSO sends the text version, so a
 // failure here degrades to text rather than losing the reply entirely.
 async function sendWhatsAppAudio(tenantId, to, audioBuffer, mimeType = "audio/ogg") {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED AUDIO -> ${to}] ${audioBuffer.length} bytes of ${mimeType}`);
@@ -267,7 +267,7 @@ async function sendWhatsAppAudio(tenantId, to, audioBuffer, mimeType = "audio/og
 // window instead of silence. Best-effort: a failure here is never worth
 // blocking or delaying the actual reply over.
 async function sendTypingIndicator(tenantId, messageId) {
-  const { token, phoneNumberId } = credentials(tenantId);
+  const { token, phoneNumberId } = await credentials(tenantId);
   if (!token || !phoneNumberId) return; // nothing to show in simulated/dev mode
 
   try {
@@ -313,7 +313,7 @@ async function sendWithRetry(tenantId, waId, body, { retries = 1, delayMs = 2000
     if (ok) return true;
     if (attempt === retries) {
       log("WARN", `Send failed after ${retries + 1} immediate attempt(s), queuing for durable retry.${thrown ? ` (${thrown.message})` : ""}`);
-      outboundQueueStore.enqueue(tenantId, waId, body);
+      await outboundQueueStore.enqueue(tenantId, waId, body);
       return false;
     }
     log("WARN", `Send failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${delayMs}ms.${thrown ? ` (${thrown.message})` : ""}`);
@@ -333,7 +333,7 @@ async function sendWithRetry(tenantId, waId, body, { retries = 1, delayMs = 2000
 // tenantId, so sendWhatsAppText picks the right credentials per item
 // without needing N separate timers for N tenants.
 async function processOutboundQueue() {
-  const items = outboundQueueStore.dueItems();
+  const items = await outboundQueueStore.dueItems();
   for (const item of items) {
     let ok;
     let thrown;
@@ -344,20 +344,19 @@ async function processOutboundQueue() {
       ok = false;
     }
     if (ok) {
-      outboundQueueStore.markSent(item.id);
+      await outboundQueueStore.markSent(item.id);
       log("INFO", `Durable retry delivered queued message ${item.id} to ${item.waId} (tenant ${item.tenantId}).`);
     } else {
       const message = thrown ? thrown.message : "send returned false";
-      outboundQueueStore.markFailedAttempt(item, message);
+      await outboundQueueStore.markFailedAttempt(item, message);
       log("WARN", `Durable retry attempt ${item.attempts + 1}/${item.maxAttempts} failed for queued message ${item.id} to ${item.waId} (tenant ${item.tenantId}): ${message}`);
     }
   }
   return items.length;
 }
 
-// Polls the durable queue on an interval — mirrors backupStore.js's
-// scheduleBackups() pattern. .unref()'d so a pending timer never keeps
-// the process alive on its own (tests and graceful shutdown both rely
+// Polls the durable queue on an interval. .unref()'d so a pending timer
+// never keeps the process alive on its own (tests and graceful shutdown both rely
 // on this).
 function startOutboundQueueWorker(intervalMs = 60_000) {
   const timer = setInterval(() => {

@@ -68,14 +68,15 @@ function isDue(booking, which, now = Date.now()) {
 
 async function checkAndSendReminders() {
   const now = Date.now();
-  for (const booking of bookings.valuesAllTenants()) {
+  const allBookings = await bookings.valuesAllTenants();
+  for (const booking of allBookings) {
     for (const which of ["24h", "2h"]) {
       if (!isDue(booking, which, now)) continue;
 
-      const tenant = tenantStore.getById(booking.tenantId);
+      const tenant = await tenantStore.getById(booking.tenantId);
       if (!tenant || tenant.status !== "active") continue; // Section 8.6 — a suspended/cancelled tenant's bot stays quiet, same rule the webhook itself already enforces
 
-      bookings.markReminderSent(booking.tenantId, booking.id, which); // mark first — never re-attempt-storm the same reminder if the send itself throws
+      await bookings.markReminderSent(booking.tenantId, booking.id, which); // mark first — never re-attempt-storm the same reminder if the send itself throws
       const sent = await sendWithRetry(booking.tenantId, booking.waId, reminderMessage(booking, which));
       if (!sent) log("WARN", `${which} reminder for booking ${booking.bookingId} queued for durable retry after immediate attempts failed.`);
     }

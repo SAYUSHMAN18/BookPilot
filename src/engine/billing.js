@@ -23,12 +23,13 @@ function planConfig(plan) {
 // data size. Calendar-month boundary in the server's own local time,
 // same as every other "this month"/"today" boundary in this codebase
 // (e.g. dateSlots.js's isToday check).
-function getUsageSummary(tenantId, plan) {
+async function getUsageSummary(tenantId, plan) {
   const config = planConfig(plan);
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-  const bookingsThisMonth = bookings.values(tenantId).filter((b) => b.createdAt >= monthStart).length;
+  const allBookings = await bookings.values(tenantId);
+  const bookingsThisMonth = allBookings.filter((b) => b.createdAt >= monthStart).length;
 
   const limit = config.maxBookingsPerMonth;
   const percentUsed = Number.isFinite(limit) && limit > 0 ? Math.min(100, Math.round((bookingsThisMonth / limit) * 100)) : 0;

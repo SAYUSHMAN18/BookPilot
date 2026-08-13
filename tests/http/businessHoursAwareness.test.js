@@ -12,17 +12,25 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
 const { freshApp, signupAndActivate } = require("./_setup");
+const { isoDate } = require("../../src/engine/dateSlots");
 
 async function adminSession(app, email, businessName) {
   return signupAndActivate(app, request, { businessName, email });
 }
 
 test('"Today" is excluded from the date list once all of today\'s business hours are blocked', async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { cookie, tenantId } = await adminSession(app, "hours@example.com", "Business Hours Biz");
   const { beginReplyCapture, endReplyCapture } = require("../../src/infra/whatsapp");
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Must match how the engine itself computes "today" (dateSlots.js's
+  // isoDate() — LOCAL date components). Found live: this used to be
+  // `new Date().toISOString().slice(0, 10)`, which converts to UTC first —
+  // for IST (UTC+5:30) running anywhere between local midnight and 5:30am,
+  // that rolls back to the PREVIOUS calendar day, so the block below got
+  // inserted for the wrong date entirely and this test silently failed
+  // (or passed for the wrong reason) depending purely on wall-clock time.
+  const today = isoDate(new Date());
   const block = await request(app).post("/api/dashboard/availability").set("Cookie", cookie).send({
     workflowId: "hair", providerId: "p1", date: today, time: "10:00", endTime: "20:00",
   });
@@ -39,7 +47,7 @@ test('"Today" is excluded from the date list once all of today\'s business hours
 });
 
 test('a hotel workflow\'s check-in date list is unaffected by time-slot logic — "Today" still offered', async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const { beginReplyCapture, endReplyCapture } = require("../../src/infra/whatsapp");
 
   // A hotel's checkInDate field has no matching select_time_slot step

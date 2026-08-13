@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { query } = require("./db");
 
 // Optional star rating parsed from free text ("5", "5 stars", "4/5") plus
 // whatever the customer actually wrote, linked to the specific booking
@@ -13,13 +13,6 @@ const { db } = require("./db");
 // requiring every read here to join back to bookings just to scope by
 // tenant or business. Both are set once at creation from the booking the
 // feedback is about and never change afterward.
-const insertStmt = db.prepare("INSERT INTO feedback (tenant_id, booking_id, workflow_id, wa_id, rating, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
-const listForBookingStmt = db.prepare("SELECT * FROM feedback WHERE tenant_id = ? AND booking_id = ? ORDER BY created_at DESC");
-const listForWorkflowStmt = db.prepare("SELECT * FROM feedback WHERE tenant_id = ? AND workflow_id = ? ORDER BY created_at DESC");
-const listAllStmt = db.prepare("SELECT * FROM feedback WHERE tenant_id = ? ORDER BY created_at DESC");
-const avgRatingForWorkflowStmt = db.prepare(
-  "SELECT AVG(rating) AS avg, COUNT(rating) AS n FROM feedback WHERE tenant_id = ? AND workflow_id = ? AND rating IS NOT NULL"
-);
 
 function rowToFeedback(row) {
   if (!row) return undefined;
@@ -30,7 +23,7 @@ function rowToFeedback(row) {
     waId: row.wa_id,
     rating: row.rating,
     comment: row.comment,
-    createdAt: row.created_at,
+    createdAt: Number(row.created_at),
   };
 }
 
@@ -45,23 +38,36 @@ function parseRating(text) {
 }
 
 const feedback = {
-  create(tenantId, bookingId, workflowId, waId, text) {
+  async create(tenantId, bookingId, workflowId, waId, text) {
     const rating = parseRating(text);
-    const result = insertStmt.run(tenantId, bookingId, workflowId, waId, rating, text || null, Date.now());
-    return rowToFeedback({ id: result.lastInsertRowid, tenant_id: tenantId, booking_id: bookingId, wa_id: waId, rating, comment: text, created_at: Date.now() });
+    const rows = await query(
+      "INSERT INTO feedback (tenant_id, booking_id, workflow_id, wa_id, rating, comment, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+      [tenantId, bookingId, workflowId, waId, rating, text || null, Date.now()]
+    );
+    return rowToFeedback(rows[0]);
   },
-  listForBooking(tenantId, bookingId) {
-    return listForBookingStmt.all(tenantId, bookingId).map(rowToFeedback);
+  async listForBooking(tenantId, bookingId) {
+    const rows = await query("SELECT * FROM feedback WHERE tenant_id = $1 AND booking_id = $2 ORDER BY created_at DESC", [tenantId, bookingId]);
+    return rows.map(rowToFeedback);
   },
-  listForWorkflow(tenantId, workflowId) {
-    return listForWorkflowStmt.all(tenantId, workflowId).map(rowToFeedback);
+  async listForWorkflow(tenantId, workflowId) {
+    const rows = await query("SELECT * FROM feedback WHERE tenant_id = $1 AND workflow_id = $2 ORDER BY created_at DESC", [tenantId, workflowId]);
+    return rows.map(rowToFeedback);
   },
-  listAll(tenantId) {
-    return listAllStmt.all(tenantId).map(rowToFeedback);
+  async listAll(tenantId) {
+    const rows = await query("SELECT * FROM feedback WHERE tenant_id = $1 ORDER BY created_at DESC", [tenantId]);
+    return rows.map(rowToFeedback);
   },
-  averageRatingForWorkflow(tenantId, workflowId) {
-    const row = avgRatingForWorkflowStmt.get(tenantId, workflowId);
-    return { average: row.avg !== null ? Math.round(row.avg * 10) / 10 : null, count: row.n };
+  async averageRatingForWorkflow(tenantId, workflowId) {
+    // AVG()/COUNT() return Postgres `numeric`/`bigint` — the `pg` driver
+    // parses both as STRINGS by default (unlike node:sqlite, which
+    // returned real JS numbers), so both need an explicit Number() here.
+    const rows = await query(
+      "SELECT AVG(rating) AS avg, COUNT(rating) AS n FROM feedback WHERE tenant_id = $1 AND workflow_id = $2 AND rating IS NOT NULL",
+      [tenantId, workflowId]
+    );
+    const row = rows[0];
+    return { average: row.avg !== null ? Math.round(Number(row.avg) * 10) / 10 : null, count: Number(row.n) };
   },
 };
 

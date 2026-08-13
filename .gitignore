@@ -24,6 +24,11 @@ src/data/*.db-wal
 src/data/*.db-shm
 backups/
 
+# Stray root-level redirected output from manually running `node server.js
+# > x.log` during local dev — not the app's own logger.js output (that's
+# logs/app.log, already covered above).
+/*.log
+
 # Section 13 — the React/Vite rewrite's build output (frontend/ is the
 # source; `npm run build` there generates this). Not committed, same as
 # any other compiled artifact — rebuild it after a fresh clone.

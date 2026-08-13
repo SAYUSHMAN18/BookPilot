@@ -10,7 +10,7 @@ const request = require("supertest");
 const { freshApp } = require("./_setup");
 
 test("responds with a real reply and never a client-suppliable tenantId", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const resp = await request(app).post("/api/demo/chat").send({ sessionId: "test-session-1", text: "hello" });
   assert.equal(resp.status, 200);
   assert.ok(typeof resp.body.reply === "string" && resp.body.reply.length > 0);
@@ -22,7 +22,7 @@ test("responds with a real reply and never a client-suppliable tenantId", async 
 });
 
 test("rejects missing/empty sessionId or text with 400", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const noSession = await request(app).post("/api/demo/chat").send({ text: "hello" });
   assert.equal(noSession.status, 400);
 
@@ -34,13 +34,13 @@ test("rejects missing/empty sessionId or text with 400", async () => {
 });
 
 test("two different sessionIds get independent conversations that don't collide", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const bookingStore = require("../../src/store/bookingStore");
   const tenantStore = require("../../src/store/tenantStore");
-  const demoTenant = tenantStore.getBySlug("bookpilot-live-demo");
+  const demoTenant = await tenantStore.getBySlug("bookpilot-live-demo");
   assert.ok(demoTenant, "expected the dedicated demo tenant to have been bootstrapped at startup");
 
-  const before = bookingStore.values(demoTenant.id).length;
+  const before = (await bookingStore.values(demoTenant.id)).length;
 
   await request(app).post("/api/demo/chat").send({ sessionId: "session-a", text: "hello" });
   await request(app).post("/api/demo/chat").send({ sessionId: "session-b", text: "hello" });
@@ -56,13 +56,13 @@ test("two different sessionIds get independent conversations that don't collide"
 });
 
 test("text longer than 500 characters is rejected", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const resp = await request(app).post("/api/demo/chat").send({ sessionId: "s1", text: "a".repeat(501) });
   assert.equal(resp.status, 400);
 });
 
 test("a 31st request from the same IP within the window is rate-limited", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   let lastStatus;
   for (let i = 0; i < 31; i++) {
     const resp = await request(app).post("/api/demo/chat").send({ sessionId: `rl-session-${i}`, text: "hello" });
@@ -78,23 +78,27 @@ test("a 31st request from the same IP within the window is rate-limited", async 
 // forever, cluttering a platform admin's activation queue with an entry
 // there's nothing to actually do about. ensureDemoTenant() now corrects
 // an existing-but-wrong status on every boot, not just at creation.
-test("the demo tenant self-heals to active on the next boot even if something had left it pending", () => {
-  freshApp(); // first "boot" — creates the demo tenant, active
+test("the demo tenant self-heals to active on the next boot even if something had left it pending", async () => {
+  await freshApp(); // first "boot" — creates the demo tenant, active
   const tenantStore = require("../../src/store/tenantStore");
-  const demoTenant = tenantStore.getBySlug("bookpilot-live-demo");
+  const demoTenant = await tenantStore.getBySlug("bookpilot-live-demo");
   assert.equal(demoTenant.status, "active");
 
-  tenantStore.setStatus(demoTenant.id, "pending"); // simulate a pre-existing install's stale state
+  await tenantStore.setStatus(demoTenant.id, "pending"); // simulate a pre-existing install's stale state
 
   // A real second boot re-runs server.js's whole startup sequence,
   // including ensureDemoTenant(). freshApp() always points at a brand
-  // new temp DATA_DIR, which would just create a second, unrelated demo
-  // tenant and trivially pass without testing anything — so only
+  // new isolated database, which would just create a second, unrelated
+  // demo tenant and trivially pass without testing anything — so only
   // server.js itself is busted here, deliberately leaving tenantStore
   // (and the live DB connection it holds) exactly as-is, the same
-  // in-process module the line above just used to set "pending".
+  // in-process module the line above just used to set "pending". Startup
+  // is async now (Postgres, not node:sqlite) — the re-required server.js
+  // exports its own fresh bootstrap promise as app.ready, which must
+  // resolve before ensureDemoTenant()'s self-heal has actually run.
   delete require.cache[require.resolve("../../server")];
-  require("../../server");
-  const healed = tenantStore.getBySlug("bookpilot-live-demo");
+  const rebootedApp = require("../../server");
+  await rebootedApp.ready;
+  const healed = await tenantStore.getBySlug("bookpilot-live-demo");
   assert.equal(healed.status, "active");
 });

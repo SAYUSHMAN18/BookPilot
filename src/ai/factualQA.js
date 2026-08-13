@@ -20,39 +20,39 @@ const MAX_TOTAL_FAQ_CHARS = 6000;
 // tenant (two different tenants can each have their own "medical"
 // workflow), so filtering knowledge_documents by workflow_id alone could
 // match the wrong tenant's docs, not just miss the right one.
-function buildKnowledgeBase(tenantId, workflows) {
+async function buildKnowledgeBase(tenantId, workflows) {
   let faqBudget = MAX_TOTAL_FAQ_CHARS;
 
-  return Object.values(workflows)
-    .map((w) => {
-      const lines = [`### ${w.label} (${w.id})`, w.description];
-      if (w.businessName) lines.push(`Business name: ${w.businessName}`);
-      if (w.businessHours) lines.push(`Hours: ${w.businessHours.start}–${w.businessHours.end}`);
-      if (w.providers) {
-        lines.push("Providers:");
-        for (const p of w.providers) lines.push(`- ${p.name}: ${p.attribute}, fee ₹${p.fee}`);
+  const sections = [];
+  for (const w of Object.values(workflows)) {
+    const lines = [`### ${w.label} (${w.id})`, w.description];
+    if (w.businessName) lines.push(`Business name: ${w.businessName}`);
+    if (w.businessHours) lines.push(`Hours: ${w.businessHours.start}–${w.businessHours.end}`);
+    if (w.providers) {
+      lines.push("Providers:");
+      for (const p of w.providers) lines.push(`- ${p.name}: ${p.attribute}, fee ₹${p.fee}`);
+    }
+    if (w.hotels) {
+      lines.push("Hotels:");
+      for (const h of w.hotels) {
+        lines.push(`- ${h.name}, ${h.location}, rating ${h.rating}`);
+        for (const r of h.rooms) lines.push(`  - Room: ${r.name} (${r.attribute}), ₹${r.fee}/night`);
       }
-      if (w.hotels) {
-        lines.push("Hotels:");
-        for (const h of w.hotels) {
-          lines.push(`- ${h.name}, ${h.location}, rating ${h.rating}`);
-          for (const r of h.rooms) lines.push(`  - Room: ${r.name} (${r.attribute}), ₹${r.fee}/night`);
-        }
-      }
+    }
 
-      const docs = knowledgeStore.listForWorkflow(tenantId, w.id);
-      if (docs.length > 0 && faqBudget > 0) {
-        lines.push("FAQs / policies:");
-        for (const doc of docs) {
-          const entry = `- ${doc.title}: ${doc.content.slice(0, MAX_DOC_CHARS)}`;
-          if (entry.length > faqBudget) break;
-          lines.push(entry);
-          faqBudget -= entry.length;
-        }
+    const docs = await knowledgeStore.listForWorkflow(tenantId, w.id);
+    if (docs.length > 0 && faqBudget > 0) {
+      lines.push("FAQs / policies:");
+      for (const doc of docs) {
+        const entry = `- ${doc.title}: ${doc.content.slice(0, MAX_DOC_CHARS)}`;
+        if (entry.length > faqBudget) break;
+        lines.push(entry);
+        faqBudget -= entry.length;
       }
-      return lines.join("\n");
-    })
-    .join("\n\n");
+    }
+    sections.push(lines.join("\n"));
+  }
+  return sections.join("\n\n");
 }
 
 // For messages that don't map to a booking intent, this is the difference
@@ -78,7 +78,7 @@ function buildKnowledgeBase(tenantId, workflows) {
 async function tryAnswerFactually(tenantId, text, workflows, history = []) {
   if (!process.env.GROQ_API_KEY) return null;
 
-  const knowledgeBase = buildKnowledgeBase(tenantId, workflows);
+  const knowledgeBase = await buildKnowledgeBase(tenantId, workflows);
   const historyBlock = history.length
     ? `\n\nRECENT CONVERSATION (most recent last — use this ONLY to understand what a follow-up like "it"/"that"/"today or another day" refers to, never as a source of facts beyond what's in DATA):\n${history
         .map((h) => `Customer: ${h.text}\nBot: ${h.reply}`)
@@ -190,4 +190,5 @@ async function tryAnswerAboutBooking(text, booking, history = []) {
   }
 }
 
-module.exports = { tryAnswerFactually, tryAnswerAboutBooking, MAX_DOC_CHARS };
+module.exports = { tryAnswerFactually, tryAnswerAboutBooking, buildKnowledgeBase, MAX_DOC_CHARS };
+

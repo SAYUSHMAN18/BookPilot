@@ -144,18 +144,30 @@
   playSequence(document.getElementById("waBody"), heroSteps, { loop: true, statusEl: document.getElementById("waStatus") });
 
   /* ---------- full demo (medical booking, plays once on scroll-in) ---------- */
+  // Generate dynamic date labels so the demo never shows a past date
+  const _today = new Date();
+  const _tomorrow = new Date(_today); _tomorrow.setDate(_today.getDate() + 1);
+  const _dayAfter = new Date(_today); _dayAfter.setDate(_today.getDate() + 2);
+  const _dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const _monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const _dayAfterLabel = `${_dayNames[_dayAfter.getDay()]}, ${_dayAfter.getDate()} ${_monthNames[_dayAfter.getMonth()]}`;
+  // Generate a booking ID that looks current (uses today's date)
+  const _pad = (n) => String(n).padStart(2, "0");
+  const _aptDate = `${_today.getFullYear()}${_pad(_today.getMonth()+1)}${_pad(_today.getDate())}`;
+  const _aptId = `APT-${_aptDate}-X7QK`;
+
   const demoSteps = [
     { type: "in", text: "I have a fever, need to see a doctor", holdMs: 500 },
     { type: "out", text: "Got it! Based on your message, it looks like you need a doctor.", typingMs: 900, holdMs: 500 },
     { type: "list", text: "Please select the doctor you'd like to consult.", options: ["Dr. Rajesh Sharma — General Physician (₹500)", "Dr. Neha Mehta — Orthopedic (₹700)", "Dr. Imran Khan — Dermatologist (₹600)"], typingMs: 600, holdMs: 800 },
     { type: "in", text: "Dr. Rajesh Sharma", holdMs: 500 },
-    { type: "list", text: "Please select your preferred date.", options: ["Today", "Tomorrow", "Wednesday, 12 Aug"], typingMs: 600, holdMs: 700 },
+    { type: "list", text: "Please select your preferred date.", options: ["Today", "Tomorrow", _dayAfterLabel], typingMs: 600, holdMs: 700 },
     { type: "in", text: "Today", holdMs: 450 },
     { type: "list", text: "Please choose a time slot.", options: ["4:30 pm", "5:00 pm", "5:30 pm"], typingMs: 600, holdMs: 700 },
     { type: "in", text: "5:30 pm", holdMs: 450 },
     { type: "out", text: "What's your name?", typingMs: 600, holdMs: 500 },
     { type: "in", text: "Aisha", holdMs: 450 },
-    { type: "out", text: "✅ Your appointment has been confirmed!\n\n🆔 APT-20260812-X7QK\n👨‍⚕️ Dr. Rajesh Sharma\n📅 Today · 5:30 pm\n💰 ₹500\n\nReply HERE when you arrive.", typingMs: 1000, holdMs: 4000 },
+    { type: "out", text: `✅ Your appointment has been confirmed!\n\n🆔 ${_aptId}\n👨‍⚕️ Dr. Rajesh Sharma\n📅 Today · 5:30 pm\n💰 ₹500\n\nReply HERE when you arrive.`, typingMs: 1000, holdMs: 4000 },
   ];
   const demoBody = document.getElementById("demoBody");
   let demoPlayed = false;

@@ -16,7 +16,6 @@ const { computeAnalytics } = require("../engine/analytics");
 const { getUsageSummary } = require("../engine/billing");
 const supportRequests = require("../store/supportRequestStore");
 const feedbackStore = require("../store/feedbackStore");
-const { runBackup, listBackups } = require("../infra/backupStore");
 const { getErrorRate } = require("../infra/alerting");
 const { MAX_DOC_CHARS } = require("../ai/factualQA");
 const { sendWhatsAppText, sendWithRetry } = require("../infra/whatsapp");
@@ -40,9 +39,10 @@ const { isTerminal } = require("../engine/bookingStateMachine");
 
 const router = express.Router();
 
-function listAllProviders(tenantId) {
+async function listAllProviders(tenantId) {
   const list = [];
-  for (const workflow of Object.values(tenantWorkflowStore.listForTenant(tenantId))) {
+  const workflows = await tenantWorkflowStore.listForTenant(tenantId);
+  for (const workflow of Object.values(workflows)) {
     for (const p of workflow.providers || []) {
       list.push({
         workflowId: workflow.id,
@@ -83,13 +83,21 @@ function listAllProviders(tenantId) {
 // reached full feature parity in the React/Vite app (frontend/, built via
 // `npm run build` there into public/app/) and has been deleted, so old
 // links/bookmarks/the Google OAuth callback below just redirect to the
-// real thing now. No client-side router in the React app (it's a single
-// view that switches between Provider/Admin in-place), so no SPA-fallback
-// wildcard is needed beyond serving the built directory statically.
+// real thing now.
 router.get("/dashboard", (req, res) => {
   res.redirect(302, "/app");
 });
 router.use("/app", express.static(path.join(__dirname, "..", "..", "public", "app")));
+// New plan, Stream 4 — the React app now has a real client-side router
+// (react-router-dom), so a hard refresh/direct link on any sub-route
+// (e.g. /app/bookings) is a real browser navigation to a path express.static
+// above has no file for — it calls next() and falls through to here rather
+// than 404ing. Always serves the same built index.html; the client router
+// takes it from there. Deliberately AFTER the static mount (real asset
+// files like /app/assets/x.js must still be served as themselves, not this).
+router.get("/app/*", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "..", "public", "app", "index.html"));
+});
 // Item 7 — the go-live journey's persistent checklist. Computed live from
 // real state every call (no separate "wizard progress" table to keep in
 // sync or let drift) — each item's `done` is a genuine fact about the
@@ -98,16 +106,18 @@ router.use("/app", express.static(path.join(__dirname, "..", "..", "public", "ap
 // ever landed), not a step someone can check off without doing it.
 // `dismissed` persists in the tenant's own feature_flags_json (Section 8's
 // existing per-tenant config store) — no schema change needed for it.
-router.get("/api/dashboard/setup-checklist", requireAuth("admin"), (req, res) => {
-  const tenant = tenantStore.getById(req.user.tenantId);
-  const teamCount = users.list(req.user.tenantId).length;
-  const bookingCount = bookings.values(req.user.tenantId).length;
+router.get("/api/dashboard/setup-checklist", requireAuth("admin"), asyncHandler(async (req, res) => {
+  const tenant = await tenantStore.getById(req.user.tenantId);
+  const team = await users.list(req.user.tenantId);
+  const teamCount = team.length;
+  const allBookings = await bookings.values(req.user.tenantId);
+  const bookingCount = allBookings.length;
 
   const items = [
     {
       id: "customize-business",
       label: "Customize your first business",
-      done: tenantWorkflowStore.hasCustomizations(req.user.tenantId),
+      done: await tenantWorkflowStore.hasCustomizations(req.user.tenantId),
       hint: "Add your first real business under Manage Businesses — with its own photo (upload or a URL) and location (map pin, or typed coordinates/Maps link) per provider.",
     },
     {
@@ -135,73 +145,65 @@ router.get("/api/dashboard/setup-checklist", requireAuth("admin"), (req, res) =>
     allDone: items.every((i) => i.done),
     dismissed: !!tenant?.featureFlags?.setupChecklistDismissed,
   });
-});
+}));
 
-router.post("/api/dashboard/setup-checklist/dismiss", requireAuth("admin"), (req, res) => {
-  const tenant = tenantStore.getById(req.user.tenantId);
-  tenantStore.updateConfig(req.user.tenantId, { featureFlags: { ...tenant.featureFlags, setupChecklistDismissed: true } });
+router.post("/api/dashboard/setup-checklist/dismiss", requireAuth("admin"), asyncHandler(async (req, res) => {
+  const tenant = await tenantStore.getById(req.user.tenantId);
+  await tenantStore.updateConfig(req.user.tenantId, { featureFlags: { ...tenant.featureFlags, setupChecklistDismissed: true } });
   res.json({ ok: true });
-});
+}));
 
 // New plan, Block 12 — the tenant's own view of the billing skeleton
 // above: which plan they're on and how their usage compares to it this
 // month. Admin only, same as everything else that reveals account-level
 // (not booking-level) information.
-router.get("/api/dashboard/billing", requireAuth("admin"), (req, res) => {
-  const tenant = tenantStore.getById(req.user.tenantId);
-  res.json(getUsageSummary(req.user.tenantId, tenant.plan));
-});
+router.get("/api/dashboard/billing", requireAuth("admin"), asyncHandler(async (req, res) => {
+  const tenant = await tenantStore.getById(req.user.tenantId);
+  res.json(await getUsageSummary(req.user.tenantId, tenant.plan));
+}));
 
-router.get("/api/dashboard/providers", requireAuth("admin", "provider"), (req, res) => {
-  const all = listAllProviders(req.user.tenantId);
+router.get("/api/dashboard/providers", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const all = await listAllProviders(req.user.tenantId);
   if (req.user.role === "provider") {
     // Not the roster — only the caller's own entry, so a provider session
     // can render its label without ever learning who else is on the platform.
     return res.json(all.filter((p) => p.workflowId === req.user.workflowId && p.providerId === req.user.providerId));
   }
   res.json(all);
-});
+}));
 
 // Admin role view — every booking across every business, one call. The
 // client already has /api/dashboard/providers loaded, so it joins on
 // workflowId+providerId client-side for human-readable labels rather than
 // this endpoint duplicating that lookup server-side. Admin-only: this is
 // exactly the cross-business visibility a provider must never get.
-router.get("/api/dashboard/all-bookings", requireAuth("admin"), (req, res) => {
-  res.json(bookings.values(req.user.tenantId));
-});
-
-router.get("/api/dashboard/audit-log", requireAuth("admin"), (req, res) => {
-  res.json(listAudit(req.user.tenantId));
-});
-
-// Backups (Section 5.1) — automated on a schedule (see scheduleBackups()
-// near app.listen below), plus a manual trigger and a list so an operator
-// can actually see backups are happening rather than trusting they are.
-// Section 8 — platform_admin only, not a tenant admin: a backup captures
-// the ENTIRE database file, every tenant's data at once. Letting a
-// tenant's own admin trigger or even see backup timestamps/filenames for
-// the whole platform is a real (if narrow) cross-tenant information leak
-// this file used to have from before multi-tenancy existed — closed here,
-// not carried forward silently.
-router.get("/api/dashboard/backups", requireAuth("platform_admin"), (req, res) => {
-  res.json(listBackups());
-});
-
-router.post("/api/dashboard/backups", requireAuth("platform_admin"), asyncHandler(async (req, res) => {
-  const result = await runBackup();
-  recordAudit(null, req.user, "backup.manual", result);
-  if (!result.ok) return res.status(500).json(result);
-  res.status(201).json(result);
+router.get("/api/dashboard/all-bookings", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json(await bookings.values(req.user.tenantId));
 }));
+
+router.get("/api/dashboard/audit-log", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json(await listAudit(req.user.tenantId));
+}));
+
+// Backups (Section 5.1) used to live here (a node:sqlite-native online
+// backup + manual-trigger/list routes) — removed as part of the Postgres
+// migration (src/store/db.js) since that mechanism was SQLite-file-
+// specific with no Postgres equivalent. Cloud SQL's own built-in automated
+// backups + point-in-time recovery replace it at the infrastructure level
+// (see README's deployment section) — a net simplification, not a gap:
+// nothing in this app needs to re-implement what the managed database
+// already does more reliably.
 
 // Durable outbound queue (Section 5.3) — visibility into proactive sends
 // (arrival alerts, feedback requests) that failed their immediate retries
 // and are now waiting on the background worker (see startOutboundQueueWorker()
 // near app.listen below).
-router.get("/api/dashboard/outbound-queue", requireAuth("admin"), (req, res) => {
-  res.json({ counts: outboundQueueStore.statusCounts(req.user.tenantId), recent: outboundQueueStore.listRecent(req.user.tenantId) });
-});
+router.get("/api/dashboard/outbound-queue", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json({
+    counts: await outboundQueueStore.statusCounts(req.user.tenantId),
+    recent: await outboundQueueStore.listRecent(req.user.tenantId),
+  });
+}));
 
 // Section 5.4 — the two rates worth an admin's attention at a glance: how
 // often the app is erroring (webhook handling, Groq calls, DB writes —
@@ -210,13 +212,13 @@ router.get("/api/dashboard/outbound-queue", requireAuth("admin"), (req, res) => 
 // elsewhere (src/alerting.js, src/outboundQueueStore.js) — this just
 // surfaces them together in one place instead of an operator having to
 // know to check two different things.
-router.get("/api/dashboard/alerts", requireAuth("admin"), (req, res) => {
+router.get("/api/dashboard/alerts", requireAuth("admin"), asyncHandler(async (req, res) => {
   // errorRate is deliberately global, not tenant-scoped — it's a signal
   // about this one Node process's overall health (Groq/DB/webhook
   // errors), not about any tenant's business data, so a tenant admin
   // seeing "the platform had N errors recently" isn't a meaningful leak
   // the way seeing another tenant's bookings/backups would be.
-  const outboundCounts = outboundQueueStore.statusCounts(req.user.tenantId);
+  const outboundCounts = await outboundQueueStore.statusCounts(req.user.tenantId);
   const outboundTotal = outboundCounts.pending + outboundCounts.sent + outboundCounts.failed;
   res.json({
     errorRate: getErrorRate(),
@@ -225,7 +227,7 @@ router.get("/api/dashboard/alerts", requireAuth("admin"), (req, res) => {
       failureRate: outboundTotal > 0 ? outboundCounts.failed / outboundTotal : 0,
     },
   });
-});
+}));
 
 // Business/workflow management — admin only, and (Item 5) tenant-scoped:
 // every read/write here goes through tenantWorkflowStore keyed on
@@ -246,9 +248,9 @@ function validateWorkflowShape(workflow) {
   return null;
 }
 
-router.get("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
-  res.json(tenantWorkflowStore.listForTenant(req.user.tenantId));
-});
+router.get("/api/dashboard/workflows", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json(await tenantWorkflowStore.listForTenant(req.user.tenantId));
+}));
 
 // Device-upload path for a business/provider photo — the alternative to
 // just pasting an externally-hosted image URL, which is all the "Photo
@@ -257,7 +259,7 @@ router.get("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
 // already accepts, so the frontend just writes the response straight into
 // it — no separate "uploaded image" concept on the backend.
 router.post("/api/dashboard/upload-image", requireAuth("admin"), (req, res) => {
-  uploadImage.single("image")(req, res, (err) => {
+  uploadImage.single("image")(req, res, async (err) => {
     if (err) {
       const message =
         err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
@@ -267,7 +269,7 @@ router.post("/api/dashboard/upload-image", requireAuth("admin"), (req, res) => {
     }
     if (!req.file) return res.status(400).json({ error: "No image file provided." });
     const url = `/uploads/${req.user.tenantId}/${req.file.filename}`;
-    recordAudit(req.user.tenantId, req.user, "image.upload", { filename: req.file.filename, size: req.file.size });
+    await recordAudit(req.user.tenantId, req.user, "image.upload", { filename: req.file.filename, size: req.file.size });
     res.json({ url });
   });
 });
@@ -302,7 +304,7 @@ router.post("/api/dashboard/workflows/generate", requireAuth("admin"), asyncHand
   try {
     const workflow = await generateWorkflowFromDescription(description.trim());
     const validationWarning = validateWorkflowShape(workflow);
-    recordAudit(req.user.tenantId, req.user, "workflow.generate", { description: description.trim().slice(0, 200), valid: !validationWarning });
+    await recordAudit(req.user.tenantId, req.user, "workflow.generate", { description: description.trim().slice(0, 200), valid: !validationWarning });
     res.json({ workflow, validationWarning: validationWarning || null });
   } catch (err) {
     log("ERROR", `Workflow generation failed: ${err.message}`);
@@ -333,7 +335,7 @@ function deriveKeywordsFromDescription(description) {
     .filter(Boolean);
 }
 
-router.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
+router.post("/api/dashboard/workflows", requireAuth("admin"), asyncHandler(async (req, res) => {
   const workflow = req.body;
   const validationError = validateWorkflowShape(workflow);
   if (validationError) return res.status(400).json({ error: validationError });
@@ -341,21 +343,21 @@ router.post("/api/dashboard/workflows", requireAuth("admin"), (req, res) => {
     workflow.keywords = deriveKeywordsFromDescription(workflow.description);
   }
 
-  const isUpdate = !!tenantWorkflowStore.get(req.user.tenantId, workflow.id);
-  tenantWorkflowStore.upsert(req.user.tenantId, workflow);
-  recordAudit(req.user.tenantId, req.user, isUpdate ? "workflow.update" : "workflow.create", { workflowId: workflow.id });
+  const isUpdate = !!(await tenantWorkflowStore.get(req.user.tenantId, workflow.id));
+  await tenantWorkflowStore.upsert(req.user.tenantId, workflow);
+  await recordAudit(req.user.tenantId, req.user, isUpdate ? "workflow.update" : "workflow.create", { workflowId: workflow.id });
   log("INFO", `${req.user.email} ${isUpdate ? "updated" : "created"} workflow "${workflow.id}"`);
   res.status(isUpdate ? 200 : 201).json({ ok: true });
-});
+}));
 
-router.delete("/api/dashboard/workflows/:id", requireAuth("admin"), (req, res) => {
+router.delete("/api/dashboard/workflows/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = req.params.id;
-  if (!tenantWorkflowStore.get(req.user.tenantId, id)) return res.status(404).json({ error: "Unknown workflowId" });
-  tenantWorkflowStore.remove(req.user.tenantId, id);
-  recordAudit(req.user.tenantId, req.user, "workflow.delete", { workflowId: id });
+  if (!(await tenantWorkflowStore.get(req.user.tenantId, id))) return res.status(404).json({ error: "Unknown workflowId" });
+  await tenantWorkflowStore.remove(req.user.tenantId, id);
+  await recordAudit(req.user.tenantId, req.user, "workflow.delete", { workflowId: id });
   log("INFO", `${req.user.email} deleted workflow "${id}"`);
   res.json({ ok: true });
-});
+}));
 
 // Team management — admin only. This is what makes "every business gets
 // its own login and only sees its own data" self-serve instead of a CLI
@@ -365,36 +367,36 @@ router.delete("/api/dashboard/workflows/:id", requireAuth("admin"), (req, res) =
 // Section 14 — API key management for the Public API above. Admin-only,
 // same as Manage Team: issuing a credential another system can act with
 // is exactly the kind of action a provider account shouldn't have.
-router.get("/api/dashboard/api-keys", requireAuth("admin"), (req, res) => {
-  res.json(apiKeys.listForTenant(req.user.tenantId));
-});
+router.get("/api/dashboard/api-keys", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json(await apiKeys.listForTenant(req.user.tenantId));
+}));
 
-router.post("/api/dashboard/api-keys", requireAuth("admin"), (req, res) => {
+router.post("/api/dashboard/api-keys", requireAuth("admin"), asyncHandler(async (req, res) => {
   const { name } = req.body || {};
   if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "A name for this key is required (e.g. \"Website integration\")." });
-  const { key, record } = apiKeys.create(req.user.tenantId, name.trim().slice(0, 100));
-  recordAudit(req.user.tenantId, req.user, "api_key.create", { id: record.id, name: record.name });
+  const { key, record } = await apiKeys.create(req.user.tenantId, name.trim().slice(0, 100));
+  await recordAudit(req.user.tenantId, req.user, "api_key.create", { id: record.id, name: record.name });
   log("INFO", `${req.user.email} created API key "${record.name}" (${record.keyPrefix}...).`);
   // The only response that will ever carry the full raw key — shown to
   // the admin exactly once, matching the create/record split in
   // src/store/apiKeyStore.js's own doc comment.
   res.status(201).json({ key, record });
-});
+}));
 
-router.delete("/api/dashboard/api-keys/:id", requireAuth("admin"), (req, res) => {
+router.delete("/api/dashboard/api-keys/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  apiKeys.revoke(req.user.tenantId, id);
-  recordAudit(req.user.tenantId, req.user, "api_key.revoke", { id });
+  await apiKeys.revoke(req.user.tenantId, id);
+  await recordAudit(req.user.tenantId, req.user, "api_key.revoke", { id });
   log("INFO", `${req.user.email} revoked API key ${id}.`);
   res.json({ ok: true });
-});
+}));
 
-router.get("/api/dashboard/users", requireAuth("admin"), (req, res) => {
-  res.json(users.list(req.user.tenantId));
-});
+router.get("/api/dashboard/users", requireAuth("admin"), asyncHandler(async (req, res) => {
+  res.json(await users.list(req.user.tenantId));
+}));
 
-router.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
+router.post("/api/dashboard/users", requireAuth("admin"), asyncHandler(async (req, res) => {
   const { email, password, role, name, workflowId, providerId } = req.body || {};
   if (typeof email !== "string" || !email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
     return res.status(400).json({ error: "A valid email is required." });
@@ -409,12 +411,13 @@ router.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
     if (typeof workflowId !== "string" || typeof providerId !== "string") {
       return res.status(400).json({ error: "workflowId and providerId are required for a provider account." });
     }
-    const matches = listAllProviders(req.user.tenantId).some((p) => p.workflowId === workflowId && p.providerId === providerId);
+    const allProviders = await listAllProviders(req.user.tenantId);
+    const matches = allProviders.some((p) => p.workflowId === workflowId && p.providerId === providerId);
     if (!matches) return res.status(400).json({ error: "Unknown workflowId/providerId — pick one from the provider list." });
   }
 
   try {
-    const user = users.create({
+    const user = await users.create({
       email: email.trim(),
       password,
       role,
@@ -423,7 +426,7 @@ router.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
       providerId: role === "provider" ? providerId : null,
       tenantId: req.user.tenantId,
     });
-    recordAudit(req.user.tenantId, req.user, "user.create", { email: user.email, role: user.role, workflowId: user.workflowId, providerId: user.providerId });
+    await recordAudit(req.user.tenantId, req.user, "user.create", { email: user.email, role: user.role, workflowId: user.workflowId, providerId: user.providerId });
     log("INFO", `${req.user.email} created a ${role} account for ${user.email}`);
     res.status(201).json(user);
   } catch (err) {
@@ -431,32 +434,33 @@ router.post("/api/dashboard/users", requireAuth("admin"), (req, res) => {
     log("ERROR", `Failed to create user: ${err.message}`);
     res.status(500).json({ error: "Failed to create account." });
   }
-});
+}));
 
-router.patch("/api/dashboard/users/:id", requireAuth("admin"), (req, res) => {
+router.patch("/api/dashboard/users/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   if (typeof req.body?.active !== "boolean") return res.status(400).json({ error: "active (boolean) is required." });
   if (id === req.user.uid && !req.body.active) {
     return res.status(400).json({ error: "You can't deactivate your own account." });
   }
-  const user = users.setActive(req.user.tenantId, id, req.body.active);
+  const user = await users.setActive(req.user.tenantId, id, req.body.active);
   if (!user) return res.status(404).json({ error: "Not found" });
-  recordAudit(req.user.tenantId, req.user, user.active ? "user.activate" : "user.deactivate", { email: user.email });
+  await recordAudit(req.user.tenantId, req.user, user.active ? "user.activate" : "user.deactivate", { email: user.email });
   res.json(user);
-});
+}));
 
-router.get("/api/dashboard/bookings", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/bookings", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   // A provider session is pinned to exactly one workflowId+providerId —
   // for that role the query params are ignored outright (not merely
   // validated), so there's no way to read someone else's bookings by
   // editing the URL.
   const { workflowId, providerId } = req.user.role === "provider" ? req.user : req.query;
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId query params are required" });
-  const rows = bookings.values(req.user.tenantId).filter((b) => b.workflowId === workflowId && b.providerId === providerId);
+  const allBookings = await bookings.values(req.user.tenantId);
+  const rows = allBookings.filter((b) => b.workflowId === workflowId && b.providerId === providerId);
   rows.sort((a, b) => b.createdAt - a.createdAt);
   res.json(rows);
-});
+}));
 
 // Provider-initiated cancel or reschedule.  When a provider cancels or
 // reschedules a booking from the dashboard, the customer gets a WhatsApp
@@ -467,7 +471,7 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid booking id" });
 
-  const booking = bookings.getById(req.user.tenantId, id);
+  const booking = await bookings.getById(req.user.tenantId, id);
   if (!booking) return res.status(404).json({ error: "Booking not found" });
 
   // Provider role: scope check — they cannot touch another provider's booking.
@@ -497,13 +501,13 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
       return res.status(400).json({ error: `Cannot cancel a booking that's already marked ${booking.status.replace("_", "-")} — it's a completed record, not an active one.` });
     }
 
-    const updated = bookings.updateWithMeta(req.user.tenantId, id, {
+    const updated = await bookings.updateWithMeta(req.user.tenantId, id, {
       status: "cancelled",
       cancelledBy: req.user.email,
       rescheduleNote: note || null,
     });
 
-    recordAudit(req.user.tenantId, req.user, "booking.cancel", {
+    await recordAudit(req.user.tenantId, req.user, "booking.cancel", {
       bookingId: booking.bookingId, waId: booking.waId, workflowId: booking.workflowId, note: note || null,
     });
     log("INFO", `${req.user.email} cancelled booking ${booking.bookingId} for ${booking.waId}`);
@@ -512,9 +516,10 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
     // (workflow.refundPolicy.providerCancellation can still say "none").
     // Never blocks the cancellation itself on a refund failure — see
     // src/engine/paymentRefunds.js's own comment for why.
+    const workflowForRefund = await tenantWorkflowStore.get(req.user.tenantId, booking.workflowId);
     const refundResult = await refundIfPaid(req.user.tenantId, booking, {
       initiatedBy: "provider",
-      refundPolicy: tenantWorkflowStore.get(req.user.tenantId, booking.workflowId)?.refundPolicy,
+      refundPolicy: workflowForRefund?.refundPolicy,
     });
 
     // Notify the customer on WhatsApp.
@@ -575,7 +580,7 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
 
     let updated;
     try {
-      updated = bookings.updateWithMeta(req.user.tenantId, id, {
+      updated = await bookings.updateWithMeta(req.user.tenantId, id, {
         // Back to "booked" — the appointment simply has a new date/time
         // now. Not a distinct state anything else in the system (STATUS,
         // queue position, arrival alerts) needs to know how to handle.
@@ -600,7 +605,7 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
       throw err;
     }
 
-    recordAudit(req.user.tenantId, req.user, "booking.reschedule", {
+    await recordAudit(req.user.tenantId, req.user, "booking.reschedule", {
       bookingId: booking.bookingId, waId: booking.waId,
       oldDate: booking.visitDate, oldTime: booking.visitTime,
       newDate: rescheduleDate, newTime: rescheduleTime || null, note: note || null,
@@ -624,7 +629,8 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
       log("WARN", `WhatsApp notification failed for reschedule of ${booking.bookingId}: ${err.message}`);
     }
 
-    await syncBookingRescheduled(req.user.tenantId, updated, tenantWorkflowStore.get(req.user.tenantId, updated.workflowId));
+    const workflowForCalendar = await tenantWorkflowStore.get(req.user.tenantId, updated.workflowId);
+    await syncBookingRescheduled(req.user.tenantId, updated, workflowForCalendar);
     publishBookingEvent(req.user.tenantId, "booking.updated", updated);
 
     return res.json({ ok: true, booking: updated });
@@ -659,21 +665,22 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
     // that state, rather than leaving two bookings simultaneously marked
     // "serving" (which would double-count in the queue position math).
     if (action === "serve") {
-      for (const other of bookings.values(req.user.tenantId)) {
+      const allBookings = await bookings.values(req.user.tenantId);
+      for (const other of allBookings) {
         if (other.id !== booking.id && other.workflowId === booking.workflowId && other.providerId === booking.providerId &&
             other.visitDate === booking.visitDate && other.status === "serving") {
-          bookings.updateWithMeta(req.user.tenantId, other.id, { status: "done" });
+          await bookings.updateWithMeta(req.user.tenantId, other.id, { status: "done" });
         }
       }
     }
 
     const newStatus = action === "serve" ? "serving" : "done";
-    const updated = bookings.updateWithMeta(req.user.tenantId, id, {
+    const updated = await bookings.updateWithMeta(req.user.tenantId, id, {
       status: newStatus,
       providerNote: cappedNote,
       feedbackRequestedAt: action === "complete" ? Date.now() : null,
     });
-    recordAudit(req.user.tenantId, req.user, `booking.${action}`, { bookingId: booking.bookingId, waId: booking.waId, note: cappedNote });
+    await recordAudit(req.user.tenantId, req.user, `booking.${action}`, { bookingId: booking.bookingId, waId: booking.waId, note: cappedNote });
     log("INFO", `${req.user.email} marked booking ${booking.bookingId} as ${newStatus}`);
 
     if (action === "serve" && booking.visitTime) {
@@ -723,16 +730,18 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
       return res.status(400).json({ error: `Cannot mark a ${booking.status} booking as no-show.` });
     }
 
-    const updated = bookings.updateWithMeta(req.user.tenantId, id, { status: "no_show", providerNote: typeof note === "string" ? note.slice(0, 500) : null });
-    const policy = tenantWorkflowStore.get(req.user.tenantId, booking.workflowId)?.refundPolicy?.noShow;
+    const updated = await bookings.updateWithMeta(req.user.tenantId, id, { status: "no_show", providerNote: typeof note === "string" ? note.slice(0, 500) : null });
+    const workflowForNoShow = await tenantWorkflowStore.get(req.user.tenantId, booking.workflowId);
+    const policy = workflowForNoShow?.refundPolicy?.noShow;
     let refundResult = { refunded: false };
     if (policy === "refund") {
       refundResult = await refundIfPaid(req.user.tenantId, booking, { initiatedBy: "provider", refundPolicy: { providerCancellation: "full" } });
     } else {
-      const hadPaidDeposit = paymentStore.listForBooking(req.user.tenantId, booking.id).some((p) => p.status === "paid");
+      const paymentsForBooking = await paymentStore.listForBooking(req.user.tenantId, booking.id);
+      const hadPaidDeposit = paymentsForBooking.some((p) => p.status === "paid");
       if (hadPaidDeposit) log("INFO", `Deposit retained for no-show booking ${booking.bookingId} (policy: retain, the default).`);
     }
-    recordAudit(req.user.tenantId, req.user, "booking.no_show", { bookingId: booking.bookingId, waId: booking.waId, refunded: refundResult.refunded });
+    await recordAudit(req.user.tenantId, req.user, "booking.no_show", { bookingId: booking.bookingId, waId: booking.waId, refunded: refundResult.refunded });
     log("INFO", `${req.user.email} marked booking ${booking.bookingId} as no-show.`);
     publishBookingEvent(req.user.tenantId, "booking.updated", updated);
     return res.json({ ok: true, booking: updated, refund: refundResult });
@@ -746,18 +755,18 @@ router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), as
 // strictly for an admin permanently clearing test/demo data). Removes the
 // row outright rather than soft-transitioning status, so it also disappears
 // from billing usage counts and analytics, not just the bookings list.
-router.delete("/api/dashboard/bookings/:id", requireAuth("admin"), (req, res) => {
+router.delete("/api/dashboard/bookings/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid booking id" });
 
-  const booking = bookings.getById(req.user.tenantId, id);
+  const booking = await bookings.getById(req.user.tenantId, id);
   if (!booking) return res.status(404).json({ error: "Booking not found" });
 
-  bookings.remove(req.user.tenantId, id);
-  recordAudit(req.user.tenantId, req.user, "booking.delete", { bookingId: booking.bookingId, waId: booking.waId });
+  await bookings.remove(req.user.tenantId, id);
+  await recordAudit(req.user.tenantId, req.user, "booking.delete", { bookingId: booking.bookingId, waId: booking.waId });
   log("INFO", `${req.user.email} permanently deleted booking ${booking.bookingId}.`);
   res.json({ ok: true });
-});
+}));
 
 // Recomputes live queue position for everyone else still active in this
 // provider's queue for this date and sends a one-time "you're next" alert
@@ -767,13 +776,14 @@ router.delete("/api/dashboard/bookings/:id", requireAuth("admin"), (req, res) =>
 // failure doesn't just silently drop the alert, but a failure here never
 // blocks or fails the triggering request itself.
 async function notifyQueueShifts(tenantId, workflowId, providerId, date, excludeId) {
-  for (const other of sameQueueBookings(tenantId, workflowId, providerId, date, excludeId)) {
-    const position = computeQueuePosition(other);
+  const others = await sameQueueBookings(tenantId, workflowId, providerId, date, excludeId);
+  for (const other of others) {
+    const position = await computeQueuePosition(other);
     if (position !== 0) continue;
-    if (wasAlerted(tenantId, other.id)) continue;
-    if (isOptedOutOfAlerts(other.waId)) continue;
+    if (await wasAlerted(tenantId, other.id)) continue;
+    if (await isOptedOutOfAlerts(other.waId)) continue;
 
-    markAlerted(tenantId, other.id); // mark first — never re-attempt-storm the same alert if the send itself throws
+    await markAlerted(tenantId, other.id); // mark first — never re-attempt-storm the same alert if the send itself throws
     const sent = await sendWithRetry(
       tenantId,
       other.waId,
@@ -785,13 +795,13 @@ async function notifyQueueShifts(tenantId, workflowId, providerId, date, exclude
 
 
 
-router.get("/api/dashboard/availability", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/availability", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const { workflowId, providerId } = req.user.role === "provider" ? req.user : req.query;
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId query params are required" });
-  res.json(listBlocksForProvider(req.user.tenantId, workflowId, providerId));
-});
+  res.json(await listBlocksForProvider(req.user.tenantId, workflowId, providerId));
+}));
 
-router.post("/api/dashboard/availability", requireAuth("admin", "provider"), (req, res) => {
+router.post("/api/dashboard/availability", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const body = req.body || {};
   const workflowId = req.user.role === "provider" ? req.user.workflowId : body.workflowId;
   const providerId = req.user.role === "provider" ? req.user.providerId : body.providerId;
@@ -799,7 +809,7 @@ router.post("/api/dashboard/availability", requireAuth("admin", "provider"), (re
   if (typeof workflowId !== "string" || typeof providerId !== "string" || typeof date !== "string") {
     return res.status(400).json({ error: "workflowId, providerId, and date are required strings" });
   }
-  if (!tenantWorkflowStore.get(req.user.tenantId, workflowId)) return res.status(400).json({ error: "Unknown workflowId" });
+  if (!(await tenantWorkflowStore.get(req.user.tenantId, workflowId))) return res.status(400).json({ error: "Unknown workflowId" });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be in YYYY-MM-DD format" });
   if (time !== undefined && time !== null && typeof time !== "string") {
     return res.status(400).json({ error: "time must be a string (or omitted to block the whole day)" });
@@ -817,8 +827,8 @@ router.post("/api/dashboard/availability", requireAuth("admin", "provider"), (re
   }
 
   const cappedReason = typeof reason === "string" ? reason.slice(0, 200) : null;
-  blockSlot(req.user.tenantId, workflowId, providerId, date, time || null, endTime || null, cappedReason);
-  recordAudit(req.user.tenantId, req.user, "availability.block", { workflowId, providerId, date, time: time || null, endTime: endTime || null, reason: cappedReason });
+  await blockSlot(req.user.tenantId, workflowId, providerId, date, time || null, endTime || null, cappedReason);
+  await recordAudit(req.user.tenantId, req.user, "availability.block", { workflowId, providerId, date, time: time || null, endTime: endTime || null, reason: cappedReason });
 
   // Advisory, not a hard reject — surface which existing bookings fall
   // inside the new block so the provider can decide whether to also
@@ -828,8 +838,8 @@ router.post("/api/dashboard/availability", requireAuth("admin", "provider"), (re
   if (time) {
     const startMin = timeToMinutes(time);
     const endMin = endTime ? timeToMinutes(endTime) : startMin + 1;
-    conflictingBookings = bookings
-      .values(req.user.tenantId)
+    const allBookings = await bookings.values(req.user.tenantId);
+    conflictingBookings = allBookings
       .filter((b) => {
         if (b.workflowId !== workflowId || b.providerId !== providerId || b.visitDate !== date || b.status === "cancelled" || !b.visitTime) {
           return false;
@@ -841,102 +851,104 @@ router.post("/api/dashboard/availability", requireAuth("admin", "provider"), (re
   }
 
   res.status(201).json({ ok: true, conflictingBookings });
-});
+}));
 
-router.delete("/api/dashboard/availability/:id", requireAuth("admin", "provider"), (req, res) => {
+router.delete("/api/dashboard/availability/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const block = getBlockById(req.user.tenantId, id);
+  const block = await getBlockById(req.user.tenantId, id);
   if (!block) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && (block.workflowId !== req.user.workflowId || block.providerId !== req.user.providerId)) {
     return res.status(403).json({ error: "You can only remove your own availability blocks." });
   }
-  unblockSlot(req.user.tenantId, id);
-  recordAudit(req.user.tenantId, req.user, "availability.unblock", { id, workflowId: block.workflowId, providerId: block.providerId, date: block.date, time: block.time, endTime: block.endTime });
+  await unblockSlot(req.user.tenantId, id);
+  await recordAudit(req.user.tenantId, req.user, "availability.unblock", { id, workflowId: block.workflowId, providerId: block.providerId, date: block.date, time: block.time, endTime: block.endTime });
   res.json({ ok: true });
-});
+}));
 
 // Support requests — what makes human escalation (Section 1.4) land
 // somewhere real instead of a dead end. Same role scoping as every other
 // resource: a provider sees only requests tied to their own workflow (or
 // with no workflow yet resolved — a fresh complaint before the customer
 // named a business — which nobody can scope, so only admin sees those).
-router.get("/api/dashboard/support-requests", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/support-requests", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const list = req.user.role === "provider"
-    ? supportRequests.listForWorkflow(req.user.tenantId, req.user.workflowId)
-    : supportRequests.listAll(req.user.tenantId);
+    ? await supportRequests.listForWorkflow(req.user.tenantId, req.user.workflowId)
+    : await supportRequests.listAll(req.user.tenantId);
   res.json(list);
-});
+}));
 
-router.patch("/api/dashboard/support-requests/:id", requireAuth("admin", "provider"), (req, res) => {
+router.patch("/api/dashboard/support-requests/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   if (typeof req.body?.resolved !== "boolean") return res.status(400).json({ error: "resolved (boolean) is required." });
-  const existing = supportRequests.getById(req.user.tenantId, id);
+  const existing = await supportRequests.getById(req.user.tenantId, id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
     return res.status(403).json({ error: "You can only manage support requests for your own business." });
   }
-  const updated = supportRequests.setResolved(req.user.tenantId, id, req.body.resolved);
-  recordAudit(req.user.tenantId, req.user, updated.resolved ? "support_request.resolve" : "support_request.reopen", { id, waId: updated.waId });
+  const updated = await supportRequests.setResolved(req.user.tenantId, id, req.body.resolved);
+  await recordAudit(req.user.tenantId, req.user, updated.resolved ? "support_request.resolve" : "support_request.reopen", { id, waId: updated.waId });
   res.json(updated);
-});
+}));
 
 // Feedback (Section 4) — same role scoping as everything else.
-router.get("/api/dashboard/feedback", requireAuth("admin", "provider"), (req, res) => {
-  const list = req.user.role === "provider" ? feedbackStore.listForWorkflow(req.user.tenantId, req.user.workflowId) : feedbackStore.listAll(req.user.tenantId);
+router.get("/api/dashboard/feedback", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const list = req.user.role === "provider" ? await feedbackStore.listForWorkflow(req.user.tenantId, req.user.workflowId) : await feedbackStore.listAll(req.user.tenantId);
   // Joined with the booking's own label fields client-side needs (booking
   // id, customer name) so the dashboard doesn't have to make a second
   // round trip per row to make sense of who left what.
-  const withBookingInfo = list.map((f) => {
-    const b = bookings.getById(req.user.tenantId, f.bookingId);
+  const withBookingInfo = await Promise.all(list.map(async (f) => {
+    const b = await bookings.getById(req.user.tenantId, f.bookingId);
     return { ...f, bookingLabel: b?.bookingId || null, customerName: b?.customerName || null, workflowId: b?.workflowId || null };
-  });
+  }));
   res.json(withBookingInfo);
-});
+}));
 
 // Analytics — same role scoping as every other dashboard route: a
 // provider only ever gets their own numbers (the query params are ignored
 // for that role, not merely validated), an admin gets platform-wide.
-router.get("/api/dashboard/analytics", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/analytics", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const scope = req.user.role === "provider"
     ? { workflowId: req.user.workflowId, providerId: req.user.providerId }
     : { workflowId: req.query.workflowId || null, providerId: req.query.providerId || null };
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 90);
-  res.json(computeAnalytics({ tenantId: req.user.tenantId, ...scope, days }));
-});
+  res.json(await computeAnalytics({ tenantId: req.user.tenantId, ...scope, days }));
+}));
 
 // Section 9.8 — payment visibility + the manual "issue refund" escape
 // hatch for whatever the automatic cancellation-triggered flow doesn't
 // cover (a partial goodwill refund outside the stated policy, a payment
 // stuck in a state the webhook never resolved, etc.).
-router.get("/api/dashboard/payments", requireAuth("admin", "provider"), (req, res) => {
-  const list = paymentStore.listForTenant(req.user.tenantId);
+router.get("/api/dashboard/payments", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const list = await paymentStore.listForTenant(req.user.tenantId);
   // Provider role sees only payments for their own bookings — same
   // ownership-check style as GET /api/dashboard/feedback above (a join
   // back to bookings, since payments itself doesn't carry workflow/
   // provider id — it only ever needs tenant_id + booking_id).
-  const scoped = req.user.role === "provider"
-    ? list.filter((p) => {
-        const b = bookings.getById(req.user.tenantId, p.bookingId);
-        return b && b.workflowId === req.user.workflowId && b.providerId === req.user.providerId;
-      })
-    : list;
-  const withBookingInfo = scoped.map((p) => {
-    const b = bookings.getById(req.user.tenantId, p.bookingId);
+  let scoped = list;
+  if (req.user.role === "provider") {
+    const flags = await Promise.all(list.map(async (p) => {
+      const b = await bookings.getById(req.user.tenantId, p.bookingId);
+      return b && b.workflowId === req.user.workflowId && b.providerId === req.user.providerId;
+    }));
+    scoped = list.filter((_, i) => flags[i]);
+  }
+  const withBookingInfo = await Promise.all(scoped.map(async (p) => {
+    const b = await bookings.getById(req.user.tenantId, p.bookingId);
     return { ...p, bookingLabel: b?.bookingId || null, customerName: b?.customerName || null, workflowId: b?.workflowId || null };
-  });
+  }));
   res.json(withBookingInfo);
-});
+}));
 
 router.post("/api/dashboard/payments/:id/refund", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const payment = paymentStore.getById(req.user.tenantId, id);
+  const payment = await paymentStore.getById(req.user.tenantId, id);
   if (!payment) return res.status(404).json({ error: "Not found" });
   if (payment.status !== "paid") return res.status(400).json({ error: `Cannot refund a payment with status "${payment.status}" — only a paid payment can be refunded.` });
 
-  const booking = bookings.getById(req.user.tenantId, payment.bookingId);
+  const booking = await bookings.getById(req.user.tenantId, payment.bookingId);
   if (req.user.role === "provider" && booking && (booking.workflowId !== req.user.workflowId || booking.providerId !== req.user.providerId)) {
     return res.status(403).json({ error: "You can only refund payments for your own bookings." });
   }
@@ -951,12 +963,12 @@ router.post("/api/dashboard/payments/:id/refund", requireAuth("admin", "provider
     const refund = await razorpay.createRefund({ providerPaymentId: payment.providerPaymentId, amount: refundAmountPaise });
     const finalAmount = refundAmountPaise ?? payment.amount;
     const status = finalAmount >= payment.amount ? "refunded" : "partially_refunded";
-    paymentStore.markRefunded(payment.id, status, refund.status, finalAmount);
+    await paymentStore.markRefunded(payment.id, status, refund.status, finalAmount);
     if (booking) {
-      bookings.updatePaymentStatus(req.user.tenantId, booking.id, status);
+      await bookings.updatePaymentStatus(req.user.tenantId, booking.id, status);
       publishBookingEvent(req.user.tenantId, "booking.updated", { ...booking, paymentStatus: status });
     }
-    recordAudit(req.user.tenantId, req.user, "payment.manual_refund", { paymentId: payment.id, bookingId: payment.bookingId, amount: finalAmount });
+    await recordAudit(req.user.tenantId, req.user, "payment.manual_refund", { paymentId: payment.id, bookingId: payment.bookingId, amount: finalAmount });
     log("INFO", `${req.user.email} manually refunded ₹${finalAmount / 100} for payment ${payment.id} (booking ${payment.bookingId}).`);
     res.json({ ok: true, refundAmount: finalAmount, status });
   } catch (err) {
@@ -973,12 +985,12 @@ function resolveWorkflowProvider(req) {
   return req.user.role === "provider" ? { workflowId: req.user.workflowId, providerId: req.user.providerId } : { workflowId: req.query.workflowId || req.body?.workflowId, providerId: req.query.providerId || req.body?.providerId };
 }
 
-router.get("/api/dashboard/calendar/status", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/calendar/status", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const { workflowId, providerId } = resolveWorkflowProvider(req);
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId are required" });
-  const connection = calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
+  const connection = await calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
   res.json({ configured: googleCalendar.isConfigured(), connection: calendarConnections.toPublicView(connection) });
-});
+}));
 
 // A real browser top-level navigation (the "Connect Calendar" button is a
 // plain link, not a fetch call) — redirects to Google's own consent
@@ -1012,13 +1024,13 @@ router.get("/api/dashboard/calendar/callback", requireAuth("admin", "provider"),
 
   try {
     const tokens = await googleCalendar.exchangeCodeForTokens(code);
-    calendarConnections.create(req.user.tenantId, statePayload.workflowId, statePayload.providerId, {
+    await calendarConnections.create(req.user.tenantId, statePayload.workflowId, statePayload.providerId, {
       calendarType: "google",
       refreshToken: tokens.refreshToken,
       accessToken: tokens.accessToken,
       accessTokenExpiresAt: tokens.expiresAt,
     });
-    recordAudit(req.user.tenantId, req.user, "calendar.connect", { workflowId: statePayload.workflowId, providerId: statePayload.providerId });
+    await recordAudit(req.user.tenantId, req.user, "calendar.connect", { workflowId: statePayload.workflowId, providerId: statePayload.providerId });
     log("INFO", `${req.user.email} connected Google Calendar for ${statePayload.workflowId}/${statePayload.providerId}.`);
     res.redirect("/dashboard?calendar=connected");
   } catch (err) {
@@ -1027,16 +1039,16 @@ router.get("/api/dashboard/calendar/callback", requireAuth("admin", "provider"),
   }
 }));
 
-router.post("/api/dashboard/calendar/disconnect", requireAuth("admin", "provider"), (req, res) => {
+router.post("/api/dashboard/calendar/disconnect", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const { workflowId, providerId } = resolveWorkflowProvider(req);
   if (!workflowId || !providerId) return res.status(400).json({ error: "workflowId and providerId are required" });
-  const connection = calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
+  const connection = await calendarConnections.getForProvider(req.user.tenantId, workflowId, providerId);
   if (!connection) return res.status(404).json({ error: "No active calendar connection to disconnect." });
-  calendarConnections.disconnect(req.user.tenantId, connection.id);
-  recordAudit(req.user.tenantId, req.user, "calendar.disconnect", { workflowId, providerId });
+  await calendarConnections.disconnect(req.user.tenantId, connection.id);
+  await recordAudit(req.user.tenantId, req.user, "calendar.disconnect", { workflowId, providerId });
   log("INFO", `${req.user.email} disconnected Google Calendar for ${workflowId}/${providerId}.`);
   res.json({ ok: true });
-});
+}));
 
 // Section 11 — Server-Sent Events. A dashboard tab open on GET
 // /api/dashboard/bookings-shaped data used to only ever learn about a new
@@ -1116,44 +1128,45 @@ router.get("/api/dashboard/events", requireAuth("admin", "provider"), (req, res)
 // business within the same one) as a fresh, tenant-owned workflow. Admin
 // only: installing makes it live for that tenant's WhatsApp bot
 // immediately, same blast radius as creating one by hand.
-router.get("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
+router.get("/api/dashboard/templates", requireAuth("admin"), asyncHandler(async (req, res) => {
   // Strip the full definition from the list — it can be large and the
   // browser only needs it at install time, which re-fetches by id.
-  res.json(templates.list().map(({ definition, ...rest }) => ({
+  const list = await templates.list();
+  res.json(list.map(({ definition, ...rest }) => ({
     ...rest,
     stepCount: definition.steps?.length ?? 0,
     providerCount: definition.providers?.length ?? definition.hotels?.length ?? 0,
   })));
-});
+}));
 
-router.post("/api/dashboard/templates", requireAuth("admin"), (req, res) => {
+router.post("/api/dashboard/templates", requireAuth("admin"), asyncHandler(async (req, res) => {
   const { workflowId, name, industry, description } = req.body || {};
-  const source = tenantWorkflowStore.get(req.user.tenantId, workflowId);
+  const source = await tenantWorkflowStore.get(req.user.tenantId, workflowId);
   if (!source) return res.status(400).json({ error: "Unknown workflowId — publish from an existing business." });
   if (typeof name !== "string" || !name.trim()) return res.status(400).json({ error: "A template name is required." });
 
-  const template = templates.create({
+  const template = await templates.create({
     name: name.trim().slice(0, 120),
     industry: typeof industry === "string" ? industry.trim().slice(0, 60) : null,
     description: typeof description === "string" ? description.trim().slice(0, 500) : source.description || null,
     definition: source,
     createdBy: req.user.email,
   });
-  recordAudit(req.user.tenantId, req.user, "template.publish", { templateId: template.id, name: template.name, fromWorkflowId: workflowId });
+  await recordAudit(req.user.tenantId, req.user, "template.publish", { templateId: template.id, name: template.name, fromWorkflowId: workflowId });
   res.status(201).json({ id: template.id, name: template.name });
-});
+}));
 
-router.post("/api/dashboard/templates/:id/install", requireAuth("admin"), (req, res) => {
+router.post("/api/dashboard/templates/:id/install", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const template = templates.getById(id);
+  const template = await templates.getById(id);
   if (!template) return res.status(404).json({ error: "Template not found" });
 
   const { newId, newLabel } = req.body || {};
   if (typeof newId !== "string" || !WORKFLOW_ID_RE.test(newId)) {
     return res.status(400).json({ error: "newId is required and must contain only letters, numbers, dashes, and underscores." });
   }
-  if (tenantWorkflowStore.get(req.user.tenantId, newId)) return res.status(409).json({ error: `A business with id "${newId}" already exists.` });
+  if (await tenantWorkflowStore.get(req.user.tenantId, newId)) return res.status(409).json({ error: `A business with id "${newId}" already exists.` });
 
   // Deep copy so the stored template is never mutated by the install.
   const workflow = JSON.parse(JSON.stringify(template.definition));
@@ -1163,21 +1176,21 @@ router.post("/api/dashboard/templates/:id/install", requireAuth("admin"), (req, 
   const validationError = validateWorkflowShape(workflow);
   if (validationError) return res.status(400).json({ error: `Template produced an invalid workflow: ${validationError}` });
 
-  tenantWorkflowStore.upsert(req.user.tenantId, workflow);
-  recordAudit(req.user.tenantId, req.user, "template.install", { templateId: id, newWorkflowId: newId });
+  await tenantWorkflowStore.upsert(req.user.tenantId, workflow);
+  await recordAudit(req.user.tenantId, req.user, "template.install", { templateId: id, newWorkflowId: newId });
   log("INFO", `${req.user.email} installed template "${template.name}" as workflow "${newId}"`);
   res.status(201).json({ ok: true, workflowId: newId });
-});
+}));
 
-router.delete("/api/dashboard/templates/:id", requireAuth("admin"), (req, res) => {
+router.delete("/api/dashboard/templates/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const template = templates.getById(id);
+  const template = await templates.getById(id);
   if (!template) return res.status(404).json({ error: "Template not found" });
-  templates.remove(id);
-  recordAudit(req.user.tenantId, req.user, "template.delete", { templateId: id, name: template.name });
+  await templates.remove(id);
+  await recordAudit(req.user.tenantId, req.user, "template.delete", { templateId: id, name: template.name });
   res.json({ ok: true });
-});
+}));
 
 // Knowledge base (RAG-lite) — the FAQ/policy/pricing text the WhatsApp
 // bot is allowed to answer questions from. Scoped per business: a provider
@@ -1201,16 +1214,16 @@ function resolveKnowledgeWorkflowId(req, requested) {
   return requested;
 }
 
-router.get("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/knowledge", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const workflowId = resolveKnowledgeWorkflowId(req, req.query.workflowId);
-  if (!workflowId) return res.json(knowledge.listAll(req.user.tenantId)); // admin, no workflow filter (still tenant-scoped)
-  res.json(knowledge.listForWorkflow(req.user.tenantId, workflowId));
-});
+  if (!workflowId) return res.json(await knowledge.listAll(req.user.tenantId)); // admin, no workflow filter (still tenant-scoped)
+  res.json(await knowledge.listForWorkflow(req.user.tenantId, workflowId));
+}));
 
-router.post("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, res) => {
+router.post("/api/dashboard/knowledge", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const { title, content } = req.body || {};
   const workflowId = resolveKnowledgeWorkflowId(req, req.body?.workflowId);
-  if (typeof workflowId !== "string" || !tenantWorkflowStore.get(req.user.tenantId, workflowId)) {
+  if (typeof workflowId !== "string" || !(await tenantWorkflowStore.get(req.user.tenantId, workflowId))) {
     return res.status(400).json({ error: "A known workflowId is required." });
   }
   if (typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "title is required." });
@@ -1219,15 +1232,15 @@ router.post("/api/dashboard/knowledge", requireAuth("admin", "provider"), (req, 
     return res.status(400).json({ error: `content must be ${MAX_KNOWLEDGE_CONTENT} characters or fewer (got ${content.trim().length}).` });
   }
 
-  const doc = knowledge.create(req.user.tenantId, workflowId, title.trim().slice(0, 200), content.trim());
-  recordAudit(req.user.tenantId, req.user, "knowledge.create", { workflowId, id: doc.id, title: doc.title });
+  const doc = await knowledge.create(req.user.tenantId, workflowId, title.trim().slice(0, 200), content.trim());
+  await recordAudit(req.user.tenantId, req.user, "knowledge.create", { workflowId, id: doc.id, title: doc.title });
   res.status(201).json(doc);
-});
+}));
 
-router.put("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), (req, res) => {
+router.put("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const existing = knowledge.getById(req.user.tenantId, id);
+  const existing = await knowledge.getById(req.user.tenantId, id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
     return res.status(403).json({ error: "You can only edit your own business's knowledge base." });
@@ -1239,23 +1252,23 @@ router.put("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), (re
     return res.status(400).json({ error: `content must be ${MAX_KNOWLEDGE_CONTENT} characters or fewer (got ${content.trim().length}).` });
   }
 
-  const doc = knowledge.update(req.user.tenantId, id, title.trim().slice(0, 200), content.trim());
-  recordAudit(req.user.tenantId, req.user, "knowledge.update", { workflowId: existing.workflowId, id, title: doc.title });
+  const doc = await knowledge.update(req.user.tenantId, id, title.trim().slice(0, 200), content.trim());
+  await recordAudit(req.user.tenantId, req.user, "knowledge.update", { workflowId: existing.workflowId, id, title: doc.title });
   res.json(doc);
-});
+}));
 
-router.delete("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), (req, res) => {
+router.delete("/api/dashboard/knowledge/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const existing = knowledge.getById(req.user.tenantId, id);
+  const existing = await knowledge.getById(req.user.tenantId, id);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (req.user.role === "provider" && existing.workflowId !== req.user.workflowId) {
     return res.status(403).json({ error: "You can only delete your own business's knowledge base." });
   }
-  knowledge.remove(req.user.tenantId, id);
-  recordAudit(req.user.tenantId, req.user, "knowledge.delete", { workflowId: existing.workflowId, id, title: existing.title });
+  await knowledge.remove(req.user.tenantId, id);
+  await recordAudit(req.user.tenantId, req.user, "knowledge.delete", { workflowId: existing.workflowId, id, title: existing.title });
   res.json({ ok: true });
-});
+}));
 
 
 module.exports = { router };

@@ -6,21 +6,22 @@
 // synchronously (no real network call, no sandbox dependency) — same
 // "don't require live credentials for automated tests" stance as
 // tests/infra/razorpayProvider.test.js.
-const { test } = require("node:test");
+const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-paymentrefunds-test-"));
-for (const mod of ["../../src/store/db", "../../src/store/bookingStore", "../../src/store/paymentStore", "../../src/engine/paymentRefunds"]) {
-  delete require.cache[require.resolve(mod)];
-}
-const bookings = require("../../src/store/bookingStore");
-const paymentStore = require("../../src/store/paymentStore");
-const { computeRefundPercent, refundIfPaid } = require("../../src/engine/paymentRefunds");
-
+let bookings, paymentStore, computeRefundPercent, refundIfPaid;
 const TENANT = 1;
+
+before(async () => {
+  await createIsolatedTestDatabase();
+  for (const mod of ["../../src/store/db", "../../src/store/bookingStore", "../../src/store/paymentStore", "../../src/engine/paymentRefunds"]) {
+    delete require.cache[require.resolve(mod)];
+  }
+  bookings = require("../../src/store/bookingStore");
+  paymentStore = require("../../src/store/paymentStore");
+  ({ computeRefundPercent, refundIfPaid } = require("../../src/engine/paymentRefunds"));
+});
 
 test("computeRefundPercent: provider-initiated cancellation is a full refund unless the policy says none", () => {
   assert.equal(computeRefundPercent({ initiatedBy: "provider", refundPolicy: null }), 100);
@@ -65,7 +66,7 @@ test("computeRefundPercent: an unparseable visit date/time doesn't penalize on a
 
 test("refundIfPaid: a booking with no paid payment is a no-op, never calls the provider", () => {
   return (async () => {
-    const booking = bookings.create(TENANT, "919000006001", {
+    const booking = await bookings.create(TENANT, "919000006001", {
       bookingId: "REFUND-TEST-1", workflowId: "medical", providerId: "p1", providerName: "Dr. Test",
       visitDate: "2099-01-01", visitTime: "9:00 am", customerName: "No Payment", status: "booked", createdAt: Date.now(),
     });
@@ -76,17 +77,17 @@ test("refundIfPaid: a booking with no paid payment is a no-op, never calls the p
 
 test("refundIfPaid: a policy that computes 0% never calls the provider and marks nothing refunded", () => {
   return (async () => {
-    const booking = bookings.create(TENANT, "919000006002", {
+    const booking = await bookings.create(TENANT, "919000006002", {
       bookingId: "REFUND-TEST-2", workflowId: "medical", providerId: "p1", providerName: "Dr. Test",
       visitDate: "2099-01-01", visitTime: "9:30 am", customerName: "Zero Percent", status: "booked", createdAt: Date.now(),
     });
-    const payment = paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_zero_pct" });
-    paymentStore.markPaid(payment.id, "pay_zero_pct");
+    const payment = await paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_zero_pct" });
+    await paymentStore.markPaid(payment.id, "pay_zero_pct");
 
     const result = await refundIfPaid(TENANT, booking, { initiatedBy: "provider", refundPolicy: { providerCancellation: "none" } });
     assert.deepEqual(result, { refunded: false, percent: 0 });
 
-    const stillPaid = paymentStore.getById(TENANT, payment.id);
+    const stillPaid = await paymentStore.getById(TENANT, payment.id);
     assert.equal(stillPaid.status, "paid", "a 0%-refund decision must not touch the payment row");
   })();
 });
@@ -98,18 +99,18 @@ test("refundIfPaid: a provider-side failure (createRefund throws) is caught and 
     delete process.env.RAZORPAY_KEY_ID;
     delete process.env.RAZORPAY_KEY_SECRET;
     try {
-      const booking = bookings.create(TENANT, "919000006003", {
+      const booking = await bookings.create(TENANT, "919000006003", {
         bookingId: "REFUND-TEST-3", workflowId: "medical", providerId: "p1", providerName: "Dr. Test",
         visitDate: "2099-01-01", visitTime: "10:00 am", customerName: "Provider Down", status: "booked", createdAt: Date.now(),
       });
-      const payment = paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_provider_down" });
-      paymentStore.markPaid(payment.id, "pay_provider_down");
+      const payment = await paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_provider_down" });
+      await paymentStore.markPaid(payment.id, "pay_provider_down");
 
       const result = await refundIfPaid(TENANT, booking, { initiatedBy: "provider", refundPolicy: null });
       assert.equal(result.refunded, false);
       assert.ok(result.error, "must report why the refund didn't go through");
 
-      const stillPaid = paymentStore.getById(TENANT, payment.id);
+      const stillPaid = await paymentStore.getById(TENANT, payment.id);
       assert.equal(stillPaid.status, "paid", "a failed refund attempt must not falsely mark the payment refunded");
     } finally {
       if (savedId === undefined) delete process.env.RAZORPAY_KEY_ID; else process.env.RAZORPAY_KEY_ID = savedId;
@@ -130,12 +131,12 @@ test("refundIfPaid: with real credentials configured, a bogus provider payment i
     // manually via createOrder() earlier in this project's Section 9 work.
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) return; // no credentials in this environment — skip
 
-    const booking = bookings.create(TENANT, "919000006004", {
+    const booking = await bookings.create(TENANT, "919000006004", {
       bookingId: "REFUND-TEST-4", workflowId: "medical", providerId: "p1", providerName: "Dr. Test",
       visitDate: "2099-01-01", visitTime: "10:30 am", customerName: "Bogus Payment Id", status: "booked", createdAt: Date.now(),
     });
-    const payment = paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_bogus" });
-    paymentStore.markPaid(payment.id, "pay_this_id_does_not_exist_on_razorpay");
+    const payment = await paymentStore.create(TENANT, booking.id, { amount: 10000, providerOrderId: "order_bogus" });
+    await paymentStore.markPaid(payment.id, "pay_this_id_does_not_exist_on_razorpay");
 
     const result = await refundIfPaid(TENANT, booking, { initiatedBy: "provider", refundPolicy: null });
     assert.equal(result.refunded, false, "Razorpay must reject a refund against a payment id it doesn't recognize");

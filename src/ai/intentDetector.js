@@ -29,8 +29,20 @@ const VALID_INTENTS = new Set(Object.values(INTENTS));
 // words customers actually type.
 const CANCEL_RE =
   /\b(cancel|cancell?ation|stop|drop|remove|don['']?t want|delete)\b.{0,40}\b(booking|appointment|slot|reserv|this|it|that)\b|\b(cancel|cancell?ation)\b|\b(cancel|band|radd)\s*(kar\s*do|karo|kardo)\b|\bhata\s*(do|o)\b|\bhatao\b/i;
+// Found live: bare `where`/`when` matched ANY message containing that
+// word, including plain location questions like "where are you located" —
+// STATUS_RE wins an unconditional override over the LLM (see the
+// CANCEL_RE/STATUS_RE override comment below), so a location question was
+// swallowed as a status check before QUESTION_RE (or the LLM, or the
+// dedicated location-lookup quick action) ever got a chance to answer it.
+// Scoped to require "where"/"when"/"what time"/"what day" to actually be
+// asking about a booking/appointment/order, the same way
+// "my (booking|appointment)" already was — bare "what time"/"what day"
+// had the identical bug (e.g. "what time do you close" is a QUESTION_RE
+// business-hours question, not a status check, but STATUS_RE's override
+// preempted it every time).
 const STATUS_RE =
-  /\b(status|where|when|my (booking|appointment)|what time|what day|track|check.{0,15}booking)\b|\bkab\s*(hai|h)\b|\bkitne\s*baje\b|\bstatus\s*bata/i;
+  /\b(status)\b|\b(where|when|what time|what day)\b.{0,25}\b(my|booking|appointment|order|slot|table)\b|\bmy (booking|appointment)\b|\btrack\b|\bcheck.{0,15}booking\b|\bkab\s*(hai|h)\b|\bkitne\s*baje\b|\bstatus\s*bata/i;
 const RESTART_RE = /\b(restart|start over|start again|new booking|book something else|reset|menu|exit)\b/i;
 const QUESTION_RE = /\b(how much|price|fee|cost|hour|open|close|location|address|where are you|do you have|available|what (do|is|are)|can you|tell me about)\b/i;
 const COMPLAINT_RE = /\b(frustrated|angry|upset|terrible|horrible|awful|this (is|was) (bad|wrong)|not working|wasted|useless|ridiculous|mess)\b/i;
@@ -43,7 +55,7 @@ const SYMPTOM_RE =
   /\b(fever|bukhar|cough|khansi|pain|dard|headache|sar\s*dard|stomach\s*ache|cold|jukam|zukam|vomit|ulti|injury|chot|rash)\b/i;
 
 const GREETING_RE =
-  /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar)[\s!,.?]*$/i;
+  /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar|raam\s*raam|ram\s*ram|kya\s*hal|kaise\s*ho|radhe\s*radhe|jai\s*shree\s*ram|pranam|sat\s*sri|adaab|khamma\s*ghani)[\s!,.?]*$/i;
 
 function keywordIntent(text) {
   const t = text.toLowerCase().trim();

@@ -86,14 +86,19 @@ In **WhatsApp → Configuration** in the Meta dashboard:
 
 ## 7. Run it
 
+This project is two separate servers sharing one database — see the main
+README's "How marketing, dashboard, and the bot actually run" for the
+full split. For working on the bot/dashboard (this guide's focus), you
+only need the first one:
+
 ```bash
-node server.js
+npm run start:dashboard   # or: node server.js
 ```
 
 You should see:
 
 ```
-BookPilot AI listening on port 8081
+BookPilot AI dashboard/bot server listening on port 8081
 ```
 
 Send a WhatsApp message to your test number — e.g. `I have a bad
@@ -102,6 +107,16 @@ replies on WhatsApp itself. Type `restart` anytime to start over.
 
 The dashboard is at `http://localhost:8081/dashboard` — log in with
 whatever you set as `ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD`.
+
+If you're also working on the public marketing site or its signup/demo-
+chat widget, run the second server too, in a separate terminal:
+
+```bash
+npm run start:marketing   # or: node marketingServer.js
+```
+
+It listens on `MARKETING_PORT` (default 8082) and serves the marketing
+homepage at `http://localhost:8082/`.
 
 ### Optional: the new React dashboard (Section 13)
 

@@ -12,6 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
 // Each freshApp() call re-requires server.js fresh (needed for per-test DB
 // isolation — see below), and server.js registers its crash-safety
@@ -38,8 +39,16 @@ function blank(...keys) {
   for (const k of keys) process.env[k] = "";
 }
 
-function freshApp({ webhookAppSecret } = {}) {
+async function freshApp({ webhookAppSecret } = {}) {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-http-test-"));
+  // Postgres (not the old SQLite temp file) is what actually needs to be
+  // fresh/isolated per freshApp() call now — sets process.env.DATABASE_URL
+  // to a brand-new, empty database before the require-cache-busting loop
+  // below, so the fresh `require("../../server")` a few lines down (and
+  // its own fresh require of src/store/db) connects to it instead of
+  // whatever database the previous freshApp() call in this file left
+  // configured.
+  await createIsolatedTestDatabase();
   process.env.SESSION_SECRET = "test-session-secret";
   process.env.APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
   process.env.WHATSAPP_VERIFY_TOKEN = "test-verify-token";
@@ -65,68 +74,40 @@ function freshApp({ webhookAppSecret } = {}) {
   // webhookAppSecret AND still wants simulate enabled too.
   process.env.ALLOW_SIMULATE_ENDPOINT = webhookAppSecret ? "true" : "";
 
-  for (const mod of [
-    "../../server",
-    "../../src/store/db",
-    "../../src/store/tenantStore",
-    "../../src/store/bookingStore",
-    "../../src/store/userStore",
-    "../../src/store/sessionStore",
-    "../../src/store/availabilityStore",
-    "../../src/store/signupOtpStore",
-    "../../src/store/authSessionStore",
-    // server.js was split into per-domain route files (src/routes/*.js) —
-    // each one does its own `require("../store/x")` at module scope, same
-    // shape as every other module in this list, so each needs the same
-    // busting or it holds the first freshApp() call's store references
-    // forever. auth.js is the one every OTHER router also imports
-    // requireAuth/requireApiKey from, so staleness here would silently
-    // affect every route's auth check, not just the auth routes themselves.
-    "../../src/routes/auth",
-    "../../src/routes/platformAdmin",
-    "../../src/routes/publicApi",
-    "../../src/routes/webhook",
-    "../../src/routes/dashboard",
-    "../../src/routes/marketing",
-    "../../src/infra/publishBookingEvent",
-    "../../src/infra/asyncHandler",
-    // Same stale-module-scope-db-reference bug already found and fixed in
-    // billing.js/analytics.js/calendarSync.js/paymentRefunds.js/reminders.js
-    // — tenantWorkflowStore.js does `const { db } = require("./db")` at
-    // module scope, so it silently keeps using the FIRST freshApp() call's
-    // db connection on every later freshApp() in the same test file unless
-    // busted here too. Went undetected until now because every read AND
-    // write for a given test both go through this same module, so a stale
-    // (but internally self-consistent) db never produced a visible
-    // assertion failure — only cross-file isolation checks would expose it.
-    "../../src/store/tenantWorkflowStore",
-    "../../src/infra/rateLimit",
-    "../../src/engine/workflowEngine",
-    "../../src/engine/loadWorkflows",
-    // Real bug, found live: any engine module that caches a require()'d
-    // store reference at module scope (const bookings = require(...) at
-    // the top of the file, not inside each function) holds onto that
-    // FIRST freshApp() call's db connection forever unless it's busted
-    // here too — src/engine/billing.js's usage counts were silently
-    // reading from the wrong (stale, first-test's) database for every
-    // freshApp() after the first one in the same file. workflowEngine.js
-    // above already needed this same fix; these three have the identical
-    // shape and would hit the identical bug the moment a test file uses
-    // more than one tenant across more than one freshApp() call.
-    "../../src/engine/billing",
-    "../../src/engine/analytics",
-    "../../src/engine/calendarSync",
-    "../../src/engine/paymentRefunds",
-    "../../src/infra/reminders",
-  ]) {
-    try {
-      delete require.cache[require.resolve(mod)];
-    } catch {
-      // not loaded yet — fine
+  // Every module under src/ that does `const { pool } = require("./db")` (or
+  // `require("../store/x")`, `require("../engine/y")`, etc.) at MODULE
+  // SCOPE — not inside a function — captures whatever object was in
+  // require.cache at THAT require() call, permanently. If that module
+  // itself isn't also busted here, it keeps holding the FIRST freshApp()
+  // call's (by-then-closed, orphaned) pool/store reference forever, no
+  // matter how many times server.js and src/store/db are freshly required.
+  // This used to be a hand-maintained list of "every module we've found
+  // this bug in so far" — it kept missing modules (auditLog.js was the
+  // last one found live: recordAudit() calls throwing "Cannot use a pool
+  // after calling end on the pool" the moment a SECOND freshApp() in the
+  // same file tried to use it), because nothing forced the list to stay
+  // exhaustive as src/ grew. Busting every already-`require()`d module
+  // under src/ (plus server.js itself) sidesteps that maintenance burden
+  // entirely: it doesn't matter which modules cache what, everything
+  // reachable from server.js gets a clean slate on every freshApp() call.
+  const projectRoot = path.join(__dirname, "..", "..");
+  const serverPath = path.join(projectRoot, "server.js");
+  const srcDir = path.join(projectRoot, "src") + path.sep;
+  for (const resolvedPath of Object.keys(require.cache)) {
+    if (resolvedPath === serverPath || resolvedPath.startsWith(srcDir)) {
+      delete require.cache[resolvedPath];
     }
   }
 
   const app = require("../../server");
+  // Startup is now async (Postgres, not node:sqlite's synchronous
+  // DatabaseSync) — server.js mounts every route INSIDE its bootstrap()
+  // function, not synchronously at module load, and exports that same
+  // bootstrap promise as app.ready. Awaiting it here is what guarantees
+  // every route is actually mounted before any test makes a request
+  // against the returned app — skipping this produced 404s for every
+  // route, since requests could fire before bootstrap() finished.
+  await app.ready;
   // Tenant id=1 ("the default tenant", created explicitly by db.js's own
   // bootstrap — see its comment) is used directly by several test files
   // (bookings.test.js, loopDetection.test.js, webhook.test.js) via
@@ -135,7 +116,7 @@ function freshApp({ webhookAppSecret } = {}) {
   // tenant with the workflows/*.json demo catalog, so this fixture-seeds
   // just tenant 1 here instead of repeating the same call in every one of
   // those files. Idempotent — a no-op for tests that don't touch tenant 1.
-  require("../../src/store/tenantWorkflowStore").seedDefaultsForTenant(1);
+  await require("../../src/store/tenantWorkflowStore").seedDefaultsForTenant(1);
   return app;
 }
 
@@ -153,20 +134,20 @@ async function signupAndActivate(app, request, { businessName, email, password =
   const { createOtp } = require("../../src/store/signupOtpStore");
   const tenantStore = require("../../src/store/tenantStore");
   const tenantWorkflowStore = require("../../src/store/tenantWorkflowStore");
-  const otp = createOtp(email);
+  const otp = await createOtp(email);
   const resp = await request(app).post("/api/signup").send({ businessName, ownerName, email, password, otp });
   if (resp.status !== 201) {
     throw new Error(`signupAndActivate: POST /api/signup failed (${resp.status}): ${JSON.stringify(resp.body)}`);
   }
   const tenantId = resp.body.user.tenantId;
-  tenantStore.setStatus(tenantId, "active");
+  await tenantStore.setStatus(tenantId, "active");
   // Production signup no longer auto-seeds the workflows/*.json demo
   // catalog (a real tenant lists their own businesses by hand now) — but
   // most of this suite's tests are exercising booking/workflow flows, not
   // signup itself, so they still need a working catalog to book against.
   // Seeded directly here rather than via the HTTP layer, same reasoning as
   // bypassing the platform_admin activation endpoint above.
-  tenantWorkflowStore.seedDefaultsForTenant(tenantId);
+  await tenantWorkflowStore.seedDefaultsForTenant(tenantId);
   return { cookie: resp.headers["set-cookie"], tenantId };
 }
 

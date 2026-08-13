@@ -1,6 +1,6 @@
 /**
- * BookPilot AI — WhatsApp booking bot powered by a config-driven Dynamic
- * Workflow Engine.
+ * BookPilot AI — the DASHBOARD + WHATSAPP BOT server. Powered by a
+ * config-driven Dynamic Workflow Engine.
  * -------------------------------------------------------------------------
  * Customer sends a free-text requirement on WhatsApp
  *   -> AI (Groq, free tier) classifies it into a business/workflow
@@ -10,7 +10,17 @@
  *      (pick a provider/service via a tappable list/buttons, collect
  *      whatever fields that industry needs, confirm)
  *
- * Two ways to run this:
+ * This is ONE of TWO servers this project runs — see README's "Running
+ * both servers" section. This one owns everything that touches real
+ * tenant data: login/signup, the dashboard app (/app), the WhatsApp
+ * webhook, payments, and the platform-admin/public API. The public
+ * marketing site is a SEPARATE process (marketingServer.js) — start both
+ * to run the full product; either one alone is enough for
+ * bot-development/API work. Listens on PORT (default 8081), meant to sit
+ * behind the product's own domain (this repo's convention: bookpilot.com;
+ * see README for the reasoning).
+ *
+ * Two ways to run the bot itself:
  *   1. Real WhatsApp — set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID,
  *      WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET in .env and point Meta's
  *      webhook at POST https://<your-public-url>/webhook (see README).
@@ -18,6 +28,16 @@
  *      /api/simulate-whatsapp with { "from": "<any id>", "text": "..." }.
  *      Replies are printed to the console/log file instead of sent
  *      over WhatsApp when WHATSAPP_TOKEN isn't configured yet.
+ *
+ * Startup is now ASYNC (Postgres — src/store/db.js — replaced node:sqlite's
+ * synchronous DatabaseSync), which is why almost everything below lives
+ * inside bootstrap() rather than running at module-top-level the way it
+ * used to: route mounting itself depends on ensureDemoTenant() having
+ * resolved (the demo-chat router is built with a concrete tenant id, not a
+ * promise). `module.exports.ready` is that same bootstrap promise — the
+ * real `node server.js` entry point below awaits it before app.listen();
+ * tests/http/_setup.js's freshApp() awaits it too before making any
+ * request against the exported `app`.
  */
 
 require("dotenv").config();
@@ -54,18 +74,17 @@ process.on("uncaughtException", (err) => {
   log("ERROR", `Uncaught exception — exiting so a process manager can restart cleanly: ${err.stack || err.message}`);
   process.exit(1);
 });
+const { runMigrations } = require("./src/store/db");
 const users = require("./src/store/userStore");
-const tenantStore = require("./src/store/tenantStore");
-const { runBackup, scheduleBackups } = require("./src/infra/backupStore");
 const { scheduleReminders } = require("./src/infra/reminders");
 const { startOutboundQueueWorker } = require("./src/infra/whatsapp");
 const { UPLOAD_DIR } = require("./src/infra/uploads");
 const { runWithRequestId, newRequestId } = require("./src/infra/tracing");
-
+const { ensureDemoTenant } = require("./src/infra/demoTenant");
+const { finalErrorHandler } = require("./src/infra/finalErrorHandler");
 
 const app = express();
 app.disable("x-powered-by");
-
 
 // Section 15 — the very first middleware, ahead of even the security
 // headers below: every log() call anywhere in this request's lifecycle
@@ -79,19 +98,6 @@ app.use((req, res, next) => {
   res.setHeader("X-Request-Id", requestId);
   runWithRequestId(next, requestId);
 });
-
-// Express 4 (what this project uses) has no built-in awareness of
-// async/await — a rejected promise inside an `async (req, res) => {...}`
-// handler does NOT reach the error-handling middleware below the way a
-// synchronous throw does; it becomes an unhandled rejection instead, and
-// the client is left waiting on a response that will never come. Found
-// live: a ReferenceError inside the bookings PATCH route hung a curl
-// call for the full 2-minute timeout with nothing ever sent back. Every
-// async route handler needs this wrapper (or its own complete try/catch)
-// or it's vulnerable to the exact same silent hang.
-function asyncHandler(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-}
 
 // Capture the raw body alongside the parsed one — signature verification
 // needs to HMAC the exact bytes Meta sent, not a re-serialized version.
@@ -148,36 +154,6 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 8081;
-
-// Item 8 — the public marketing site's live chat widget (POST
-// /api/demo/chat) needs somewhere to run real conversations that isn't
-// any actual customer's business. A dedicated, permanent tenant — created
-// once (idempotent via its well-known slug, safe to call on every boot)
-// and never assigned real WhatsApp credentials, so its sends always stay
-// in simulated/logged mode regardless of what any real tenant on this
-// install has configured. Never the upgrade-continuity fallback tenant
-// (id 1) — a real single-tenant install's actual business could BE
-// tenant 1, and a public demo visitor must never be able to touch it.
-const DEMO_TENANT_SLUG = "bookpilot-live-demo";
-function ensureDemoTenant() {
-  const existing = tenantStore.getBySlug(DEMO_TENANT_SLUG);
-  // tenantStore.create() always starts a tenant "pending" (every tenant
-  // needs a platform_admin to explicitly activate it — see requireAuth()'s
-  // own comment). The demo tenant never has a real user logging in
-  // through it, so "pending" would just be permanent, meaningless clutter
-  // in a platform admin's activation queue — force it active on every
-  // boot, not just at creation, so an install that already had this
-  // tenant from before this check existed gets corrected too.
-  if (existing) {
-    if (existing.status !== "active") tenantStore.setStatus(existing.id, "active");
-    return existing.id;
-  }
-  const created = tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
-  tenantStore.setStatus(created.id, "active");
-  log("INFO", `Created dedicated demo tenant (id ${created.id}) for the public marketing chat widget.`);
-  return created.id;
-}
-const DEMO_TENANT_ID = ensureDemoTenant();
 
 // Item 5 previously backfilled every tenant with the workflows/*.json demo
 // catalog (hair/hotel/makeup/medical/service) on every boot, and both
@@ -246,103 +222,144 @@ async function checkWhatsAppTokenValidity() {
     log("WARN", `Could not verify WHATSAPP_TOKEN at startup (${err.message}) — Meta's API may be temporarily unreachable. Will retry naturally on the next real send.`);
   }
 }
-validateEnv();
 
-const bootstrap = users.bootstrapAdminIfNeeded();
-if (bootstrap?.bootstrapped) {
-  log("INFO", `Bootstrapped admin account for ${bootstrap.email} from ADMIN_BOOTSTRAP_EMAIL/PASSWORD. You can unset those env vars now — they only matter when the users table is empty.`);
-} else if (users.count() === 0) {
-  log("WARN", "No dashboard users exist yet and ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD are not set — nobody can log into /dashboard. Set both env vars and restart once to create the first admin account.");
+// Everything that used to run synchronously at module-top-level, now
+// awaited in order — Postgres (unlike node:sqlite) means every one of
+// these steps is a real async DB round trip. Route mounting happens
+// INSIDE here (not after) because the demo-chat router needs a concrete,
+// already-resolved tenant id, not a promise.
+async function bootstrap() {
+  await runMigrations();
+
+  // workflowEngine.js's in-memory `sessions` Map is loaded once, async,
+  // at startup (Postgres, unlike node:sqlite, can't populate it
+  // synchronously at module-require time) — must resolve before any
+  // route that could handle a real conversation (webhook, simulate,
+  // demo-chat) is reachable.
+  await require("./src/engine/workflowEngine").initSessions();
+
+  const demoTenantId = await ensureDemoTenant();
+
+  validateEnv();
+
+  const bootstrapResult = await users.bootstrapAdminIfNeeded();
+  if (bootstrapResult?.bootstrapped) {
+    log("INFO", `Bootstrapped admin account for ${bootstrapResult.email} from ADMIN_BOOTSTRAP_EMAIL/PASSWORD. You can unset those env vars now — they only matter when the users table is empty.`);
+  } else if ((await users.count()) === 0) {
+    log("WARN", "No dashboard users exist yet and ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD are not set — nobody can log into /dashboard. Set both env vars and restart once to create the first admin account.");
+  }
+
+  const platformBootstrap = await users.bootstrapPlatformAdminIfNeeded();
+  if (platformBootstrap?.bootstrapped) {
+    log("INFO", `Bootstrapped platform_admin account for ${platformBootstrap.email} from PLATFORM_ADMIN_BOOTSTRAP_EMAIL/PASSWORD.`);
+  }
+
+  // Found live (production-readiness audit): bootstrap only ever WARNS about
+  // unset credentials or CONFIRMS a fresh bootstrap — a startup where the
+  // account already existed from a PRIOR run and the bootstrap env vars are
+  // STILL sitting in .env produced no signal at all. That's a real, easy
+  // mistake (the "you can unset those now" message above is easy to miss or
+  // forget), and it means a plaintext admin password lingers in .env
+  // indefinitely for no reason once the account it was for already exists.
+  if (!bootstrapResult?.bootstrapped && process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+    log("WARN", "ADMIN_BOOTSTRAP_PASSWORD is still set even though the admin account it bootstraps already exists — it's not doing anything anymore. Remove it from .env.");
+  }
+  if (!platformBootstrap?.bootstrapped && process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD) {
+    log("WARN", "PLATFORM_ADMIN_BOOTSTRAP_PASSWORD is still set even though a platform_admin account already exists — it's not doing anything anymore. Remove it from .env.");
+  }
+
+  const { createWebhookRouter } = require("./src/routes/webhook");
+  app.use(createWebhookRouter());
+
+  // Mounted here too (not just on marketingServer.js) so this process alone
+  // is still enough to run tests/http/demoChat.test.js and to develop the
+  // bot without also having the marketing server up — see src/routes/
+  // demoChat.js's own comment.
+  const { createDemoChatRouter } = require("./src/routes/demoChat");
+  app.use(createDemoChatRouter(demoTenantId));
+
+  const authRoutes = require("./src/routes/auth");
+  app.use(authRoutes.router);
+
+  const billingRoutes = require("./src/routes/billing");
+  app.use(billingRoutes.router);
+
+  const dashboardRoutes = require("./src/routes/dashboard");
+  app.use(dashboardRoutes.router);
+
+  // Serves whatever POST /api/dashboard/upload-image just saved. Public and
+  // unauthenticated on purpose — a business photo is customer-facing (shown
+  // on WhatsApp booking confirmations and in the dashboard's own <img> tags),
+  // exactly as public as the externally-hosted photo URLs an admin could
+  // already paste into the same field.
+  app.use("/uploads", express.static(UPLOAD_DIR));
+
+  const platformAdminRoutes = require("./src/routes/platformAdmin");
+  app.use(platformAdminRoutes.router);
+
+  const publicApiRoutes = require("./src/routes/publicApi");
+  app.use(publicApiRoutes.router);
+
+  // New plan, Stream 4 — the reverse of marketingServer.js's own
+  // /marketing/config.js: the React dashboard app needs to know the
+  // marketing site's URL for exactly one thing (redirecting a
+  // needsPlanSelection session to /plan-selection there, since checkout
+  // isn't part of this app). Same runtime-config-over-a-tiny-JS-file
+  // pattern, same reasoning (don't hardcode a URL that changes per
+  // environment into the built static bundle).
+  const marketingUrl = process.env.MARKETING_URL || "http://localhost:8082";
+  app.get("/app-config.js", (req, res) => {
+    res.type("application/javascript").send(`window.MARKETING_URL = ${JSON.stringify(marketingUrl)};`);
+  });
+
+  app.get("/health", (req, res) => {
+    // Item 5 — used to list every workflow id on the entire platform here
+    // (Object.keys() of the old global, un-scoped `workflows` object). Now
+    // that workflows are tenant-owned, there's no single "current tenant"
+    // for an unauthenticated health check to report on, and leaking every
+    // tenant's business names to anyone who can reach this URL was never
+    // something this endpoint's actual purpose (process liveness) needed.
+    res.json({ status: "ok", uptimeSeconds: process.uptime() });
+  });
+
+  // Anything that fell through every route above.
+  app.use((req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
+  app.use(finalErrorHandler);
 }
 
-const platformBootstrap = users.bootstrapPlatformAdminIfNeeded();
-if (platformBootstrap?.bootstrapped) {
-  log("INFO", `Bootstrapped platform_admin account for ${platformBootstrap.email} from PLATFORM_ADMIN_BOOTSTRAP_EMAIL/PASSWORD.`);
-}
-
-// Found live (production-readiness audit): bootstrap only ever WARNS about
-// unset credentials or CONFIRMS a fresh bootstrap — a startup where the
-// account already existed from a PRIOR run and the bootstrap env vars are
-// STILL sitting in .env produced no signal at all. That's a real, easy
-// mistake (the "you can unset those now" message above is easy to miss or
-// forget), and it means a plaintext admin password lingers in .env
-// indefinitely for no reason once the account it was for already exists.
-if (!bootstrap?.bootstrapped && process.env.ADMIN_BOOTSTRAP_PASSWORD) {
-  log("WARN", "ADMIN_BOOTSTRAP_PASSWORD is still set even though the admin account it bootstraps already exists — it's not doing anything anymore. Remove it from .env.");
-}
-if (!platformBootstrap?.bootstrapped && process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD) {
-  log("WARN", "PLATFORM_ADMIN_BOOTSTRAP_PASSWORD is still set even though a platform_admin account already exists — it's not doing anything anymore. Remove it from .env.");
-}
-
-
-const { createWebhookRouter } = require("./src/routes/webhook");
-app.use(createWebhookRouter(DEMO_TENANT_ID));
-
-const authRoutes = require("./src/routes/auth");
-app.use(authRoutes.router);
-
-
-const dashboardRoutes = require("./src/routes/dashboard");
-app.use(dashboardRoutes.router);
-
-// Serves whatever POST /api/dashboard/upload-image just saved. Public and
-// unauthenticated on purpose — a business photo is customer-facing (shown
-// on WhatsApp booking confirmations and in the dashboard's own <img> tags),
-// exactly as public as the externally-hosted photo URLs an admin could
-// already paste into the same field.
-app.use("/uploads", express.static(UPLOAD_DIR));
-
-const marketingRoutes = require("./src/routes/marketing");
-app.use(marketingRoutes.router);
-
-const platformAdminRoutes = require("./src/routes/platformAdmin");
-app.use(platformAdminRoutes.router);
-
-const publicApiRoutes = require("./src/routes/publicApi");
-app.use(publicApiRoutes.router);
-
-app.get("/health", (req, res) => {
-  // Item 5 — used to list every workflow id on the entire platform here
-  // (Object.keys() of the old global, un-scoped `workflows` object). Now
-  // that workflows are tenant-owned, there's no single "current tenant"
-  // for an unauthenticated health check to report on, and leaking every
-  // tenant's business names to anyone who can reach this URL was never
-  // something this endpoint's actual purpose (process liveness) needed.
-  res.json({ status: "ok", uptimeSeconds: process.uptime() });
-});
-
-// Anything that fell through every route above.
-app.use((req, res) => {
-  res.status(404).json({ error: "Not found" });
-});
-
-// Final safety net — Express's own default error handler would otherwise
-// send an HTML page (and, outside NODE_ENV=production, a stack trace) for
-// any error a route handler didn't catch itself. This keeps every response
-// this API sends as JSON and never leaks internals to the client, while
-// the real detail still goes to the log.
-app.use((err, req, res, next) => {
-  log("ERROR", `Unhandled error on ${req.method} ${req.path}: ${err.stack || err.message}`);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: "Internal server error." });
-});
+const readyPromise = bootstrap();
+// Surfaced so both `node server.js` below and tests/http/_setup.js's
+// freshApp() can await the SAME promise rather than each racing their own
+// guess at "is the server ready yet." A bootstrap failure (e.g. Postgres
+// unreachable) rejects this promise — awaited below for the real entry
+// point (exits loudly rather than silently listening with half the routes
+// unmounted), and propagates naturally to any test that awaits it too.
+app.ready = readyPromise;
 
 // Item 2 (HTTP-level route tests) needs `app` importable without the side
 // effect of actually binding a port and kicking off background loops
-// (backups, the outbound queue worker, a live WhatsApp token check) —
-// none of which a test run wants. `require.main === module` is true only
-// when this file is the actual process entry point (`node server.js`),
-// never when another file `require()`s it, so `node server.js` behaves
-// identically to before; a test file gets the bare `app` instead.
+// (the outbound queue worker, a live WhatsApp token check) — none of which
+// a test run wants. `require.main === module` is true only when this file
+// is the actual process entry point (`node server.js`), never when
+// another file `require()`s it, so `node server.js` behaves identically to
+// before; a test file gets the bare `app` (plus `app.ready`) instead.
 if (require.main === module) {
-  app.listen(PORT, () => {
-    log("INFO", `BookPilot AI listening on port ${PORT}`);
-    scheduleBackups(); // every BACKUP_INTERVAL_HOURS (default 6h)
-    runBackup().catch((err) => log("ERROR", `Startup backup threw: ${err.message}`)); // one immediately, don't wait 6h for the first
-    startOutboundQueueWorker(); // polls the durable send queue every 60s
-    scheduleReminders(); // every 10 minutes — Block 13's 24h/2h pre-appointment reminders
-    checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
-  });
+  readyPromise
+    .then(() => {
+      app.listen(PORT, () => {
+        log("INFO", `BookPilot AI dashboard/bot server listening on port ${PORT}`);
+        startOutboundQueueWorker(); // polls the durable send queue every 60s
+        scheduleReminders(); // every 10 minutes — Block 13's 24h/2h pre-appointment reminders
+        checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
+      });
+    })
+    .catch((err) => {
+      log("ERROR", `Startup failed: ${err.stack || err.message}`);
+      process.exit(1);
+    });
 }
 
 module.exports = app;

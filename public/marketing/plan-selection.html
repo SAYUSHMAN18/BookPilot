@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Choose your plan — BookPilot AI</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📅</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/marketing/styles.css" />
+  <link rel="stylesheet" href="/marketing/auth.css" />
+  <link rel="stylesheet" href="/marketing/plan-selection.css" />
+</head>
+<body class="auth-body">
+  <div class="grain"></div>
+
+  <a href="/" class="auth-brand"><span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span></a>
+
+  <div class="plan-wrap">
+    <div class="plan-header">
+      <h1>You're almost in — pick a plan.</h1>
+      <p>Your account is created. Choose a plan to unlock your dashboard — our onboarding team takes it from there.</p>
+    </div>
+
+    <div class="error-banner" id="errorBanner" hidden></div>
+
+    <div class="plan-grid" id="planGrid">
+      <p class="plan-loading">Loading plans…</p>
+    </div>
+
+    <p class="auth-fineprint plan-fineprint">
+      Not ready to pay yet? <a href="#" id="logoutLink">Log out</a> and come back anytime — your account will be waiting at "choose a plan."
+    </p>
+  </div>
+
+  <script src="/marketing/config.js"></script>
+  <script src="/marketing/plan-selection.js"></script>
+</body>
+</html>

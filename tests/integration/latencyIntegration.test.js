@@ -8,6 +8,7 @@ const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
 const http = require("node:http");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
 test("handleIncomingMessage completes within the timeout window even when Groq hangs entirely", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-latency-test-"));
@@ -15,6 +16,7 @@ test("handleIncomingMessage completes within the timeout window even when Groq h
   process.env.SESSION_SECRET = "test-secret";
   process.env.GROQ_API_KEY = "test-key-not-real";
   process.env.GROQ_TIMEOUT_MS = "300"; // fast test, not the 5s production default
+  await createIsolatedTestDatabase();
 
   const server = http.createServer(() => {}); // accepts, never responds
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -51,12 +53,10 @@ test("handleIncomingMessage completes within the timeout window even when Groq h
     server.close();
     delete process.env.GROQ_API_URL;
     delete process.env.GROQ_TIMEOUT_MS;
-    // node:sqlite holds its file handle open for the life of the process
-    // (db.js never closes it, by design — the real server never needs
-    // to), which makes Windows refuse to remove the containing directory
-    // here. Not a bug to chase: it's a leftover temp dir in the OS temp
-    // folder, not the real data/ directory, and the OS reclaims it
-    // eventually.
+    // dataDir here is DATA_DIR (src/infra/uploads.js's local-upload
+    // directory), unrelated to the actual Postgres database now — best-
+    // effort cleanup only, same as every other test file's own mkdtempSync
+    // temp dir.
     try {
       fs.rmSync(dataDir, { recursive: true, force: true });
     } catch {

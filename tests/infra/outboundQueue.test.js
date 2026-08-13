@@ -5,19 +5,21 @@
 // drains a queued item and marks it sent once the send succeeds, and
 // (3) an item that keeps failing eventually gets marked 'failed' instead
 // of retrying forever.
-const { test } = require("node:test");
+const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
+const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-outbound-test-"));
-for (const mod of ["../../src/store/db", "../../src/store/outboundQueueStore", "../../src/infra/whatsapp"]) {
-  delete require.cache[require.resolve(mod)];
-}
-const outboundQueueStore = require("../../src/store/outboundQueueStore");
-const { sendWithRetry, processOutboundQueue } = require("../../src/infra/whatsapp");
+let outboundQueueStore, sendWithRetry, processOutboundQueue;
 const TENANT = 1; // the default tenant, created by db.js's own migration
+
+before(async () => {
+  await createIsolatedTestDatabase();
+  for (const mod of ["../../src/store/db", "../../src/store/outboundQueueStore", "../../src/infra/whatsapp"]) {
+    delete require.cache[require.resolve(mod)];
+  }
+  outboundQueueStore = require("../../src/store/outboundQueueStore");
+  ({ sendWithRetry, processOutboundQueue } = require("../../src/infra/whatsapp"));
+});
 
 const originalFetch = global.fetch;
 const originalToken = process.env.WHATSAPP_TOKEN;
@@ -48,7 +50,7 @@ test("sendWithRetry enqueues into the durable queue once immediate attempts are 
   const sent = await sendWithRetry(TENANT, waId, body, { retries: 0, delayMs: 1 });
 
   assert.equal(sent, false);
-  const due = outboundQueueStore.dueItems();
+  const due = await outboundQueueStore.dueItems();
   const match = due.find((item) => item.waId === waId && item.body === body);
   assert.ok(match, "expected the failed send to have been enqueued for durable retry");
   assert.equal(match.status, "pending");
@@ -58,37 +60,37 @@ test("processOutboundQueue delivers a queued item once the send succeeds and mar
   useLiveModeCreds();
   const waId = "919000000102";
   const body = "Completion + feedback request (durable-queue test)";
-  outboundQueueStore.enqueue(TENANT, waId, body);
+  await outboundQueueStore.enqueue(TENANT, waId, body);
 
   global.fetch = async () => ({ ok: false, status: 500, text: async () => "still down" });
-  const stillPending = outboundQueueStore.dueItems().find((i) => i.waId === waId);
+  const stillPending = (await outboundQueueStore.dueItems()).find((i) => i.waId === waId);
   assert.ok(stillPending);
 
   global.fetch = async () => ({ ok: true, json: async () => ({}) });
   const processed = await processOutboundQueue();
   assert.ok(processed >= 1);
 
-  const recent = outboundQueueStore.listRecent(TENANT).find((i) => i.waId === waId && i.body === body);
+  const recent = (await outboundQueueStore.listRecent(TENANT)).find((i) => i.waId === waId && i.body === body);
   assert.ok(recent, "expected the queued item to still exist in listRecent()");
   assert.equal(recent.status, "sent");
-  assert.ok(!outboundQueueStore.dueItems().some((i) => i.waId === waId && i.body === body));
+  assert.ok(!(await outboundQueueStore.dueItems()).some((i) => i.waId === waId && i.body === body));
 });
 
-test("an item that exhausts max_attempts is marked failed instead of retried forever", () => {
+test("an item that exhausts max_attempts is marked failed instead of retried forever", async () => {
   const waId = "919000000103";
   const body = "Arrival alert that never delivers (durable-queue test)";
-  outboundQueueStore.enqueue(TENANT, waId, body);
-  const item = outboundQueueStore.dueItems().find((i) => i.waId === waId && i.body === body);
+  await outboundQueueStore.enqueue(TENANT, waId, body);
+  const item = (await outboundQueueStore.dueItems()).find((i) => i.waId === waId && i.body === body);
   assert.ok(item);
   assert.equal(item.maxAttempts, 5);
 
   let current = item;
   for (let i = 0; i < 5; i++) {
-    outboundQueueStore.markFailedAttempt(current, `simulated failure ${i + 1}`);
-    current = outboundQueueStore.listRecent(TENANT).find((r) => r.id === item.id);
+    await outboundQueueStore.markFailedAttempt(current, `simulated failure ${i + 1}`);
+    current = (await outboundQueueStore.listRecent(TENANT)).find((r) => r.id === item.id);
   }
 
   assert.equal(current.status, "failed");
   assert.equal(current.attempts, 5);
-  assert.ok(!outboundQueueStore.dueItems().some((i) => i.id === item.id));
+  assert.ok(!(await outboundQueueStore.dueItems()).some((i) => i.id === item.id));
 });

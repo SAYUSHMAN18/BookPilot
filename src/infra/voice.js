@@ -38,7 +38,7 @@ function isVoiceEnabled() {
 // always reading the global env var — a voice note sent to Tenant B's
 // number must be downloaded with Tenant B's token, not Tenant A's.
 async function downloadWhatsAppMedia(tenantId, mediaId) {
-  const tenant = tenantId ? tenantStore.getById(tenantId) : null;
+  const tenant = tenantId ? await tenantStore.getById(tenantId) : null;
   const token = tenant?.whatsappAccessToken || process.env.WHATSAPP_TOKEN;
   if (!token) throw new Error("WHATSAPP_TOKEN is not set — can't download voice notes.");
 

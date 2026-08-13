@@ -8,6 +8,9 @@ const bookings = require("../store/bookingStore");
 const tenantStore = require("../store/tenantStore");
 const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const paymentStore = require("../store/paymentStore");
+const subscriptionOrders = require("../store/subscriptionOrderStore");
+const onboardingRequests = require("../store/onboardingRequestStore");
+const { sendEmail } = require("../infra/emailSender");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
 const { recordAudit } = require("../store/auditLog");
 const { publishBookingEvent } = require("../infra/publishBookingEvent");
@@ -21,7 +24,6 @@ const {
   beginReplyCapture,
   endReplyCapture,
 } = require("../infra/whatsapp");
-const { isDemoChatRateLimited } = require("../infra/rateLimit");
 const { asyncHandler } = require("../infra/asyncHandler");
 
 // Voice notes: Sarvam transcribes -> normal text pipeline -> Sarvam speaks
@@ -59,7 +61,7 @@ async function handleVoiceMessage(tenantId, waId, message) {
   // engine itself is untouched and unaware this is a voice conversation.
   beginReplyCapture(waId);
   try {
-    await handleIncomingMessage(tenantId, waId, transcript, tenantWorkflowStore.listForTenant(tenantId));
+    await handleIncomingMessage(tenantId, waId, transcript, await tenantWorkflowStore.listForTenant(tenantId));
   } finally {
     const replyText = endReplyCapture(waId);
     if (replyText && languageCode) {
@@ -78,16 +80,54 @@ async function handleVoiceMessage(tenantId, waId, message) {
   }
 }
 
-function syntheticDemoWaId(sessionId) {
-  const hash = crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-  return `demo-${hash}`;
+// New plan, Stream 2 — the moment a plan-subscription checkout is
+// confirmed paid, this is the ONLY thing that advances a tenant past
+// awaiting_payment (same "webhook is the sole source of truth" discipline
+// as the booking-payment branch above it) — never the checkout route
+// itself, which only ever creates the order and hands back a payment URL.
+async function handleSubscriptionWebhookEvent(event, subscriptionOrder) {
+  const tenant = await tenantStore.getById(subscriptionOrder.tenantId);
+  if (!tenant) {
+    log("ERROR", `Razorpay webhook "${event.type}" for subscription order ${subscriptionOrder.id} references tenant ${subscriptionOrder.tenantId}, which no longer exists.`);
+    return;
+  }
+
+  if (event.type === "payment.captured") {
+    await subscriptionOrders.markPaid(subscriptionOrder.id, event.paymentId);
+    if (tenant.status === "awaiting_payment") {
+      await tenantStore.setPlan(tenant.id, subscriptionOrder.plan);
+      await tenantStore.setStatus(tenant.id, "onboarding_pending");
+      await onboardingRequests.create(tenant.id, { plan: subscriptionOrder.plan, amount: subscriptionOrder.amount });
+      await recordAudit(tenant.id, { email: "razorpay-webhook", role: "system" }, "subscription.activated", { plan: subscriptionOrder.plan, amount: subscriptionOrder.amount });
+      log("INFO", `Subscription payment captured for tenant ${tenant.id} (${tenant.slug}), plan "${subscriptionOrder.plan}" — queued for onboarding.`);
+      if (tenant.billingEmail) {
+        try {
+          await sendEmail(
+            tenant.billingEmail,
+            "You're all set — BookPilot AI onboarding",
+            `Thanks for subscribing to the ${subscriptionOrder.plan} plan! Our onboarding team has been notified and will reach out shortly to get "${tenant.name}" set up. No further action is needed from you right now.`
+          );
+        } catch (err) {
+          log("WARN", `Onboarding-queue email failed for tenant ${tenant.id}: ${err.message}`);
+        }
+      }
+    } else {
+      // Already past awaiting_payment (e.g. a duplicate webhook delivery,
+      // which Razorpay's own docs say to expect and de-dupe defensively
+      // against) — the order itself is still marked paid above, but the
+      // tenant's lifecycle state must not be stomped backward.
+      log("INFO", `Subscription payment captured for tenant ${tenant.id}, but tenant is already "${tenant.status}" — order marked paid, lifecycle unchanged.`);
+    }
+  } else if (event.type === "payment.failed") {
+    await subscriptionOrders.markFailed(subscriptionOrder.id, event.failureReason);
+    // Tenant stays awaiting_payment — same "no auto-cancel, let them retry
+    // the link" reasoning as a failed booking deposit.
+    await recordAudit(tenant.id, { email: "razorpay-webhook", role: "system" }, "subscription.payment_failed", { plan: subscriptionOrder.plan, reason: event.failureReason });
+    log("WARN", `Subscription payment failed for tenant ${tenant.id}: ${event.failureReason}`);
+  }
 }
 
-// demoTenantId is passed in rather than computed here — ensureDemoTenant()
-// stays a one-time boot-sequence concern in server.js (alongside the admin/
-// platform_admin bootstrap it runs next to), not something every route
-// module re-derives on its own.
-function createWebhookRouter(demoTenantId) {
+function createWebhookRouter() {
   const router = express.Router();
 
   // ---------------------------------------------------------------------------
@@ -145,10 +185,10 @@ function createWebhookRouter(demoTenantId) {
       // conversation into another's — so the fallback only applies when no
       // tenant in the system has claimed any phone_number_id at all yet.
       const incomingPhoneNumberId = value?.metadata?.phone_number_id;
-      const matchedTenant = tenantStore.getByPhoneNumberId(incomingPhoneNumberId);
+      const matchedTenant = await tenantStore.getByPhoneNumberId(incomingPhoneNumberId);
       if (matchedTenant) {
         tenantId = matchedTenant.id;
-      } else if (!tenantStore.getById(1)?.whatsappPhoneNumberId) {
+      } else if (!(await tenantStore.getById(1))?.whatsappPhoneNumberId) {
         tenantId = 1; // upgrade-continuity fallback — see comment above
       } else {
         log("WARN", `Webhook message for unrecognized phone_number_id "${incomingPhoneNumberId}" — no tenant claims it. Dropping.`);
@@ -161,7 +201,7 @@ function createWebhookRouter(demoTenantId) {
       // this codebase's own "no silent failures" principle already treats
       // as a bug elsewhere — Section 6's async-handler-hang fix exists for
       // exactly that reason). One clear, non-alarming reply, then stop.
-      const currentTenant = tenantStore.getById(tenantId);
+      const currentTenant = await tenantStore.getById(tenantId);
       if (currentTenant && currentTenant.status !== "active") {
         log("WARN", `Webhook message for tenant ${tenantId} whose status is "${currentTenant.status}" — not processing.`);
         await sendWhatsAppText(tenantId, waId, "This business isn't currently accepting bookings. Please check back later.");
@@ -188,7 +228,7 @@ function createWebhookRouter(demoTenantId) {
         message.button?.text ||
         "";
 
-      if (text) await handleIncomingMessage(tenantId, waId, text, tenantWorkflowStore.listForTenant(tenantId));
+      if (text) await handleIncomingMessage(tenantId, waId, text, await tenantWorkflowStore.listForTenant(tenantId));
     } catch (err) {
       // The safety net, not the fix (Section 0's timeouts are the fix — a
       // hung call used to be the actual cause of this path firing at all).
@@ -227,39 +267,52 @@ function createWebhookRouter(demoTenantId) {
     const event = razorpay.parseWebhookEvent(req.body);
     if (!event) return; // an event type this integration has no opinion about
 
-    const payment = event.orderId ? paymentStore.getByOrderId(event.orderId) : null;
-    if (!payment) {
-      log("WARN", `Razorpay webhook "${event.type}" for order ${event.orderId} matches no known payment row — ignoring.`);
+    // Two independent kinds of Razorpay order can hit this one webhook: a
+    // booking deposit (payments table) or a plan-subscription checkout
+    // (subscription_orders table, Stream 2) — both use the same Payment
+    // Links mechanism under the hood (see razorpayProvider.js's
+    // createSubscriptionCheckout comment), so Razorpay's payload shape
+    // gives no signal which kind this is; the order id is looked up
+    // against both tables to find out.
+    const subscriptionOrder = event.orderId ? await subscriptionOrders.getByOrderId(event.orderId) : null;
+    if (subscriptionOrder) {
+      await handleSubscriptionWebhookEvent(event, subscriptionOrder);
       return;
     }
-    const booking = bookings.getById(payment.tenantId, payment.bookingId);
+
+    const payment = event.orderId ? await paymentStore.getByOrderId(event.orderId) : null;
+    if (!payment) {
+      log("WARN", `Razorpay webhook "${event.type}" for order ${event.orderId} matches no known payment or subscription order — ignoring.`);
+      return;
+    }
+    const booking = await bookings.getById(payment.tenantId, payment.bookingId);
     if (!booking) {
       log("ERROR", `Razorpay webhook "${event.type}" for payment ${payment.id} references booking ${payment.bookingId}, which no longer exists.`);
       return;
     }
 
     if (event.type === "payment.captured") {
-      paymentStore.markPaid(payment.id, event.paymentId);
-      bookings.updateStatus(payment.tenantId, booking.id, "booked");
-      bookings.updatePaymentStatus(payment.tenantId, booking.id, "paid");
-      recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.captured", { bookingId: booking.bookingId, paymentId: event.paymentId, amount: event.amount });
+      await paymentStore.markPaid(payment.id, event.paymentId);
+      await bookings.updateStatus(payment.tenantId, booking.id, "booked");
+      await bookings.updatePaymentStatus(payment.tenantId, booking.id, "paid");
+      await recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.captured", { bookingId: booking.bookingId, paymentId: event.paymentId, amount: event.amount });
       log("INFO", `Payment captured for booking ${booking.bookingId} (₹${event.amount / 100}) — booking confirmed.`);
       try {
         await sendWhatsAppText(payment.tenantId, booking.waId, `✅ Payment received! Your booking (${booking.bookingId}) is now confirmed. Reply STATUS anytime to check it.`);
       } catch (err) {
         log("WARN", `Payment-confirmed WhatsApp notification failed for ${booking.bookingId}: ${err.message}`);
       }
-      await syncBookingCreated(payment.tenantId, booking, tenantWorkflowStore.get(payment.tenantId, booking.workflowId));
+      await syncBookingCreated(payment.tenantId, booking, await tenantWorkflowStore.get(payment.tenantId, booking.workflowId));
       publishBookingEvent(payment.tenantId, "booking.updated", { ...booking, status: "booked", paymentStatus: "paid" });
     } else if (event.type === "payment.failed") {
-      paymentStore.markFailed(payment.id, event.failureReason);
-      bookings.updatePaymentStatus(payment.tenantId, booking.id, "failed");
+      await paymentStore.markFailed(payment.id, event.failureReason);
+      await bookings.updatePaymentStatus(payment.tenantId, booking.id, "failed");
       // Booking stays payment_pending (NOT auto-cancelled) — Razorpay
       // payment links allow a retry on the same link, so cancelling the
       // slot here would yank it out from under a customer mid-retry. The
       // slot is released explicitly if/when the customer or provider
       // actually cancels, same as any other booking.
-      recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.failed", { bookingId: booking.bookingId, reason: event.failureReason });
+      await recordAudit(payment.tenantId, { email: "razorpay-webhook", role: "system" }, "payment.failed", { bookingId: booking.bookingId, reason: event.failureReason });
       log("WARN", `Payment failed for booking ${booking.bookingId}: ${event.failureReason}`);
       publishBookingEvent(payment.tenantId, "booking.updated", { ...booking, paymentStatus: "failed" });
     } else if (event.type === "refund.processed") {
@@ -300,7 +353,7 @@ function createWebhookRouter(demoTenantId) {
     // curl/test call site from before Section 8 keeps working unchanged.
     const effectiveTenantId = Number.isInteger(tenantId) ? tenantId : 1;
     try {
-      await handleIncomingMessage(effectiveTenantId, from, text, tenantWorkflowStore.listForTenant(effectiveTenantId));
+      await handleIncomingMessage(effectiveTenantId, from, text, await tenantWorkflowStore.listForTenant(effectiveTenantId));
       res.json({ ok: true, note: "Check the console / logs/app.log for the bot's reply." });
     } catch (err) {
       log("ERROR", `Simulate endpoint error: ${err.stack || err.message}`);
@@ -314,50 +367,6 @@ function createWebhookRouter(demoTenantId) {
         // best-effort
       }
       res.status(500).json({ error: "Internal error — see logs/app.log for details." });
-    }
-  }));
-
-  // ---------------------------------------------------------------------------
-  // Item 8 — the public marketing site's live chat widget. Deliberately a
-  // SEPARATE route from /api/simulate-whatsapp above, not a relaxed version
-  // of it, because the two have fundamentally different trust models:
-  // simulate-whatsapp accepts a client-chosen tenantId (a dev/test tool,
-  // disabled by default once real WhatsApp traffic is live) — accepting
-  // that same freedom here, on a route meant to be reachable by anyone on
-  // the internet with no login, would let a visitor inject fake messages
-  // into ANY real tenant's live conversation. This route can't do that even
-  // in principle: the tenant is hardcoded to demoTenantId, never read from
-  // the request. Safe to leave enabled permanently, independent of whether
-  // this install also has real WhatsApp/ALLOW_SIMULATE_ENDPOINT configured.
-  //
-  // `sessionId` is a random token the widget generates client-side (crypto.
-  // randomUUID(), stored in sessionStorage — gone when the tab closes) and
-  // is NOT treated as a real phone number; it's hashed into a synthetic
-  // waId so two concurrent visitors' demo conversations never collide, and
-  // so nothing here ever touches the shape a real WhatsApp id has.
-  // ---------------------------------------------------------------------------
-  router.post("/api/demo/chat", asyncHandler(async (req, res) => {
-    if (isDemoChatRateLimited(req.ip)) {
-      return res.status(429).json({ error: "Too many demo messages from this connection — please wait a few minutes and try again." });
-    }
-    const { sessionId, text } = req.body || {};
-    if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 200) {
-      return res.status(400).json({ error: "sessionId is required." });
-    }
-    if (typeof text !== "string" || !text.trim() || text.length > 500) {
-      return res.status(400).json({ error: "text is required and must be 500 characters or fewer." });
-    }
-
-    const waId = syntheticDemoWaId(sessionId.trim());
-    beginReplyCapture(waId);
-    try {
-      await handleIncomingMessage(demoTenantId, waId, text.trim(), tenantWorkflowStore.listForTenant(demoTenantId));
-      const reply = endReplyCapture(waId);
-      res.json({ reply: reply || "..." });
-    } catch (err) {
-      endReplyCapture(waId);
-      log("ERROR", `Demo chat error: ${err.stack || err.message}`);
-      res.status(500).json({ reply: "Sorry, something went wrong on my end — could you try that again?" });
     }
   }));
 

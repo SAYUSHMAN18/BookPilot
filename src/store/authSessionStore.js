@@ -1,4 +1,4 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 
 // New plan, Block 14 — see db.js's own comment on auth_sessions for the
 // "why a table when tokens are already stateless" reasoning. Every
@@ -6,15 +6,6 @@ const { db } = require("./db");
 // touch someone else's session by guessing a session id — the exact
 // same discipline every other per-account store in this codebase
 // already follows.
-const insertStmt = db.prepare(
-  "INSERT INTO auth_sessions (id, user_id, user_agent, created_at, expires_at) VALUES (?, ?, ?, ?, ?)"
-);
-const isRevokedStmt = db.prepare("SELECT revoked_at FROM auth_sessions WHERE id = ?");
-const revokeStmt = db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL");
-const revokeAllForUserStmt = db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL");
-const listForUserStmt = db.prepare(
-  "SELECT * FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC"
-);
 
 function rowToSession(row) {
   if (!row) return undefined;
@@ -22,39 +13,49 @@ function rowToSession(row) {
     id: row.id,
     userId: row.user_id,
     userAgent: row.user_agent,
-    createdAt: row.created_at,
-    expiresAt: row.expires_at,
+    createdAt: Number(row.created_at),
+    expiresAt: Number(row.expires_at),
   };
 }
 
 const authSessions = {
-  create(sessionId, userId, expiresAt, userAgent) {
-    insertStmt.run(sessionId, userId, userAgent || null, Date.now(), expiresAt);
+  async create(sessionId, userId, expiresAt, userAgent) {
+    await pool.query(
+      "INSERT INTO auth_sessions (id, user_id, user_agent, created_at, expires_at) VALUES ($1, $2, $3, $4, $5)",
+      [sessionId, userId, userAgent || null, Date.now(), expiresAt]
+    );
   },
 
   // A session with no row here at all (e.g. a token issued before this
   // table existed) is treated as NOT revoked — the token's own signature
   // and expiry are still what actually gate access; this is an
   // additional check, not the only one.
-  isRevoked(sessionId) {
-    const row = isRevokedStmt.get(sessionId);
-    return !!row?.revoked_at;
+  async isRevoked(sessionId) {
+    const rows = await query("SELECT revoked_at FROM auth_sessions WHERE id = $1", [sessionId]);
+    return !!rows[0]?.revoked_at;
   },
 
   /** @param {string} sessionId @param {number} userId — a user can only revoke their OWN session */
-  revoke(sessionId, userId) {
-    revokeStmt.run(Date.now(), sessionId, userId);
+  async revoke(sessionId, userId) {
+    await pool.query(
+      "UPDATE auth_sessions SET revoked_at = $1 WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL",
+      [Date.now(), sessionId, userId]
+    );
   },
 
   // "Log out everywhere" / a platform_admin force-logging-out a
   // compromised account — every one of that user's currently-active
   // sessions stops working on its very next request.
-  revokeAllForUser(userId) {
-    revokeAllForUserStmt.run(Date.now(), userId);
+  async revokeAllForUser(userId) {
+    await pool.query("UPDATE auth_sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL", [Date.now(), userId]);
   },
 
-  listForUser(userId) {
-    return listForUserStmt.all(userId, Date.now()).map(rowToSession);
+  async listForUser(userId) {
+    const rows = await query(
+      "SELECT * FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2 ORDER BY created_at DESC",
+      [userId, Date.now()]
+    );
+    return rows.map(rowToSession);
   },
 };
 

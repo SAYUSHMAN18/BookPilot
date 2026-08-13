@@ -1,17 +1,9 @@
-const { db } = require("./db");
+const { pool, query } = require("./db");
 
 // Section 8 — every query filters by tenant_id; getById/update/remove
 // filter by (id, tenant_id) together so a provider from one tenant can
 // never read, edit, or delete another tenant's knowledge-base entry just
 // by guessing a numeric id.
-const insertStmt = db.prepare(
-  "INSERT INTO knowledge_documents (tenant_id, workflow_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-);
-const updateStmt = db.prepare("UPDATE knowledge_documents SET title = ?, content = ?, updated_at = ? WHERE id = ? AND tenant_id = ?");
-const deleteStmt = db.prepare("DELETE FROM knowledge_documents WHERE id = ? AND tenant_id = ?");
-const getByIdStmt = db.prepare("SELECT * FROM knowledge_documents WHERE id = ? AND tenant_id = ?");
-const listForWorkflowStmt = db.prepare("SELECT * FROM knowledge_documents WHERE tenant_id = ? AND workflow_id = ? ORDER BY created_at DESC");
-const listAllStmt = db.prepare("SELECT * FROM knowledge_documents WHERE tenant_id = ? ORDER BY workflow_id, created_at DESC");
 
 function rowToDoc(row) {
   if (!row) return undefined;
@@ -21,32 +13,38 @@ function rowToDoc(row) {
     workflowId: row.workflow_id,
     title: row.title,
     content: row.content,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
   };
 }
 
 const knowledge = {
-  getById(tenantId, id) {
-    return rowToDoc(getByIdStmt.get(id, tenantId));
+  async getById(tenantId, id) {
+    const rows = await query("SELECT * FROM knowledge_documents WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+    return rowToDoc(rows[0]);
   },
-  listForWorkflow(tenantId, workflowId) {
-    return listForWorkflowStmt.all(tenantId, workflowId).map(rowToDoc);
+  async listForWorkflow(tenantId, workflowId) {
+    const rows = await query("SELECT * FROM knowledge_documents WHERE tenant_id = $1 AND workflow_id = $2 ORDER BY created_at DESC", [tenantId, workflowId]);
+    return rows.map(rowToDoc);
   },
-  listAll(tenantId) {
-    return listAllStmt.all(tenantId).map(rowToDoc);
+  async listAll(tenantId) {
+    const rows = await query("SELECT * FROM knowledge_documents WHERE tenant_id = $1 ORDER BY workflow_id, created_at DESC", [tenantId]);
+    return rows.map(rowToDoc);
   },
-  create(tenantId, workflowId, title, content) {
+  async create(tenantId, workflowId, title, content) {
     const now = Date.now();
-    const result = insertStmt.run(tenantId, workflowId, title, content, now, now);
-    return knowledge.getById(tenantId, result.lastInsertRowid);
+    const rows = await query(
+      "INSERT INTO knowledge_documents (tenant_id, workflow_id, title, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+      [tenantId, workflowId, title, content, now, now]
+    );
+    return rowToDoc(rows[0]);
   },
-  update(tenantId, id, title, content) {
-    updateStmt.run(title, content, Date.now(), id, tenantId);
+  async update(tenantId, id, title, content) {
+    await pool.query("UPDATE knowledge_documents SET title = $1, content = $2, updated_at = $3 WHERE id = $4 AND tenant_id = $5", [title, content, Date.now(), id, tenantId]);
     return knowledge.getById(tenantId, id);
   },
-  remove(tenantId, id) {
-    deleteStmt.run(id, tenantId);
+  async remove(tenantId, id) {
+    await pool.query("DELETE FROM knowledge_documents WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
   },
 };
 

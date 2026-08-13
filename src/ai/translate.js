@@ -67,4 +67,49 @@ async function translateForVoice(text, languageCode) {
   }
 }
 
-module.exports = { translateForVoice };
+const LANG_CODE_MAP = {
+  hi: "Hindi",
+  ur: "Urdu",
+  bn: "Bengali",
+  ta: "Tamil",
+  te: "Telugu",
+  mr: "Marathi",
+  pa: "Punjabi",
+  gu: "Gujarati",
+  kn: "Kannada",
+  ml: "Malayalam",
+  en: "English",
+};
+
+// Translates an outgoing WhatsApp text reply into the customer's selected language
+async function translateText(text, targetLang) {
+  if (!text || !targetLang || targetLang === "en" || !process.env.GROQ_API_KEY) return text;
+  const langName = LANG_CODE_MAP[targetLang] || targetLang;
+  if (langName === "English") return text;
+
+  try {
+    const { data } = await groqChatCompletion({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.1,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "system",
+          content:
+            `You are a translator. Translate the following WhatsApp booking-bot message into natural ${langName}. ` +
+            "Keep emojis, numbers, prices, workflow names, IDs, dates, and times unchanged. " +
+            "Reply ONLY with the translated text, no explanations.",
+        },
+        { role: "user", content: text },
+      ],
+    });
+    const translated = (data.choices?.[0]?.message?.content || "").trim();
+    return translated || text;
+  } catch (err) {
+    log("WARN", `translateText (${langName}) failed: ${err.message}`);
+    return text;
+  }
+}
+
+module.exports = { translateForVoice, translateText, LANG_CODE_MAP };
+

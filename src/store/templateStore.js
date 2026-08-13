@@ -1,11 +1,4 @@
-const { db } = require("./db");
-
-const insertStmt = db.prepare(
-  "INSERT INTO workflow_templates (name, industry, description, definition, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-);
-const deleteStmt = db.prepare("DELETE FROM workflow_templates WHERE id = ?");
-const getByIdStmt = db.prepare("SELECT * FROM workflow_templates WHERE id = ?");
-const listStmt = db.prepare("SELECT * FROM workflow_templates ORDER BY created_at DESC");
+const { pool, query } = require("./db");
 
 function rowToTemplate(row) {
   if (!row) return undefined;
@@ -16,30 +9,28 @@ function rowToTemplate(row) {
     description: row.description,
     definition: JSON.parse(row.definition),
     createdBy: row.created_by,
-    createdAt: row.created_at,
+    createdAt: Number(row.created_at),
   };
 }
 
 const templates = {
-  getById(id) {
-    return rowToTemplate(getByIdStmt.get(id));
+  async getById(id) {
+    const rows = await query("SELECT * FROM workflow_templates WHERE id = $1", [id]);
+    return rowToTemplate(rows[0]);
   },
-  list() {
-    return listStmt.all().map(rowToTemplate);
+  async list() {
+    const rows = await query("SELECT * FROM workflow_templates ORDER BY created_at DESC", []);
+    return rows.map(rowToTemplate);
   },
-  create({ name, industry, description, definition, createdBy }) {
-    const result = insertStmt.run(
-      name,
-      industry ?? null,
-      description ?? null,
-      JSON.stringify(definition),
-      createdBy ?? null,
-      Date.now()
+  async create({ name, industry, description, definition, createdBy }) {
+    const rows = await query(
+      "INSERT INTO workflow_templates (name, industry, description, definition, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+      [name, industry ?? null, description ?? null, JSON.stringify(definition), createdBy ?? null, Date.now()]
     );
-    return templates.getById(result.lastInsertRowid);
+    return rowToTemplate(rows[0]);
   },
-  remove(id) {
-    deleteStmt.run(id);
+  async remove(id) {
+    await pool.query("DELETE FROM workflow_templates WHERE id = $1", [id]);
   },
 };
 

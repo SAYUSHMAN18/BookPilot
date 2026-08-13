@@ -19,8 +19,8 @@ function baseBooking(overrides = {}) {
   };
 }
 
-test("isDue: a time-slot booking ~23h away is due for the 24h reminder, not the 2h one", () => {
-  freshApp();
+test("isDue: a time-slot booking ~23h away is due for the 24h reminder, not the 2h one", async () => {
+  await freshApp();
   const { isDue, appointmentInstant } = require("../../src/infra/reminders");
   const { isoDate, formatLongDate } = require("../../src/engine/dateSlots");
 
@@ -35,8 +35,8 @@ test("isDue: a time-slot booking ~23h away is due for the 24h reminder, not the 
   void formatLongDate;
 });
 
-test("isDue: a time-slot booking ~1h away is due for the 2h reminder, not the 24h one", () => {
-  freshApp();
+test("isDue: a time-slot booking ~1h away is due for the 2h reminder, not the 24h one", async () => {
+  await freshApp();
   const { isDue } = require("../../src/infra/reminders");
   const { isoDate } = require("../../src/engine/dateSlots");
 
@@ -49,8 +49,8 @@ test("isDue: a time-slot booking ~1h away is due for the 2h reminder, not the 24
   assert.equal(isDue(booking, "2h", now), true);
 });
 
-test("isDue: a booking already past its appointment time is never due for either reminder", () => {
-  freshApp();
+test("isDue: a booking already past its appointment time is never due for either reminder", async () => {
+  await freshApp();
   const { isDue } = require("../../src/infra/reminders");
   const booking = baseBooking({ visitDate: "2020-01-01", visitTime: "10:00 am" });
   const now = Date.now();
@@ -58,8 +58,8 @@ test("isDue: a booking already past its appointment time is never due for either
   assert.equal(isDue(booking, "2h", now), false);
 });
 
-test("isDue: a reminder already sent never fires again, even still inside its window", () => {
-  freshApp();
+test("isDue: a reminder already sent never fires again, even still inside its window", async () => {
+  await freshApp();
   const { isDue } = require("../../src/infra/reminders");
   const { isoDate } = require("../../src/engine/dateSlots");
   const now = Date.now();
@@ -69,8 +69,8 @@ test("isDue: a reminder already sent never fires again, even still inside its wi
   assert.equal(isDue(booking, "2h", now), false);
 });
 
-test("isDue: cancelled, done, no_show, and serving bookings are never due for a reminder", () => {
-  freshApp();
+test("isDue: cancelled, done, no_show, and serving bookings are never due for a reminder", async () => {
+  await freshApp();
   const { isDue } = require("../../src/infra/reminders");
   const { isoDate } = require("../../src/engine/dateSlots");
   const now = Date.now();
@@ -83,8 +83,8 @@ test("isDue: cancelled, done, no_show, and serving bookings are never due for a 
   }
 });
 
-test("isDue: a hotel booking (checkInIso) is never due for the 2h reminder, only the 24h one", () => {
-  freshApp();
+test("isDue: a hotel booking (checkInIso) is never due for the 2h reminder, only the 24h one", async () => {
+  await freshApp();
   const { isDue } = require("../../src/infra/reminders");
   const { isoDate } = require("../../src/engine/dateSlots");
   const now = Date.now();
@@ -98,7 +98,7 @@ test("isDue: a hotel booking (checkInIso) is never due for the 2h reminder, only
 });
 
 test("checkAndSendReminders sends a real reminder through the actual delivery path and marks it sent so a second run doesn't repeat it", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   void app;
   const bookingStore = require("../../src/store/bookingStore");
   const { checkAndSendReminders } = require("../../src/infra/reminders");
@@ -108,7 +108,7 @@ test("checkAndSendReminders sends a real reminder through the actual delivery pa
   const target = new Date(Date.now() + 60 * 60 * 1000); // ~1h away — due for the 2h reminder
   const label = `${((target.getHours() + 11) % 12) + 1}:${String(target.getMinutes()).padStart(2, "0")} ${target.getHours() >= 12 ? "pm" : "am"}`;
   const waId = "919000044445";
-  const booking = bookingStore.create(1, waId, {
+  const booking = await bookingStore.create(1, waId, {
     bookingId: "APT-REM-LIVE-1", workflowId: "hair", providerId: "p1", providerName: "Snip & Style",
     visitDate: isoDate(target), visitDateLabel: isoDate(target), visitTime: label,
     customerName: "Reminder Test", status: "booked", createdAt: Date.now(),
@@ -119,7 +119,7 @@ test("checkAndSendReminders sends a real reminder through the actual delivery pa
   const captured = endReplyCapture(waId);
   assert.ok(/reminder/i.test(captured), `expected a reminder message to have been sent, got: ${captured}`);
 
-  const updated = bookingStore.getById(1, booking.id);
+  const updated = await bookingStore.getById(1, booking.id);
   assert.ok(updated.reminder2hSentAt, "expected reminder2hSentAt to be set after sending");
 
   // A second run must not send it again — the exact regression this
@@ -131,7 +131,7 @@ test("checkAndSendReminders sends a real reminder through the actual delivery pa
 });
 
 test("checkAndSendReminders skips a booking whose tenant is suspended", async () => {
-  const app = freshApp();
+  const app = await freshApp();
   const tenantStore = require("../../src/store/tenantStore");
   const bookingStore = require("../../src/store/bookingStore");
   const { checkAndSendReminders } = require("../../src/infra/reminders");
@@ -139,13 +139,13 @@ test("checkAndSendReminders skips a booking whose tenant is suspended", async ()
   const { isoDate } = require("../../src/engine/dateSlots");
   void app;
 
-  const tenant = tenantStore.create({ name: "Suspended Reminder Biz", slug: "suspended-reminder-biz", plan: "free" });
-  tenantStore.setStatus(tenant.id, "suspended");
+  const tenant = await tenantStore.create({ name: "Suspended Reminder Biz", slug: "suspended-reminder-biz", plan: "free" });
+  await tenantStore.setStatus(tenant.id, "suspended");
 
   const target = new Date(Date.now() + 60 * 60 * 1000);
   const label = `${((target.getHours() + 11) % 12) + 1}:${String(target.getMinutes()).padStart(2, "0")} ${target.getHours() >= 12 ? "pm" : "am"}`;
   const waId = "919000044446";
-  bookingStore.create(tenant.id, waId, {
+  await bookingStore.create(tenant.id, waId, {
     bookingId: "APT-REM-SUSPENDED-1", workflowId: "hair", providerId: "p1", providerName: "Test",
     visitDate: isoDate(target), visitTime: label, customerName: "Test", status: "booked", createdAt: Date.now(),
   });

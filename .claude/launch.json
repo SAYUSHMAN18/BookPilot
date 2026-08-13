@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
       "port": 8081
+    },
+    {
+      "name": "bookpilot-marketing",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["marketingServer.js"],
+      "port": 8082
     }
   ]
 }
