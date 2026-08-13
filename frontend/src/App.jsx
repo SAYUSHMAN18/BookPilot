@@ -1,17 +1,34 @@
 import { useEffect, useState, useCallback } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./lib/AuthContext";
 import { get } from "./lib/api";
 import { useLiveEvents } from "./lib/useLiveEvents";
 import LoginPage from "./pages/LoginPage";
-import ProviderView from "./pages/ProviderView";
-import AdminView from "./pages/AdminView";
 import PlatformAdminView from "./pages/PlatformAdminView";
+import DashboardLayout from "./layouts/DashboardLayout";
+import OverviewPage from "./pages/OverviewPage";
+import BookingsPage from "./pages/BookingsPage";
+import AvailabilityPage from "./pages/AvailabilityPage";
+import TeamPage from "./pages/TeamPage";
+import BusinessesPage from "./pages/BusinessesPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import SupportPage from "./pages/SupportPage";
+import BillingPage from "./pages/BillingPage";
+import SettingsPage from "./pages/SettingsPage";
+
+// New plan, Stream 2 — a needsPlanSelection session has nothing to do in
+// this app at all; checkout lives on the marketing site's own origin
+// (public/marketing/plan-selection.html). window.MARKETING_URL comes from
+// /app-config.js (see server.js) — same runtime-config pattern the
+// marketing site already uses in reverse for its own "Log in" links.
+function redirectToPlanSelection() {
+  const marketingUrl = window.MARKETING_URL || "http://localhost:8082";
+  window.location.href = `${marketingUrl}/plan-selection`;
+}
 
 export default function App() {
-  const { user, pending, logout } = useAuth();
+  const { user, pending, needsPlanSelection, logout } = useAuth();
   const [providers, setProviders] = useState([]);
-  const [selectedKey, setSelectedKey] = useState("");
-  const [mode, setMode] = useState("provider"); // view toggle — an admin ACCOUNT can still browse a single provider's own view, same as the vanilla dashboard
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = useCallback(() => setRefreshKey((k) => k + 1), []);
   const isPlatformAdmin = user?.role === "platform_admin";
@@ -21,31 +38,22 @@ export default function App() {
     // theirs to call at all (requireAuth("admin", "provider") 403s them),
     // they get PlatformAdminView instead, below.
     if (user === undefined || user === null || pending || isPlatformAdmin) return;
-    get("/api/dashboard/providers").then((list) => {
-      setProviders(list);
-      if (list.length) {
-        setSelectedKey(`${list[0].workflowId}::${list[0].providerId}`);
-      } else if (user.role === "admin") {
-        // A brand new tenant starts with zero businesses (nothing is
-        // auto-seeded any more) — the Provider view has nothing to show
-        // for an admin until at least one exists, so land them on Admin
-        // (Manage Businesses) instead of a dead-end "Loading providers…"
-        // screen. A real provider-role account can never hit this: it's
-        // always pinned to one already-existing workflowId+providerId.
-        setMode("admin");
-      }
-    });
+    get("/api/dashboard/providers").then(setProviders);
   }, [user, pending, isPlatformAdmin]);
 
   const connected = useLiveEvents((type) => {
     // Any booking/support/feedback event is relevant to at least one
-    // visible panel — a single shared refreshKey bump keeps this simple;
-    // each panel's own useEffect dependency on refreshKey re-fetches only
+    // visible page — a single shared refreshKey bump keeps this simple;
+    // each page's own useEffect dependency on refreshKey re-fetches only
     // itself, not a full-page reload.
     if (type) bump();
   });
 
   if (user === undefined) return null; // still checking session
+  if (needsPlanSelection) {
+    redirectToPlanSelection();
+    return null;
+  }
   if (pending) {
     return (
       <div className="login-wrap">
@@ -65,43 +73,40 @@ export default function App() {
   if (isPlatformAdmin) return <PlatformAdminView currentUserEmail={user.email} logout={logout} />;
 
   const isAdminAccount = user.role === "admin";
-  const provider = providers.find((p) => `${p.workflowId}::${p.providerId}` === selectedKey);
+  // A brand new tenant starts with zero businesses (nothing is auto-seeded
+  // any more) — Overview has nothing bookings-shaped to show for an admin
+  // until at least one exists, so it leads with the setup checklist either
+  // way; Bookings/Availability/Analytics for a zero-provider admin just
+  // render their own empty states rather than needing a special case here.
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <span className="brand">BookPilot AI</span>
-
-        {isAdminAccount && (
-          <div className="role-toggle">
-            <button className={mode === "provider" ? "active" : ""} onClick={() => setMode("provider")}>🏢 Provider</button>
-            <button className={mode === "admin" ? "active" : ""} onClick={() => setMode("admin")}>👑 Admin</button>
-          </div>
-        )}
-
-        {mode === "provider" && (
-          <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ minWidth: 220 }}>
-            {providers.map((p) => (
-              <option key={`${p.workflowId}::${p.providerId}`} value={`${p.workflowId}::${p.providerId}`}>{p.workflowLabel} — {p.providerName}</option>
-            ))}
-          </select>
-        )}
-
-        <button className="btn-secondary" onClick={bump}>↻ Refresh</button>
-        <span className="live-indicator" title="Live updates">
-          <span className="live-dot" style={{ background: connected ? "var(--success)" : "var(--subtle)" }} /> Live
-        </span>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>{user.name || user.email} ({user.role})</span>
-        <button className="btn-link" onClick={logout}>Log out</button>
-      </header>
-
-      <main className="app-main">
-        {mode === "admin" && isAdminAccount ? (
-          <AdminView providers={providers} refreshKey={refreshKey} bump={bump} currentUserEmail={user.email} />
-        ) : (
-          <ProviderView provider={provider} providers={providers} refreshKey={refreshKey} bump={bump} />
-        )}
-      </main>
-    </div>
+    <BrowserRouter basename="/app">
+      <Routes>
+        <Route
+          element={
+            <DashboardLayout
+              user={user}
+              providers={providers}
+              refreshKey={refreshKey}
+              bump={bump}
+              connected={connected}
+              logout={logout}
+              isAdminAccount={isAdminAccount}
+            />
+          }
+        >
+          <Route index element={<OverviewPage />} />
+          <Route path="bookings" element={<BookingsPage />} />
+          <Route path="availability" element={<AvailabilityPage />} />
+          {isAdminAccount && <Route path="team" element={<TeamPage />} />}
+          {isAdminAccount && <Route path="businesses" element={<BusinessesPage />} />}
+          <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="support" element={<SupportPage />} />
+          {isAdminAccount && <Route path="billing" element={<BillingPage />} />}
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }

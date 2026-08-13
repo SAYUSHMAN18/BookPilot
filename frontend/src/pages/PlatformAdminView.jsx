@@ -7,18 +7,35 @@ import { get, post, patch } from "../lib/api";
 // number management, system config) is real, separate, much larger work
 // — this is deliberately just enough to use the activation flow the
 // backend already has (PATCH /api/platform/tenants/:id/status).
-const STATUS_ORDER = { pending: 0, active: 1, suspended: 2, cancelled: 3 };
+//
+// New plan, Stream 2/5 — extended with the subscription-gated onboarding
+// lifecycle's own states and the queue that works them, plus a per-tenant
+// drill-in (GET /api/platform/tenants/:id/detail) — the literal "select
+// any specific business, then I can see whatever they have done" ask.
+const STATUS_ORDER = { awaiting_payment: 0, onboarding_pending: 1, onboarding_in_progress: 2, pending: 3, active: 4, suspended: 5, cancelled: 6 };
+const STATUS_BADGE_CLASS = {
+  active: "status-arrived",
+  suspended: "status-no_show",
+  cancelled: "status-cancelled",
+  awaiting_payment: "status-payment_pending",
+  onboarding_pending: "status-payment_pending",
+  onboarding_in_progress: "status-rescheduled",
+  pending: "status-payment_pending",
+};
 
 export default function PlatformAdminView({ currentUserEmail, logout }) {
   const [tenants, setTenants] = useState([]);
+  const [queue, setQueue] = useState([]);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [detailTenantId, setDetailTenantId] = useState(null);
 
   async function load() {
     try {
-      const list = await get("/api/platform/tenants");
+      const [list, onboardingQueue] = await Promise.all([get("/api/platform/tenants"), get("/api/platform/onboarding-queue")]);
       setTenants([...list].sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || b.createdAt - a.createdAt));
+      setQueue(onboardingQueue);
     } catch (err) {
       setError(err.message);
     }
@@ -54,6 +71,32 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
     }
   }
 
+  async function markContacted(requestId) {
+    setBusyId(`queue-${requestId}`);
+    setError("");
+    try {
+      await patch(`/api/platform/onboarding-queue/${requestId}/contacted`, {});
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function markComplete(requestId) {
+    setBusyId(`queue-${requestId}`);
+    setError("");
+    try {
+      await patch(`/api/platform/onboarding-queue/${requestId}/complete`, {});
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const pendingCount = tenants.filter((t) => t.status === "pending").length;
 
   return (
@@ -64,6 +107,40 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
         <button className="btn-link" onClick={logout}>Log out</button>
       </header>
       <main className="app-main">
+        {error && <div className="error-banner">{error}</div>}
+
+        {queue.length > 0 && (
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">🚀 Onboarding Queue <span className="count-badge">{queue.length}</span></span>
+            </div>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr><th>Business</th><th>Plan</th><th>Status</th><th>Contact</th><th>Waiting since</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {queue.map((q) => (
+                    <tr key={q.id}>
+                      <td>{q.tenant.name} <code style={{ fontSize: 11 }}>{q.tenant.slug}</code></td>
+                      <td>{q.tenant.plan}</td>
+                      <td><span className={`status-badge ${STATUS_BADGE_CLASS[q.tenant.status] || "status-payment_pending"}`}>{q.tenant.status}</span></td>
+                      <td>{q.tenant.billingEmail || "—"}</td>
+                      <td>{new Date(q.createdAt).toLocaleString()}</td>
+                      <td style={{ display: "flex", gap: 6 }}>
+                        {q.status === "pending" && (
+                          <button className="btn-secondary" disabled={busyId === `queue-${q.id}`} onClick={() => markContacted(q.id)}>Mark Contacted</button>
+                        )}
+                        <button className="btn-primary" disabled={busyId === `queue-${q.id}`} onClick={() => markComplete(q.id)}>Complete → Activate</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <div className="card-header">
             <span className="card-title">🏢 Tenants <span className="count-badge">{tenants.length}</span></span>
@@ -74,7 +151,6 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
               🔔 {pendingCount} signup{pendingCount === 1 ? "" : "s"} waiting for activation.
             </div>
           )}
-          {error && <div className="error-banner">{error}</div>}
           <div className="table-scroll">
             <table>
               <thead>
@@ -83,20 +159,22 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
               <tbody>
                 {tenants.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.name}</td>
+                    <td><button className="btn-link" style={{ fontWeight: 700, color: "var(--text)", textDecoration: "none" }} onClick={() => setDetailTenantId(t.id)}>{t.name}</button></td>
                     <td><code>{t.slug}</code></td>
                     <td>
                       <select value={t.plan} disabled={busyId === t.id} onChange={(e) => setPlan(t.id, e.target.value)} style={{ fontSize: 12, padding: "3px 6px" }}>
                         <option value="free">Starter (free)</option>
+                        <option value="starter">Starter</option>
                         <option value="growth">Growth</option>
                         <option value="enterprise">Enterprise</option>
                       </select>
                     </td>
-                    <td><span className={`status-badge status-${t.status === "cancelled" ? "cancelled" : t.status === "active" ? "arrived" : t.status === "suspended" ? "no_show" : "payment_pending"}`}>{t.status}</span></td>
+                    <td><span className={`status-badge ${STATUS_BADGE_CLASS[t.status] || "status-payment_pending"}`}>{t.status}</span></td>
                     <td>{t.whatsappConnected ? "✅" : "—"}</td>
                     <td>{t.bookingCount}</td>
                     <td>{t.userCount}</td>
-                    <td style={{ display: "flex", gap: 6 }}>
+                    <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button className="btn-secondary" onClick={() => setDetailTenantId(t.id)}>View</button>
                       {t.status === "pending" && (
                         <button className="btn-primary" disabled={busyId === t.id} onClick={() => setStatus(t.id, "active")}>Activate</button>
                       )}
@@ -118,6 +196,100 @@ export default function PlatformAdminView({ currentUserEmail, logout }) {
         </div>
       </main>
       {showCreate && <CreateTenantModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />}
+      {detailTenantId && <TenantDetailModal tenantId={detailTenantId} onClose={() => setDetailTenantId(null)} />}
+    </div>
+  );
+}
+
+// New plan, Stream 5 — the drill-in itself: booking counts by status,
+// team roster, onboarding status, and the tenant's own recent audit
+// trail, all from the one GET /api/platform/tenants/:id/detail call
+// (which itself logs a tenant.viewed audit entry server-side — see
+// platformAdmin.js — so this view being opened is itself part of the
+// trail it displays).
+function TenantDetailModal({ tenantId, onClose }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    get(`/api/platform/tenants/${tenantId}/detail`).then(setData).catch((err) => setError(err.message));
+  }, [tenantId]);
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-card" style={{ maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
+        <div className="card-header" style={{ marginBottom: 0 }}>
+          <span className="card-title">{data ? data.tenant.name : "Loading…"}</span>
+          <button className="btn-link" style={{ fontSize: 20, fontWeight: "bold" }} onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-banner">{error}</div>}
+        {data && (
+          <>
+            <div className="stat-bar" style={{ marginTop: 4 }}>
+              <div className="stat-tile"><div className="n">{data.bookingCount}</div><div className="l">Bookings</div></div>
+              <div className="stat-tile"><div className="n">{data.userCount}</div><div className="l">Team members</div></div>
+              <div className="stat-tile"><div className="n">{data.tenant.plan}</div><div className="l">Plan</div></div>
+              <div className="stat-tile"><div className="n">{data.tenant.status}</div><div className="l">Status</div></div>
+            </div>
+
+            {data.onboarding && (
+              <div style={{ marginBottom: 16 }}>
+                <div className="section-label">Onboarding</div>
+                <div style={{ fontSize: 13 }}>
+                  Status: <strong>{data.onboarding.status}</strong>
+                  {data.onboarding.assignedTo && <> · Assigned to {data.onboarding.assignedTo}</>}
+                  {data.onboarding.contactedAt && <> · First contacted {new Date(data.onboarding.contactedAt).toLocaleString()}</>}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginBottom: 16 }}>
+              <div className="section-label">Bookings by status</div>
+              {Object.keys(data.bookingsByStatus).length === 0 ? (
+                <div className="empty" style={{ padding: "8px 0" }}>No bookings yet.</div>
+              ) : (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {Object.entries(data.bookingsByStatus).map(([status, count]) => (
+                    <span key={status} className={`status-badge status-${status}`}>{status}: {count}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div className="section-label">Team</div>
+              {data.users.length === 0 ? (
+                <div className="empty" style={{ padding: "8px 0" }}>No users yet.</div>
+              ) : (
+                <div className="table-scroll">
+                  <table>
+                    <thead><tr><th>Email</th><th>Role</th><th>Status</th></tr></thead>
+                    <tbody>{data.users.map((u) => (
+                      <tr key={u.email}><td>{u.email}</td><td>{u.role}</td><td>{u.active ? "Active" : "Inactive"}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="section-label">Recent activity</div>
+              {data.recentActivity.length === 0 ? (
+                <div className="empty" style={{ padding: "8px 0" }}>No activity recorded yet.</div>
+              ) : (
+                <div className="table-scroll">
+                  <table>
+                    <thead><tr><th>When</th><th>Who</th><th>Action</th></tr></thead>
+                    <tbody>{data.recentActivity.map((a) => (
+                      <tr key={a.id}><td>{new Date(a.createdAt).toLocaleString()}</td><td>{a.actorEmail}</td><td>{a.action}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

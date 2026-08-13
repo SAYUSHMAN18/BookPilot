@@ -117,6 +117,50 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 
 .app-main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
 
+/* New plan, Stream 4 — the multi-page dashboard's sidebar shell
+   (DashboardLayout.jsx), replacing the old single sticky header. */
+.app-shell-sidebar { min-height: 100vh; display: flex; }
+
+.sidebar {
+  width: 220px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+}
+.sidebar-brand { font-weight: 800; font-size: 16px; color: var(--profile); padding: 20px 20px 12px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; flex: 1; overflow-y: auto; }
+.sidebar-link {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius-xs);
+  color: var(--muted); font-weight: 600; font-size: 13.5px; text-decoration: none;
+}
+.sidebar-link:hover { background: var(--bg); color: var(--text); }
+.sidebar-link.active { background: rgba(79,70,229,0.1); color: var(--profile); }
+.sidebar-icon { font-size: 15px; width: 18px; text-align: center; }
+
+.sidebar-footer { padding: 14px 16px 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.sidebar-user { font-size: 12px; color: var(--text); margin-top: 4px; }
+.sidebar-role { color: var(--muted); }
+
+.app-main-sidebar { flex: 1; max-width: 1200px; }
+
+.btn-full { width: 100%; }
+
+.quick-link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.quick-link-tile {
+  display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); text-decoration: none; color: var(--text); transition: border-color .15s ease, background .15s ease;
+}
+.quick-link-tile:hover { border-color: var(--profile); background: rgba(79,70,229,0.03); }
+.quick-link-icon { font-size: 20px; }
+.quick-link-label { font-weight: 700; font-size: 13.5px; }
+.quick-link-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+@media (max-width: 860px) {
+  .app-shell-sidebar { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar-nav { flex-direction: row; flex-wrap: wrap; overflow-y: visible; }
+  .sidebar-footer { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .app-main-sidebar { max-width: 100%; }
+}
+
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 .login-card { width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 32px; }
 .login-card h1 { font-size: 18px; margin-bottom: 4px; }

@@ -18,6 +18,7 @@ export default defineConfig({
     // `npm run dev` here works against real data without CORS headaches.
     proxy: {
       "/api": "http://localhost:8081",
+      "/app-config.js": "http://localhost:8081",
     },
   },
   // New plan, Block 6 — vitest reads its own config from this same file
