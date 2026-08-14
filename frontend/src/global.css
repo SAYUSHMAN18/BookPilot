@@ -95,6 +95,43 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 
 .error-banner { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px; margin-bottom: 14px; }
 
+/* New plan — subtle animated background for every full-page shell (login,
+   dashboard, platform admin). Pure CSS, no extra markup: a blurred,
+   slow-drifting layer of brand-colored radial gradients pinned behind
+   the page via a ::before pseudo-element, z-index'd under the actual
+   content (which all sits on opaque --card backgrounds anyway). Kept
+   deliberately subtle/slow — this is a working tool, not a marketing
+   page, so the animation should read as "alive" at a glance, not be
+   something you consciously watch. Respects prefers-reduced-motion.*/
+@keyframes aurora-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(2.5%, -3%) scale(1.04); }
+  66% { transform: translate(-2%, 2.5%) scale(0.97); }
+}
+.app-shell, .app-shell-sidebar, .login-wrap { position: relative; }
+.app-shell::before, .app-shell-sidebar::before, .login-wrap::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(560px circle at 15% 20%, rgba(79, 70, 229, 0.10), transparent 60%),
+    radial-gradient(480px circle at 85% 15%, rgba(124, 115, 240, 0.08), transparent 60%),
+    radial-gradient(520px circle at 50% 90%, rgba(217, 119, 6, 0.05), transparent 60%);
+  filter: blur(50px);
+  animation: aurora-drift 26s ease-in-out infinite;
+}
+/* Targeted, not a blanket ">*" — .app-header and .sidebar already set
+   their own position:sticky elsewhere in this file and must keep it;
+   only the actual content areas need lifting above the new background
+   layer (they already paint on solid --card backgrounds regardless, this
+   just removes any ambiguity). */
+.app-main, .login-card { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .app-shell::before, .app-shell-sidebar::before, .login-wrap::before { animation: none; }
+}
+
 .app-shell { min-height: 100vh; }
 .app-header {
   background: var(--card);

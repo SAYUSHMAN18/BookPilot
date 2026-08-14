@@ -1,4 +1,5 @@
 const tenantStore = require("../store/tenantStore");
+const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const { log } = require("./logger");
 
 // Item 8 — the public marketing site's live chat widget (POST
@@ -31,10 +32,24 @@ async function ensureDemoTenant() {
   // tenant from before this check existed gets corrected too.
   if (existing) {
     if (existing.status !== "active") await tenantStore.setStatus(existing.id, "active");
+    // Found live (audit pass) — every OTHER tenant's "no auto-seeded
+    // businesses" rule (see tenantWorkflowStore's own comment on
+    // hasCustomizations) is right for a real signup, who's expected to
+    // add their own. It's wrong for THIS tenant specifically: its entire
+    // purpose is showing a real conversation to a visitor with zero setup
+    // of their own, and an unseeded demo tenant meant the live chat
+    // widget had nothing to book — every message fell through to a plain
+    // AI chat reply, never the actual interactive business list. Checked
+    // (not just seeded once at creation) so an install that already had
+    // this exact gap from before this fix existed gets corrected on the
+    // next boot too — seedDefaultsForTenant is itself idempotent (a no-op
+    // once real rows exist), so this is safe to call every time.
+    await tenantWorkflowStore.seedDefaultsForTenant(existing.id);
     return existing.id;
   }
   const created = await tenantStore.create({ name: "BookPilot AI — Live Demo", slug: DEMO_TENANT_SLUG, plan: "free" });
   await tenantStore.setStatus(created.id, "active");
+  await tenantWorkflowStore.seedDefaultsForTenant(created.id);
   log("INFO", `Created dedicated demo tenant (id ${created.id}) for the public marketing chat widget.`);
   return created.id;
 }

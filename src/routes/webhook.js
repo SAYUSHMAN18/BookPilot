@@ -9,8 +9,7 @@ const tenantStore = require("../store/tenantStore");
 const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const paymentStore = require("../store/paymentStore");
 const subscriptionOrders = require("../store/subscriptionOrderStore");
-const onboardingRequests = require("../store/onboardingRequestStore");
-const { sendEmail } = require("../infra/emailSender");
+const { activateTenantOnboarding } = require("../infra/onboarding");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
 const { recordAudit } = require("../store/auditLog");
 const { publishBookingEvent } = require("../infra/publishBookingEvent");
@@ -95,22 +94,7 @@ async function handleSubscriptionWebhookEvent(event, subscriptionOrder) {
   if (event.type === "payment.captured") {
     await subscriptionOrders.markPaid(subscriptionOrder.id, event.paymentId);
     if (tenant.status === "awaiting_payment") {
-      await tenantStore.setPlan(tenant.id, subscriptionOrder.plan);
-      await tenantStore.setStatus(tenant.id, "onboarding_pending");
-      await onboardingRequests.create(tenant.id, { plan: subscriptionOrder.plan, amount: subscriptionOrder.amount });
-      await recordAudit(tenant.id, { email: "razorpay-webhook", role: "system" }, "subscription.activated", { plan: subscriptionOrder.plan, amount: subscriptionOrder.amount });
-      log("INFO", `Subscription payment captured for tenant ${tenant.id} (${tenant.slug}), plan "${subscriptionOrder.plan}" — queued for onboarding.`);
-      if (tenant.billingEmail) {
-        try {
-          await sendEmail(
-            tenant.billingEmail,
-            "You're all set — BookPilot AI onboarding",
-            `Thanks for subscribing to the ${subscriptionOrder.plan} plan! Our onboarding team has been notified and will reach out shortly to get "${tenant.name}" set up. No further action is needed from you right now.`
-          );
-        } catch (err) {
-          log("WARN", `Onboarding-queue email failed for tenant ${tenant.id}: ${err.message}`);
-        }
-      }
+      await activateTenantOnboarding(tenant, subscriptionOrder.plan, subscriptionOrder.amount, { email: "razorpay-webhook", role: "system" });
     } else {
       // Already past awaiting_payment (e.g. a duplicate webhook delivery,
       // which Razorpay's own docs say to expect and de-dupe defensively

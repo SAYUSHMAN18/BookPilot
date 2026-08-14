@@ -122,6 +122,19 @@ const tenants = {
     return this.getById(id);
   },
 
+  // New plan — audit fix. Real tenants are never deleted (suspended/
+  // cancelled exist for that), but a tenant created seconds ago as the
+  // first half of POST /api/signup's two-step create — whose SECOND step
+  // (the admin user) then failed — has no user, no workflows, no
+  // bookings, nothing pointing at it: it isn't a real tenant, just a
+  // failed transaction's leftover half. Deliberately narrow — this isn't
+  // a general "delete a tenant" capability, only ever called from that
+  // one rollback path, on a row the caller just created in the same
+  // request.
+  async removeIfOrphaned(id) {
+    await pool.query("DELETE FROM tenants WHERE id = $1", [id]);
+  },
+
   // Not exposed through rowToTenant()'s general shape — a Groq override is
   // only ever needed at the one call site that picks which API key to use
   // for a request, not anywhere a tenant's general info is displayed.

@@ -247,6 +247,36 @@
         errBubble.className = "bubble error";
         errBubble.textContent = data.error || "Something went wrong — please try again in a moment.";
         demoBody.appendChild(errBubble);
+      } else if (Array.isArray(data.parts) && data.parts.length) {
+        // Found live (audit pass) — this used to always render `reply`
+        // as plain bubbles, even for a provider/date/time list, which
+        // collapses a real interactive WhatsApp message's tappable
+        // options into one line of comma-separated text. `parts` (see
+        // demoChat.js) carries the real option structure; a bubble with
+        // options renders the exact same tappable-looking "list" bubble
+        // the scripted replay above already uses (see playSequence's
+        // `type: "list"` handling) — and clicking one actually sends it,
+        // same as tapping a real WhatsApp list row would.
+        for (const part of data.parts) {
+          if (!part.text?.trim() && !part.options) continue;
+          const outBubble = document.createElement("div");
+          if (part.options && part.options.length) {
+            outBubble.className = "bubble list"; // same class the scripted replay above uses for its own list bubbles
+            outBubble.innerHTML = `${escapeHtml(part.text)}${part.options
+              .map((o) => `<span class="opt" data-send="${escapeHtml(o.id)}">${escapeHtml(o.title)}</span>`)
+              .join("")}`;
+            outBubble.querySelectorAll(".opt").forEach((el) => {
+              el.addEventListener("click", () => {
+                if (liveDemoInput.disabled) return; // a reply is already in flight
+                sendLiveDemoMessage(el.dataset.send);
+              });
+            });
+          } else {
+            outBubble.className = "bubble out";
+            outBubble.textContent = part.text;
+          }
+          demoBody.appendChild(outBubble);
+        }
       } else {
         for (const part of String(data.reply || "").split("\n\n")) {
           if (!part.trim()) continue;

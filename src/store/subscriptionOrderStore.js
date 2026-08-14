@@ -56,6 +56,24 @@ const subscriptionOrders = {
   async markFailed(id, reason) {
     await pool.query("UPDATE subscription_orders SET status = 'failed', failure_reason = $1, updated_at = $2 WHERE id = $3", [reason || null, Date.now(), id]);
   },
+
+  // New plan, audit fix — a tenant that clicks checkout more than once
+  // (a different plan, or the same one after backing out) used to leave
+  // every earlier attempt sitting at 'created' forever, alongside the one
+  // they actually paid. Doesn't touch the real Razorpay link itself (no
+  // cancel API call here — see billing.js's own comment on why that's a
+  // separate, not-yet-attempted piece of work); this only keeps OUR OWN
+  // records honest about which attempt was actually live. Safe either
+  // way if an old, "superseded" link does still get paid — the webhook's
+  // own `tenant.status === "awaiting_payment"` guard (webhook.js) already
+  // prevents a stale attempt from double-activating an already-activated
+  // tenant, superseded or not.
+  async markPendingSuperseded(tenantId) {
+    await pool.query(
+      "UPDATE subscription_orders SET status = 'failed', failure_reason = 'superseded_by_new_checkout', updated_at = $1 WHERE tenant_id = $2 AND status = 'created'",
+      [Date.now(), tenantId]
+    );
+  },
 };
 
 module.exports = subscriptionOrders;

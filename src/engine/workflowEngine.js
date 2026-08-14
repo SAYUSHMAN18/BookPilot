@@ -309,6 +309,46 @@ const LOCATION_QUERY_PHRASES = new Set([
   "kahan hai", "kahan h", "pass wale", "aas paas", "aaspas",
 ]);
 
+// New plan — the same "AI usefulness, not a rigid button menu" pass that
+// dropped the Quick Actions section from sendBusinessMenu(). Every one of
+// these used to be reachable ONLY by tapping that section's exact button
+// (whose id, e.g. "__callback", is still checked below for backward
+// compatibility with any in-flight session). Now a customer gets the same
+// result just by typing naturally — same whole-message-only discipline
+// LOCATION_QUERY_PHRASES/LANGUAGE_QUERY_PHRASES already established above
+// (see detectAndSetLanguage's own comment on why substring-anywhere
+// matching was a real, already-fixed bug: a customer's genuine text_input
+// answer containing one of these words as part of something else must
+// never get hijacked into a global action).
+// A flat exact-phrase Set (like the others below) missed real variants a
+// customer actually typed in testing — "call me back please" isn't
+// literally any of "call back"/"call me back"/etc. Upgraded to a bounded
+// regex, same shape as intentDetector.js's own CANCEL_RE/STATUS_RE: key
+// words allowed a small gap between them (".{0,15}"), not unbounded
+// substring-anywhere matching (that's the exact bug class the location/
+// language triggers above were already fixed for once — see
+// detectAndSetLanguage's comment). Safe to be this generous specifically
+// because handleGlobalSpecialActions only ever runs from handleDetecting
+// (before/between booking flows), never from handleRunning's mid-step
+// answers — see that function's own comment on why.
+const CALLBACK_RE = /\b(call\s*back|callback)\b|\b(call|phone)\s*me\b(\s*back)?|\brequest\b.{0,10}\bcallback\b|\bmujhe\b.{0,15}\bcall\b|\bcall\s*(kar\s*do|karo|kardo)\b|\bwapas\s*call\b/i;
+const VIEW_BOOKING_QUERY_PHRASES = new Set([
+  "my booking", "view my booking", "view booking", "booking details", "check my booking",
+  "meri booking", "meri booking dikhao",
+]);
+const WAITLIST_QUERY_PHRASES = new Set([
+  "waitlist", "join waitlist", "wait list", "priority waitlist", "notify me", "notify me when free",
+  "waitlist mein daalo", "waitlist join karo",
+]);
+const AI_CHAT_QUERY_PHRASES = new Set([
+  "chat", "chat with ai", "ai chat", "talk to ai", "ai assistant", "ask ai",
+  "ai se baat karo", "ai se poochna hai",
+]);
+const SEND_PHOTO_QUERY_PHRASES = new Set([
+  "send photo", "photo", "upload photo", "share photo", "send a photo",
+  "photo bhejni hai", "photo bhejta hoon",
+]);
+
 // Found live: every quick-action/menu string that needed a non-English
 // version was hand-written as a `session.lang === "hi" ? "...hindi..." :
 // "...english..."` ternary, scattered across a dozen call sites — and the
@@ -330,67 +370,34 @@ function t(session, text) {
 }
 
 // Shown when we genuinely can't tell what the customer wants (a greeting,
-// small talk, or anything that doesn't match a business) — a single, clean
-// clickable menu bubble divided into Services and Quick Actions sections.
+// small talk, or anything that doesn't match a business) — the tappable
+// list of real services only. The old second section (a fixed "Quick
+// Actions" button list — AI chat, callback, view booking, find branch,
+// switch language, waitlist) was removed: every one of those is already
+// reachable by just typing naturally (handleGlobalSpecialActions below,
+// widened to match natural phrasing, not just the old button ids) — a
+// customer types "callback" or "waitlist" and gets the same result a tap
+// would have. Showing six extra rows next to the real business list read
+// as a rigid IVR menu, which undercuts the "AI assistant" positioning the
+// bot is actually going for; the prompt text below now says so directly.
 async function sendBusinessMenu(tenantId, waId, workflows, session) {
   const isHindi = session?.lang === "hi";
 
-  const promptText = isHindi ? "आज आप क्या बुक करना चाहेंगे?" : "What would you like to book today?";
+  const promptText = isHindi
+    ? "आज आप क्या बुक करना चाहेंगे? नीचे से चुनें, या मुझे बस बताएं — जैसे 'मेरी बुकिंग', 'कॉल बैक चाहिए', या कोई सवाल।"
+    : "What would you like to book today? Choose below, or just tell me what you need — e.g. \"my booking\", \"call me back\", or ask me anything.";
   const chooseTitle = isHindi ? "चुनें" : "Choose";
   const servicesTitle = isHindi ? "🏥 सेवाएं (Services)" : "🏥 Booking Services";
-  const quickTitle = isHindi ? "⚡ त्वरित विकल्प (Quick Actions)" : "⚡ Quick Actions";
 
-  // Section 1: Business services
   const serviceRows = Object.values(workflows).map((w) => ({
     id: w.id,
     title: w.label,
     description: w.description,
   }));
+  const cappedServiceRows = serviceRows.slice(0, MAX_LIST_ROWS);
 
-  // Section 2: Quick utility actions
-  const actionRows = [
-    {
-      id: SPECIAL_OPT_AI_CHAT,
-      title: isHindi ? "💬 AI चैट सहायता" : "💬 AI Assistant Chat",
-      description: isHindi ? "AI सहायक से सवाल पूछें" : "Ask questions & chat with AI",
-    },
-    {
-      id: SPECIAL_OPT_CALLBACK,
-      title: isHindi ? "📞 कॉल बैक अनुरोध" : "📞 Request Callback",
-      description: isHindi ? "टीम से कॉल बैक प्राप्त करें" : "Request a call from support",
-    },
-    {
-      id: SPECIAL_OPT_VIEW_BOOKING,
-      title: isHindi ? "📅 मेरी बुकिंग विवरण" : "📅 View My Booking",
-      description: isHindi ? "बुकिंग स्थिति और कतार जांचें" : "Check booking status & queue",
-    },
-    {
-      id: SPECIAL_OPT_LOCATION,
-      title: isHindi ? "📍 पास का स्थान खोजें" : "📍 Find Nearest Branch",
-      description: isHindi ? "निकटतम केंद्र का पता पाएं" : "Find nearby branch address & hours",
-    },
-    {
-      id: SPECIAL_OPT_LANGUAGE,
-      title: isHindi ? "🌐 भाषा बदलें (Language)" : "🌐 Switch Language",
-      description: isHindi ? "हिंदी / अंग्रेज़ी बदलें" : "Toggle English / Hindi",
-    },
-    {
-      id: SPECIAL_OPT_WAITLIST,
-      title: isHindi ? "⏳ वेटलिस्ट में जुड़ें" : "⏳ Join Priority Waitlist",
-      description: isHindi ? "स्लॉट खाली होने पर सूचना पाएं" : "Get notified for open slots",
-    },
-  ];
+  const sections = [{ title: servicesTitle, rows: cappedServiceRows }];
 
-  // WhatsApp lists hard-cap at 10 total rows across all sections
-  const serviceCap = Math.max(1, MAX_LIST_ROWS - actionRows.length);
-  const cappedServiceRows = serviceRows.slice(0, serviceCap);
-
-  const sections = [
-    { title: servicesTitle, rows: cappedServiceRows },
-    { title: quickTitle, rows: actionRows },
-  ];
-
-  // EXACTLY ONE SINGLE CLEAN BUBBLE
   await sendWhatsAppList(tenantId, waId, promptText, chooseTitle, sections);
 }
 
@@ -1598,7 +1605,7 @@ async function handleGlobalSpecialActions(tenantId, waId, session, trimmed, work
   }
 
   // 3. AI Chat
-  if (lc === SPECIAL_OPT_AI_CHAT || lc === "chat" || lc === "chat with ai" || lc === "💬 ai chat" || lc === "💬 ai चैट") {
+  if (lc === SPECIAL_OPT_AI_CHAT || AI_CHAT_QUERY_PHRASES.has(lc)) {
     session.awaitingBusinessPick = false;
     const greeting = await t(session, "🤖 You're now chatting with our AI assistant! Ask me anything about our services, pricing, or availability. Reply RESTART anytime to return to the main menu.");
     await sendWhatsAppText(tenantId, waId, greeting);
@@ -1607,9 +1614,9 @@ async function handleGlobalSpecialActions(tenantId, waId, session, trimmed, work
   }
 
   // 4. Callback
-  if (lc === SPECIAL_OPT_CALLBACK || lc === "callback" || lc === "request callback" || lc === "📞 callback" || lc === "📞 कॉल बैक") {
+  if (lc === SPECIAL_OPT_CALLBACK || CALLBACK_RE.test(lc)) {
     session.awaitingBusinessPick = false;
-    await supportRequests.create(tenantId, waId, null, "Customer requested a callback via menu");
+    await supportRequests.create(tenantId, waId, null, "Customer requested a callback");
     dashboardEvents.publish(tenantId, "support_request.created", { workflowId: null, waId, message: "Callback requested" });
     log("INFO", `Callback request created for ${waId} (tenant=${tenantId})`);
     const ack = await t(session, "📞 Got it! We've noted your callback request and someone from our team will reach out to you shortly.");
@@ -1618,21 +1625,21 @@ async function handleGlobalSpecialActions(tenantId, waId, session, trimmed, work
   }
 
   // 5. View Booking
-  if (lc === SPECIAL_OPT_VIEW_BOOKING || lc === "my booking" || lc === "📅 my booking" || lc === "📅 मेरी बुकिंग") {
+  if (lc === SPECIAL_OPT_VIEW_BOOKING || VIEW_BOOKING_QUERY_PHRASES.has(lc)) {
     session.awaitingBusinessPick = false;
     await handleAiViewBooking(tenantId, waId, session, workflows);
     return true;
   }
 
   // 6. Waitlist
-  if (lc === SPECIAL_OPT_WAITLIST || lc === "join waitlist" || lc === "waitlist" || lc === "⏳ join waitlist" || lc === "⏳ वेटलिस्ट") {
+  if (lc === SPECIAL_OPT_WAITLIST || WAITLIST_QUERY_PHRASES.has(lc)) {
     session.awaitingBusinessPick = false;
     await handleAiWaitlist(tenantId, waId, trimmed, session, workflows);
     return true;
   }
 
   // 7. Send Photo
-  if (lc === SPECIAL_OPT_SEND_PHOTO || lc === "send photo" || lc === "photo" || lc === "📸 send photo") {
+  if (lc === SPECIAL_OPT_SEND_PHOTO || SEND_PHOTO_QUERY_PHRASES.has(lc)) {
     session.awaitingBusinessPick = false;
     await handleAiPhotoUpload(tenantId, waId, trimmed, session, workflows);
     return true;
@@ -1672,6 +1679,22 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   }
 
 
+  // Found live (real WhatsApp number, not a test) — a customer stuck in
+  // AI_CHAT/AWAITING_PHOTO from an earlier turn had no way back to the
+  // actual business menu except typing the exact word RESTART, which
+  // nothing in the conversation ever tells them. A fresh greeting is an
+  // unambiguous "start over" signal on its own — checked and acted on
+  // BEFORE the AI_CHAT/AWAITING_PHOTO dispatch below (which used to run
+  // unconditionally first, meaning "hii" while stuck just got fed to the
+  // AI chat handler as another chat message instead of ever reaching the
+  // greeting handling further down this function). Clearing subStage
+  // here is exactly what RESTART already does elsewhere — this is just a
+  // second, actually-discoverable way to trigger the identical reset.
+  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar|raam\s*raam|ram\s*ram|kya\s*hal|kaise\s*ho|radhe\s*radhe|jai\s*shree\s*ram|pranam|sat\s*sri|adaab|khamma\s*ghani)[\s!,.?]*$/i.test(trimmed);
+  if (isGreeting && (session.subStage === "AI_CHAT" || session.subStage === "AWAITING_PHOTO")) {
+    session.subStage = null;
+  }
+
   // --- Ongoing AI chat / Photo upload sub-modes ---
   if (session.subStage === "AI_CHAT") {
     await handleAiChat(tenantId, waId, trimmed, session, workflows);
@@ -1699,11 +1722,10 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   // slightly off (e.g. "CANCEL THAT" was misrouted to a hair booking).
   const hasActive = await bookings.hasActive(tenantId, waId);
 
-  // Handle simple greetings separately.
+  // Handle simple greetings separately (isGreeting computed above, now
+  // also used to escape a stuck AI_CHAT/AWAITING_PHOTO subStage).
   // A greeting is not a booking request and should never fall through to
   // the "you already have a booking" fallback.
-  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar|raam\s*raam|ram\s*ram|kya\s*hal|kaise\s*ho|radhe\s*radhe|jai\s*shree\s*ram|pranam|sat\s*sri|adaab|khamma\s*ghani)[\s!,.?]*$/i.test(trimmed);
-
   if (isGreeting) {
     if (hasActive) {
       const msg = await t(session, "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else.");
@@ -1807,10 +1829,18 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   }
 
   if (intent === INTENTS.QUESTION) {
-    // Try to answer factually first; if we can't, show the menu anyway.
+    // Try to answer factually first (grounded in the business's own real
+    // data — hours, fees, location, FAQ docs). If that can't answer it
+    // either, hand off to the open AI assistant rather than defaulting to
+    // the menu — same reasoning and same reused handleAiChat() as the
+    // "unclassifiable" fallback further below; a real question deserves a
+    // real attempt at an answer, not a business list.
     const factualAnswer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
     if (factualAnswer) {
       await sendWhatsAppText(tenantId, waId, factualAnswer);
+    } else if (process.env.GROQ_API_KEY) {
+      session.subStage = "AI_CHAT";
+      await handleAiChat(tenantId, waId, trimmed, session, workflows);
     } else {
       session.awaitingBusinessPick = true;
       if (hasActive) {
@@ -1886,6 +1916,25 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     // this is the actual "stuck" case, not the workflow-selection menu
     // that legitimately appears the first time or two.
     if (await maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed)) return;
+
+    // New plan — hand this off to the AI assistant rather than defaulting
+    // straight back to the same business-list menu every time a message
+    // doesn't classify. This is the exact same handleAiChat() a customer
+    // reaches by typing "chat" (see handleGlobalSpecialActions above) —
+    // reused here, not duplicated, so both paths share one prompt/
+    // knowledge-base/history implementation. Sets subStage so the
+    // conversation actually CONTINUES in AI mode on their next message
+    // too, instead of re-running full intent classification from scratch
+    // every single turn — a real back-and-forth, not one-off answers.
+    // Only when GROQ_API_KEY is configured: with no key, handleAiChat's
+    // own fallback text ("AI assistant isn't available... choose a
+    // service") would just precede the SAME menu below, a redundant
+    // double message — skip straight to the menu instead in that case.
+    if (process.env.GROQ_API_KEY) {
+      session.subStage = "AI_CHAT";
+      await handleAiChat(tenantId, waId, trimmed, session, workflows);
+      return;
+    }
 
     session.awaitingBusinessPick = true;
     if (hasActive) {

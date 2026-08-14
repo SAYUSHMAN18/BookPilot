@@ -3,11 +3,44 @@
 
 .auth-body {
   min-height: 100vh;
-  background: radial-gradient(circle at 15% 15%, #eef2ff, transparent 45%), var(--bg);
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 100px 24px 40px;
+  position: relative;
+  overflow: hidden;
+}
+/* Same slow-drifting aurora treatment as the dashboard's login page
+   (frontend/src/global.css) — kept as a separate copy since this static
+   site and the Vite-built dashboard don't share a stylesheet, not
+   because the design differs. A touch richer here (brand + accent) to
+   match this site's own fuller palette (styles.css). */
+@keyframes auth-aurora-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(3%, -3.5%) scale(1.05); }
+  66% { transform: translate(-2.5%, 3%) scale(0.96); }
+}
+.auth-body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(600px circle at 12% 18%, rgba(79, 70, 229, 0.13), transparent 60%),
+    radial-gradient(520px circle at 88% 12%, rgba(124, 115, 240, 0.10), transparent 60%),
+    radial-gradient(560px circle at 50% 92%, rgba(249, 115, 22, 0.07), transparent 60%);
+  filter: blur(55px);
+  animation: auth-aurora-drift 24s var(--ease) infinite;
+}
+/* Targeted, not a blanket ">*"  — .auth-body's other children (.grain,
+   .auth-brand) already set their own position/z-index in styles.css and
+   must keep them; only the actual content wrapper needs lifting above
+   the new background layer. */
+.auth-wrap { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .auth-body::before { animation: none; }
 }
 
 .auth-brand {

@@ -3,7 +3,7 @@ const express = require("express");
 const { log } = require("../infra/logger");
 const { handleIncomingMessage } = require("../engine/workflowEngine");
 const tenantWorkflowStore = require("../store/tenantWorkflowStore");
-const { beginReplyCapture, endReplyCapture } = require("../infra/whatsapp");
+const { beginReplyCapture, endStructuredReplyCapture } = require("../infra/whatsapp");
 const { isDemoChatRateLimited } = require("../infra/rateLimit");
 const { asyncHandler } = require("../infra/asyncHandler");
 
@@ -63,10 +63,25 @@ function createDemoChatRouter(demoTenantId) {
     beginReplyCapture(waId);
     try {
       await handleIncomingMessage(demoTenantId, waId, text.trim(), await tenantWorkflowStore.listForTenant(demoTenantId));
-      const reply = endReplyCapture(waId);
-      res.json({ reply: reply || "..." });
+      const captured = endStructuredReplyCapture(waId);
+      // `reply` stays exactly the flattened plain-text string this route
+      // always returned — kept for compatibility (see tests/http/
+      // demoChat.test.js's own assertion on it being a plain string).
+      // `parts` is new: one entry per bubble, carrying the SAME text
+      // alongside the raw tappable options a real WhatsApp interactive
+      // message would have had, instead of those options being collapsed
+      // into a comma-separated line inside the text (found live — this
+      // is exactly why the live demo widget could only ever render plain
+      // text bubbles, never real-looking tappable ones, even for a
+      // provider/date/time list). Falls back to a single "..." part so
+      // the widget always has at least one bubble to render.
+      const parts = captured.length
+        ? captured.map((c) => ({ text: c.text, options: c.options ? c.options.map((o) => ({ id: o.id, title: o.title })) : null }))
+        : [{ text: "...", options: null }];
+      const reply = parts.map((p) => (p.options ? `${p.text}\n${p.options.map((o) => o.title).join(", ")}` : p.text)).join("\n\n");
+      res.json({ reply, parts });
     } catch (err) {
-      endReplyCapture(waId);
+      endStructuredReplyCapture(waId);
       log("ERROR", `Demo chat error: ${err.stack || err.message}`);
       res.status(500).json({ reply: "Sorry, something went wrong on my end — could you try that again?" });
     }

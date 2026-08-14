@@ -238,6 +238,19 @@ router.post("/api/signup", asyncHandler(async (req, res) => {
   if (!(await verifyOtp(email.trim(), otp))) {
     return res.status(400).json({ error: "That verification code is invalid or has expired. Request a new one and try again." });
   }
+  // Found live (audit pass) — checked here, before any tenant is created,
+  // specifically to avoid the realistic failure case below: someone who
+  // forgot they already signed up retries with the same email, the
+  // tenant gets created successfully, and ONLY THEN does users.create()
+  // reject the duplicate — leaving a permanently orphaned tenant behind
+  // (awaiting_payment, no user attached, unreachable and unlogginable-
+  // into forever). This early check closes the common case; the
+  // try/catch around users.create() below still cleans up for the rare
+  // remaining case (e.g. a genuine race between two signups for the same
+  // email) so a stray tenant can never survive a failed signup either way.
+  if (await users.findByEmail(email.trim())) {
+    return res.status(409).json({ error: "An account already exists for that email — try logging in instead." });
+  }
 
   // Derive a URL-safe slug from the business name, same character rules
   // POST /api/platform/tenants already enforces (lowercase, digits,
@@ -271,6 +284,12 @@ router.post("/api/signup", asyncHandler(async (req, res) => {
   try {
     user = await users.create({ email: email.trim(), password, role: "admin", name: (ownerName || "").trim() || null, tenantId: tenant.id });
   } catch (err) {
+    // Belt and suspenders on top of the early findByEmail() check above:
+    // that check closes the common case, this closes the rare remaining
+    // one (a genuine race between two signups for the same email, or any
+    // other failure here) — either way, the tenant this request just
+    // created must not survive as an orphan with nothing pointing at it.
+    await tenantStore.removeIfOrphaned(tenant.id);
     if (err.code === "DUPLICATE_EMAIL") return res.status(409).json({ error: "An account already exists for that email — try logging in instead." });
     throw err;
   }

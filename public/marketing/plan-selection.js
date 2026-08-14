@@ -3,17 +3,31 @@
 // is unauthenticated on purpose (it's just a price list); POST
 // /api/billing/checkout is the one that actually needs the session cookie
 // this page relies on already being set from signup.
+//
+// Found live (audit pass): every plan used to render as a paid checkout
+// button, including a "Free" tier that should never hit Razorpay at all
+// and an "Enterprise" tier that should never be self-serve — see
+// src/infra/plans.js's own comment. Three distinct card behaviors now,
+// keyed off amount: null (sales-assisted, contact links only), 0 (free,
+// instant-activate via checkout with no payment step), > 0 (real
+// checkout, redirect to the returned paymentUrl).
 (() => {
   const grid = document.getElementById("planGrid");
   const errorBanner = document.getElementById("errorBanner");
   const logoutLink = document.getElementById("logoutLink");
+
+  // Same contact details as the marketing site's own Enterprise card
+  // (public/marketing/index.html #pricing) — one real path, not a second
+  // one that could drift out of sync.
+  const CONTACT_EMAIL = "er.sayushman@gmail.com";
+  const CONTACT_WHATSAPP = "https://wa.me/917838881412";
 
   function showError(message) {
     errorBanner.textContent = message;
     errorBanner.hidden = false;
   }
 
-  function formatAmount(paise, currency) {
+  function formatAmount(paise) {
     return `₹${(paise / 100).toLocaleString("en-IN")}`;
   }
 
@@ -34,12 +48,23 @@
     plans.forEach((plan, i) => {
       const card = document.createElement("div");
       card.className = "plan-card" + (i === 1 ? " plan-card-featured" : "");
-      card.innerHTML = `
-        <h3>${plan.label}</h3>
-        <div class="plan-price">${formatAmount(plan.amount, plan.currency)}<span> / month</span></div>
-        <p class="plan-cycle">Billed monthly, cancel anytime.</p>
-        <button class="btn btn-primary btn-full" type="button" data-plan="${plan.id}"><span>Choose ${plan.label}</span></button>
-      `;
+
+      const priceHtml =
+        plan.amount === null
+          ? `<div class="plan-price">Custom</div><p class="plan-cycle">Multi-location, custom workflows.</p>`
+          : plan.amount === 0
+          ? `<div class="plan-price">Free</div><p class="plan-cycle">No card needed, upgrade anytime.</p>`
+          : `<div class="plan-price">${formatAmount(plan.amount)}<span> / month</span></div><p class="plan-cycle">Billed monthly, cancel anytime.</p>`;
+
+      const actionHtml =
+        plan.amount === null
+          ? `<div class="btn-group-stack">
+               <a class="btn btn-outline btn-full" href="mailto:${CONTACT_EMAIL}">✉️ Email us</a>
+               <a class="btn btn-outline btn-full" href="${CONTACT_WHATSAPP}" target="_blank" rel="noopener">💬 WhatsApp us</a>
+             </div>`
+          : `<button class="btn btn-primary btn-full" type="button" data-plan="${plan.id}"><span>${plan.amount === 0 ? "Start free" : `Choose ${plan.label}`}</span></button>`;
+
+      card.innerHTML = `<h3>${plan.label}</h3>${priceHtml}${actionHtml}`;
       grid.appendChild(card);
     });
     grid.querySelectorAll("button[data-plan]").forEach((btn) => {
@@ -52,7 +77,7 @@
     const plan = btn.dataset.plan;
     const originalText = btn.querySelector("span").textContent;
     btn.disabled = true;
-    btn.querySelector("span").textContent = "Redirecting to payment…";
+    btn.querySelector("span").textContent = "One moment…";
     try {
       const resp = await fetch("/api/billing/checkout", {
         method: "POST",
@@ -66,6 +91,16 @@
         return;
       }
       if (!resp.ok) throw new Error(data.error || "Couldn't start checkout — please try again.");
+
+      if (data.activated) {
+        // Free plan — nothing to pay, already queued for onboarding.
+        // Same dashboard redirect the "log in" links elsewhere on this
+        // site already use (window.DASHBOARD_URL, from /marketing/config.js).
+        const dashboardUrl = window.DASHBOARD_URL || "http://localhost:8081";
+        btn.querySelector("span").textContent = "You're in! Redirecting…";
+        window.location.href = `${dashboardUrl}/app`;
+        return;
+      }
       window.location.href = data.paymentUrl;
     } catch (err) {
       showError(err.message);
@@ -81,7 +116,7 @@
     } catch {
       // best-effort — the cookie may already be gone; either way, send them on
     }
-    window.location.href = "/marketing/signup.html";
+    window.location.href = "/signup";
   });
 
   loadPlans();

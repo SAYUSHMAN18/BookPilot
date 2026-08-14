@@ -39,7 +39,7 @@ async function credentials(tenantId) {
 // buffer (not a stored table), and two different tenants' bots both
 // happening to process the exact same phone number's message in the same
 // synchronous tick is not a real scenario this needs to guard against.
-const replyCaptures = new Map(); // waId -> string[]
+const replyCaptures = new Map(); // waId -> { text, options }[]
 
 function isReplyCaptureActive(waId) {
   return replyCaptures.has(waId);
@@ -49,10 +49,20 @@ function beginReplyCapture(waId) {
   if (!replyCaptures.has(waId)) replyCaptures.set(waId, []);
 }
 
+// Flattens a captured entry back to the one plain-text line every
+// existing consumer (voice, Section 1.5's conversation history) already
+// expects — same "title, title, title" shape sendWhatsAppList used to
+// bake into the string itself before options were captured separately
+// (see captureReply below), so this stays a pure refactor for those
+// callers, not a behavior change.
+function flattenCapturedEntry(entry) {
+  return entry.options ? `${entry.text}\n${entry.options.map((o) => o.title).join(", ")}` : entry.text;
+}
+
 // Non-destructive — for a caller that did NOT start the capture and must
 // leave it intact for whoever did.
 function peekReplyCapture(waId) {
-  return (replyCaptures.get(waId) || []).join("\n\n");
+  return (replyCaptures.get(waId) || []).map(flattenCapturedEntry).join("\n\n");
 }
 
 // Destructive — only call this if you're the one who called
@@ -61,12 +71,31 @@ function peekReplyCapture(waId) {
 function endReplyCapture(waId) {
   const captured = replyCaptures.get(waId) || [];
   replyCaptures.delete(waId);
-  return captured.join("\n\n");
+  return captured.map(flattenCapturedEntry).join("\n\n");
 }
 
-function captureReply(to, body) {
+// New plan — audit fix. The plain-text flattening above is exactly right
+// for voice/history, which only ever needed a string, but it threw away
+// the ACTUAL interactive structure of a list message (options collapsed
+// into one comma-separated string baked into the text). The one place
+// that structure is worth keeping — the marketing site's live chat demo
+// (src/routes/demoChat.js), so it can render real tappable-looking option
+// bubbles instead of the same flattened line as everything else. Same
+// destructive/single-consumer contract as endReplyCapture above.
+function endStructuredReplyCapture(waId) {
+  const captured = replyCaptures.get(waId) || [];
+  replyCaptures.delete(waId);
+  return captured;
+}
+
+// `options` (optional): the raw { id, title, description } rows of an
+// interactive list message — see sendWhatsAppList below. Kept structured
+// here rather than pre-flattened, so a caller that actually wants the
+// structure (endStructuredReplyCapture) can still get it; every other
+// caller only ever sees the flattened text either way.
+function captureReply(to, body, options) {
   const bucket = replyCaptures.get(to);
-  if (bucket) bucket.push(body);
+  if (bucket) bucket.push({ text: body, options: options || null });
 }
 
 // Returns true/false rather than throwing — every existing call site
@@ -150,7 +179,7 @@ async function sendWhatsAppButtons(tenantId, to, bodyText, buttons) {
   const rendered = buttons.map((b, i) => `${i + 1}. ${b.title} [reply with: ${b.id}]`).join("\n");
   // Speak the prompt and the option titles, but not the machine-readable
   // reply ids — those are for tapping, not for listening to.
-  captureReply(to, `${bodyText}\n${buttons.map((b) => b.title).join(", ")}`);
+  captureReply(to, bodyText, buttons);
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED BUTTONS -> ${to}]\n${bodyText}\n${rendered}`);
@@ -184,7 +213,7 @@ async function sendWhatsAppList(tenantId, to, bodyText, buttonLabel, sections) {
     .flatMap((s) => s.rows)
     .map((r, i) => `${i + 1}. ${r.title}${r.description ? " — " + r.description : ""} [reply with: ${r.id}]`)
     .join("\n");
-  captureReply(to, `${bodyText}\n${sections.flatMap((s) => s.rows).map((r) => r.title).join(", ")}`);
+  captureReply(to, bodyText, sections.flatMap((s) => s.rows));
 
   if (!token || !phoneNumberId) {
     log("INFO", `[SIMULATED LIST -> ${to}]\n${bodyText}\n${rendered}`);
@@ -378,6 +407,7 @@ module.exports = {
   beginReplyCapture,
   peekReplyCapture,
   endReplyCapture,
+  endStructuredReplyCapture,
   processOutboundQueue,
   startOutboundQueueWorker,
 };
