@@ -1,57 +1,130 @@
 {
   "id": "hotel",
-  "description": "hotel room booking or a place to stay",
+  "description": "hotel room booking or a place to stay in Noida Sector 62",
   "matchLabel": "a hotel room",
   "label": "Hotel Room",
-  "keywords": ["hotel", "room", "stay", "check in", "check-in", "reservation", "resort", "night stay"],
+  "keywords": [
+    "hotel",
+    "room",
+    "stay",
+    "check in",
+    "check-in",
+    "reservation",
+    "night stay",
+    "accommodation"
+  ],
   "bookingIdPrefix": "HTL",
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee}/night)",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee}/night)",
-  "dateRangeAvailability": { "startField": "checkInDate", "nightsField": "nights" },
+  "dateRangeAvailability": {
+    "startField": "checkInDate",
+    "nightsField": "nights"
+  },
   "hotels": [
     {
       "id": "h1",
-      "name": "Grand Palace Hotel",
-      "location": "MG Road, Bengaluru, Karnataka",
-      "rating": "4.5★ (1,204 reviews)",
-      "photo": "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800&q=80",
-      "mapQuery": "Grand+Palace+Hotel+MG+Road+Bengaluru",
+      "name": "Park Ascent",
+      "location": "Plot No. 126, Noida-Khoda Road, Sector 62, Noida, Uttar Pradesh 201020",
+      "rating": "4.2★",
+      "mapQuery": "Park+Ascent+Sector+62+Noida",
       "rooms": [
-        { "id": "h1-r1", "name": "Deluxe Room", "attribute": "1 King Bed, City View", "fee": 4200 },
-        { "id": "h1-r2", "name": "Executive Suite", "attribute": "2 Rooms, Balcony", "fee": 7800 }
+        {
+          "id": "h1-r1",
+          "name": "Deluxe Room",
+          "attribute": "King Bed, Business Stay",
+          "fee": 4500
+        },
+        {
+          "id": "h1-r2",
+          "name": "Executive Room",
+          "attribute": "King Bed, Work Desk",
+          "fee": 5500
+        }
       ]
     },
     {
       "id": "h2",
-      "name": "Seaside Resort & Spa",
-      "location": "East Coast Road, Chennai, Tamil Nadu",
-      "rating": "4.7★ (860 reviews)",
-      "photo": "https://images.unsplash.com/photo-1540541338537-1220059a3eec?w=800&q=80",
-      "mapQuery": "Seaside+Resort+Spa+East+Coast+Road+Chennai",
+      "name": "Bloom Hotel - Sector 62, Noida",
+      "location": "C30/4, C Block, Phase 2, Industrial Area, Sector 62, Noida, Uttar Pradesh 201309",
+      "rating": "4.5★",
+      "mapQuery": "Bloom+Hotel+Sector+62+Noida",
       "rooms": [
-        { "id": "h2-r1", "name": "Garden View Room", "attribute": "1 Queen Bed", "fee": 3500 },
-        { "id": "h2-r2", "name": "Ocean View Suite", "attribute": "1 King Bed, Sea Facing", "fee": 9000 }
+        {
+          "id": "h2-r1",
+          "name": "Standard Room",
+          "attribute": "Queen Bed",
+          "fee": 4200
+        },
+        {
+          "id": "h2-r2",
+          "name": "Deluxe Room",
+          "attribute": "King Bed",
+          "fee": 5200
+        }
       ]
     },
     {
       "id": "h3",
-      "name": "City Central Inn",
-      "location": "Connaught Place, New Delhi",
-      "rating": "4.2★ (530 reviews)",
-      "photo": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&q=80",
-      "mapQuery": "City+Central+Inn+Connaught+Place+New+Delhi",
+      "name": "Marks hotel",
+      "location": "Plot No. 3, Shaheed Chandra Shekhar Azad Road, Sector 62, Noida, Uttar Pradesh 201020",
+      "rating": "4.6★",
+      "mapQuery": "Marks+Hotel+Sector+62+Noida",
       "rooms": [
-        { "id": "h3-r1", "name": "Standard Room", "attribute": "1 Double Bed", "fee": 2200 },
-        { "id": "h3-r2", "name": "Business Room", "attribute": "1 King Bed, Work Desk", "fee": 3800 }
+        {
+          "id": "h3-r1",
+          "name": "Standard Room",
+          "attribute": "Double Bed",
+          "fee": 3500
+        },
+        {
+          "id": "h3-r2",
+          "name": "Business Room",
+          "attribute": "King Bed, Work Desk",
+          "fee": 4500
+        }
       ]
     }
   ],
   "steps": [
-    { "type": "select_hotel", "prompt": "Here are our available hotels:" },
-    { "type": "select_room", "prompt": "Great choice! Here are the room types at {hotel.name}:" },
-    { "type": "select_date", "field": "checkInDate", "prompt": "Please select your check-in date.", "days": 10, "editTarget": true },
-    { "type": "select_option", "field": "nights", "prompt": "How many nights?", "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] },
-    { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name." },
+    {
+      "type": "select_hotel",
+      "prompt": "Here are available hotels in Noida Sector 62:"
+    },
+    {
+      "type": "select_room",
+      "prompt": "Great choice! Here are the room types at {hotel.name}:"
+    },
+    {
+      "type": "select_date",
+      "field": "checkInDate",
+      "prompt": "Please select your check-in date.",
+      "days": 10,
+      "editTarget": true
+    },
+    {
+      "type": "select_option",
+      "field": "nights",
+      "prompt": "How many nights?",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10"
+      ]
+    },
+    {
+      "type": "text_input",
+      "field": "customerName",
+      "prompt": "What name should I book this under?",
+      "validate": "required",
+      "validationError": "Please share a name."
+    },
     {
       "type": "review_confirm",
       "prompt": "Please review your reservation.",

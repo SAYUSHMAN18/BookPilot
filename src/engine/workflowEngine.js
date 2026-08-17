@@ -296,13 +296,13 @@ const TRUNCATION_HINT = "\n\n(Showing the first 10 — if you don't see the one 
 
 // Special menu option ids — not real workflow ids, intercepted before the
 // normal matchWorkflowByIdOrIndex call in handleDetecting.
-const SPECIAL_OPT_AI_CHAT      = "__ai_chat";
-const SPECIAL_OPT_CALLBACK     = "__callback";
+const SPECIAL_OPT_AI_CHAT = "__ai_chat";
+const SPECIAL_OPT_CALLBACK = "__callback";
 const SPECIAL_OPT_VIEW_BOOKING = "__view_booking";
-const SPECIAL_OPT_LOCATION     = "__location";
-const SPECIAL_OPT_LANGUAGE     = "__language";
-const SPECIAL_OPT_WAITLIST     = "__waitlist";
-const SPECIAL_OPT_SEND_PHOTO   = "__send_photo";
+const SPECIAL_OPT_LOCATION = "__location";
+const SPECIAL_OPT_LANGUAGE = "__language";
+const SPECIAL_OPT_WAITLIST = "__waitlist";
+const SPECIAL_OPT_SEND_PHOTO = "__send_photo";
 
 const LOCATION_QUERY_PHRASES = new Set([
   "nearest", "location", "find branch", "nearest branch", "near me", "address", "branch",
@@ -423,9 +423,8 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
   } catch (_) { /* best-effort */ }
 
   const historyBlock = (session.history || []).length
-    ? `\n\nRECENT CONVERSATION (most recent last):\n${
-        session.history.map((h) => `Customer: ${h.text}\nBot: ${h.reply}`).join("\n")
-      }`
+    ? `\n\nRECENT CONVERSATION (most recent last):\n${session.history.map((h) => `Customer: ${h.text}\nBot: ${h.reply}`).join("\n")
+    }`
     : "";
 
   try {
@@ -579,10 +578,10 @@ async function sendLanguagePicker(tenantId, waId, session) {
     : "🌐 Please choose your preferred language:";
 
   const rows = [
-    { id: "__lang_en", title: "🇬🇧 English",   description: "Communicate in English" },
+    { id: "__lang_en", title: "🇬🇧 English", description: "Communicate in English" },
     { id: "__lang_hi", title: "🇮🇳 हिंदी (Hindi)", description: "हिंदी में संवाद करें" },
     { id: "__lang_hinglish", title: "🇮🇳 Hinglish", description: "Mix of Hindi + English" },
-    { id: "__lang_ur", title: "🇵🇰 اردو (Urdu)",  description: "اردو میں بات کریں" },
+    { id: "__lang_ur", title: "🇵🇰 اردو (Urdu)", description: "اردو میں بات کریں" },
     { id: "__lang_bn", title: "🇮🇳 বাংলা (Bengali)", description: "বাংলায় কথা বলুন" },
     { id: "__lang_ta", title: "🇮🇳 தமிழ் (Tamil)", description: "தமிழில் பேசுங்கள்" },
     { id: "__lang_te", title: "🇮🇳 తెలుగు (Telugu)", description: "తెలుగులో మాట్లాడండి" },
@@ -611,15 +610,15 @@ function detectAndSetLanguage(trimmed, session) {
     return code;
   }
 
-  if (/\b(hindi|hindi\s*me|hindi\s*mein)\b/i.test(lc))   { session.lang = "hi"; return "hi"; }
-  if (/\b(hinglish)\b/i.test(lc))                         { session.lang = "hi"; return "hi"; }
-  if (/\b(urdu|urdu\s*me|urdu\s*mein)\b/i.test(lc))       { session.lang = "ur"; return "ur"; }
+  if (/\b(hindi|hindi\s*me|hindi\s*mein)\b/i.test(lc)) { session.lang = "hi"; return "hi"; }
+  if (/\b(hinglish)\b/i.test(lc)) { session.lang = "hi"; return "hi"; }
+  if (/\b(urdu|urdu\s*me|urdu\s*mein)\b/i.test(lc)) { session.lang = "ur"; return "ur"; }
   if (/\b(english|english\s*me|english\s*mein|angrezi)\b/i.test(lc)) { session.lang = "en"; return "en"; }
-  if (/\b(bengali|bangla)\b/i.test(lc))                   { session.lang = "bn"; return "bn"; }
-  if (/\b(tamil)\b/i.test(lc))                            { session.lang = "ta"; return "ta"; }
-  if (/\b(telugu)\b/i.test(lc))                           { session.lang = "te"; return "te"; }
-  if (/\b(marathi)\b/i.test(lc))                          { session.lang = "mr"; return "mr"; }
-  if (/\b(punjabi|panjabi)\b/i.test(lc))                   { session.lang = "pa"; return "pa"; }
+  if (/\b(bengali|bangla)\b/i.test(lc)) { session.lang = "bn"; return "bn"; }
+  if (/\b(tamil)\b/i.test(lc)) { session.lang = "ta"; return "ta"; }
+  if (/\b(telugu)\b/i.test(lc)) { session.lang = "te"; return "te"; }
+  if (/\b(marathi)\b/i.test(lc)) { session.lang = "mr"; return "mr"; }
+  if (/\b(punjabi|panjabi)\b/i.test(lc)) { session.lang = "pa"; return "pa"; }
 
   // Found live: this used to be a substring-anywhere regex including bare
   // generic words like "lang" and phrases like "kisi aur" ("someone
@@ -2276,8 +2275,8 @@ async function handleHereCommand(tenantId, waId) {
   if (isTerminal(booking.status) || booking.status === "serving") {
     const message =
       booking.status === "serving" ? `You're currently being seen by ${booking.providerName}.` :
-      booking.status === "done" ? `Your${booking.visitTime ? ` ${booking.visitTime}` : ""} appointment with ${booking.providerName} is already complete.` :
-      `Your booking is already marked ${booking.status.replace("_", "-")}.`;
+        booking.status === "done" ? `Your${booking.visitTime ? ` ${booking.visitTime}` : ""} appointment with ${booking.providerName} is already complete.` :
+          `Your booking is already marked ${booking.status.replace("_", "-")}.`;
     await sendWhatsAppText(tenantId, waId, await t(session, message));
     return;
   }
@@ -2408,13 +2407,86 @@ async function processMessage(tenantId, waId, text, workflows) {
     // by design — clearing feedback_requested_at on capture is what makes
     // this "one nudge, then drop it" rather than treating every future
     // message as feedback forever.
-    const mostRecentBooking = await bookings.mostRecentForCustomer(tenantId, waId);
-    if (mostRecentBooking?.status === "done" && mostRecentBooking.feedbackRequestedAt) {
-      await feedbackStore.create(tenantId, mostRecentBooking.id, mostRecentBooking.workflowId, waId, trimmed);
-      await bookings.clearFeedbackRequest(tenantId, mostRecentBooking.id);
-      log("INFO", `Feedback captured for booking ${mostRecentBooking.bookingId}: "${trimmed}"`);
-      dashboardEvents.publish(tenantId, "feedback.created", { workflowId: mostRecentBooking.workflowId, providerId: mostRecentBooking.providerId, bookingId: mostRecentBooking.bookingId, comment: trimmed });
-      await sendWhatsAppText(tenantId, waId, "Thank you for the feedback! 🙏");
+    // Section 4.3 — feedback must be handled BEFORE normal intent detection.
+    //
+    // Do NOT use mostRecentForCustomer() here. A customer can have another
+    // booking created/cancelled after the completed appointment. We specifically
+    // look for the completed booking that still has feedbackRequestedAt set.
+
+    const customerBookings = await bookings.values(tenantId);
+
+    const pendingFeedbackBookings = customerBookings
+      .filter(
+        (booking) =>
+          booking.waId === waId &&
+          booking.status === "done" &&
+          booking.feedbackRequestedAt
+      )
+      .sort(
+        (a, b) =>
+          Number(b.feedbackRequestedAt || 0) -
+          Number(a.feedbackRequestedAt || 0)
+      );
+
+    const feedbackBooking = pendingFeedbackBookings[0];
+
+    if (feedbackBooking) {
+      let rating = null;
+      let feedbackText = trimmed;
+
+      // Handle clickable WhatsApp rating selections.
+      const ratingMatch = trimmed.match(/^feedback_rating_([1-5])$/i);
+
+      if (ratingMatch) {
+        rating = Number(ratingMatch[1]);
+        feedbackText = String(rating);
+      }
+
+      await feedbackStore.create(
+        tenantId,
+        feedbackBooking.id,
+        feedbackBooking.workflowId,
+        waId,
+        feedbackText
+      );
+
+      // Make the feedback request one-shot.
+      await bookings.clearFeedbackRequest(
+        tenantId,
+        feedbackBooking.id
+      );
+
+      log(
+        "INFO",
+        `Feedback captured for booking ${feedbackBooking.bookingId}: rating=${rating || "none"}, comment="${feedbackText}"`
+      );
+
+      dashboardEvents.publish(
+        tenantId,
+        "feedback.created",
+        {
+          workflowId: feedbackBooking.workflowId,
+          providerId: feedbackBooking.providerId,
+          bookingId: feedbackBooking.bookingId,
+          rating,
+          comment: feedbackText
+        }
+      );
+
+      if (rating) {
+        await sendWhatsAppText(
+          tenantId,
+          waId,
+          `Thank you for your ${rating}/5 rating! 🙏`
+        );
+      } else {
+        await sendWhatsAppText(
+          tenantId,
+          waId,
+          "Thank you for the feedback! 🙏"
+        );
+      }
+
       return;
     }
 
@@ -2457,8 +2529,8 @@ const processingChains = new Map();
 function handleIncomingMessage(tenantId, waId, text, workflows) {
   const key = mapKey(tenantId, waId);
   const prior = processingChains.get(key) || Promise.resolve();
-  const next = prior.catch(() => {}).then(() => processMessage(tenantId, waId, text, workflows));
-  processingChains.set(key, next.catch(() => {}));
+  const next = prior.catch(() => { }).then(() => processMessage(tenantId, waId, text, workflows));
+  processingChains.set(key, next.catch(() => { }));
   return next;
 }
 

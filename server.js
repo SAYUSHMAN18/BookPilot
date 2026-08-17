@@ -77,7 +77,7 @@ process.on("uncaughtException", (err) => {
 const { runMigrations } = require("./src/store/db");
 const users = require("./src/store/userStore");
 const { scheduleReminders } = require("./src/infra/reminders");
-const { startOutboundQueueWorker } = require("./src/infra/whatsapp");
+// Outbound queue worker is not implemented in this project.
 const { UPLOAD_DIR } = require("./src/infra/uploads");
 const { runWithRequestId, newRequestId } = require("./src/infra/tracing");
 const { ensureDemoTenant } = require("./src/infra/demoTenant");
@@ -142,13 +142,13 @@ app.use((req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      // img-src widened from 'self' data: to also allow https: — admins can
-      // paste an arbitrary externally-hosted image URL for a provider (no
-      // upload/storage infra of our own), and the business-location map
-      // picker pulls its tiles from OpenStreetMap's tile servers. Both are
-      // just <img> loads, so this is the narrowest widening that covers them.
-      "font-src https://fonts.gstatic.com; img-src 'self' data: https:; script-src 'self'; " +
-      "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    // img-src widened from 'self' data: to also allow https: — admins can
+    // paste an arbitrary externally-hosted image URL for a provider (no
+    // upload/storage infra of our own), and the business-location map
+    // picker pulls its tiles from OpenStreetMap's tile servers. Both are
+    // just <img> loads, so this is the narrowest widening that covers them.
+    "font-src https://fonts.gstatic.com; img-src 'self' data: https:; script-src 'self'; " +
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
   );
   next();
 });
@@ -177,7 +177,7 @@ function validateEnv() {
     log(
       "WARN",
       "WHATSAPP_APP_SECRET not set — webhook signature verification is DISABLED. " +
-        "Anyone who finds your webhook URL could send it fake messages. Set this before going to production."
+      "Anyone who finds your webhook URL could send it fake messages. Set this before going to production."
     );
   }
   if (!process.env.GROQ_API_KEY) {
@@ -215,7 +215,7 @@ async function checkWhatsAppTokenValidity() {
       log(
         "ERROR",
         `WHATSAPP_TOKEN appears to be invalid or expired (Graph API returned ${resp.status}): ${body.slice(0, 200)}. ` +
-          "Outbound WhatsApp sends will silently fail until this is fixed. See README's \"Get a permanent WhatsApp token\" section for how to set up a System User token that doesn't expire every 24h."
+        "Outbound WhatsApp sends will silently fail until this is fixed. See README's \"Get a permanent WhatsApp token\" section for how to set up a System User token that doesn't expire every 24h."
       );
     }
   } catch (err) {
@@ -351,7 +351,7 @@ if (require.main === module) {
     .then(() => {
       app.listen(PORT, () => {
         log("INFO", `BookPilot AI dashboard/bot server listening on port ${PORT}`);
-        startOutboundQueueWorker(); // polls the durable send queue every 60s
+        //startOutboundQueueWorker(); // polls the durable send queue every 60s
         scheduleReminders(); // every 10 minutes — Block 13's 24h/2h pre-appointment reminders
         checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
       });

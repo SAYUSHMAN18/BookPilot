@@ -18,7 +18,11 @@ const supportRequests = require("../store/supportRequestStore");
 const feedbackStore = require("../store/feedbackStore");
 const { getErrorRate } = require("../infra/alerting");
 const { MAX_DOC_CHARS } = require("../ai/factualQA");
-const { sendWhatsAppText, sendWithRetry } = require("../infra/whatsapp");
+const {
+  sendWhatsAppText,
+  sendWhatsAppList,
+  sendWithRetry
+} = require("../infra/whatsapp");
 const outboundQueueStore = require("../store/outboundQueueStore");
 const { computeQueuePosition, sameQueueBookings, markAlerted, wasAlerted, isOptedOutOfAlerts } = require("../store/queueStore");
 const tenantStore = require("../store/tenantStore");
@@ -461,295 +465,777 @@ router.get("/api/dashboard/bookings", requireAuth("admin", "provider"), asyncHan
   rows.sort((a, b) => b.createdAt - a.createdAt);
   res.json(rows);
 }));
+// Provider-initiated booking management.
+// Providers can only manage bookings belonging to their own
+// workflowId + providerId. Admins can manage all bookings in the tenant.
+router.patch(
+  "/api/dashboard/bookings/:id",
+  requireAuth("admin", "provider"),
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
 
-// Provider-initiated cancel or reschedule.  When a provider cancels or
-// reschedules a booking from the dashboard, the customer gets a WhatsApp
-// message immediately so they aren't left waiting for an appointment that
-// no longer exists.  Providers can only act on their OWN bookings (enforced
-// by checking workflowId+providerId against the authenticated session).
-router.patch("/api/dashboard/bookings/:id", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid booking id" });
-
-  const booking = await bookings.getById(req.user.tenantId, id);
-  if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-  // Provider role: scope check — they cannot touch another provider's booking.
-  if (req.user.role === "provider" &&
-      (booking.workflowId !== req.user.workflowId || booking.providerId !== req.user.providerId)) {
-    return res.status(403).json({ error: "You can only manage your own bookings." });
-  }
-
-  const { action, rescheduleDate, rescheduleTime, note } = req.body || {};
-
-  if (action === "cancel") {
-    if (booking.status === "cancelled") return res.status(400).json({ error: "Booking is already cancelled." });
-    // Real bug, found live during an exhaustive endpoint-testing pass: this
-    // check previously only excluded "cancelled" by name, so a "done" (or
-    // "no_show") booking — a finished, historical record — could be
-    // silently flipped to "cancelled" and even trigger a refund via
-    // refundIfPaid() below for a service that had already been rendered.
-    // A terminal state should stay terminal; if a completed booking
-    // genuinely needs undoing, that's a manual DB/support action, not a
-    // one-click dashboard button with no confirmation of what it implies.
-    // isTerminal() (Item 6's bookingStateMachine.js) is the single shared
-    // definition of "terminal" every status-changing action below uses —
-    // this exact bug shape (excluding one terminal status by name instead
-    // of terminal-ness itself) recurred enough times in this file that a
-    // hand-written list here was the actual bug, not a one-off typo.
-    if (isTerminal(booking.status)) {
-      return res.status(400).json({ error: `Cannot cancel a booking that's already marked ${booking.status.replace("_", "-")} — it's a completed record, not an active one.` });
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: "Invalid booking id" });
     }
 
-    const updated = await bookings.updateWithMeta(req.user.tenantId, id, {
-      status: "cancelled",
-      cancelledBy: req.user.email,
-      rescheduleNote: note || null,
-    });
+    const booking = await bookings.getById(req.user.tenantId, id);
 
-    await recordAudit(req.user.tenantId, req.user, "booking.cancel", {
-      bookingId: booking.bookingId, waId: booking.waId, workflowId: booking.workflowId, note: note || null,
-    });
-    log("INFO", `${req.user.email} cancelled booking ${booking.bookingId} for ${booking.waId}`);
-
-    // Section 9.7 — a provider-initiated cancellation refunds automatically
-    // (workflow.refundPolicy.providerCancellation can still say "none").
-    // Never blocks the cancellation itself on a refund failure — see
-    // src/engine/paymentRefunds.js's own comment for why.
-    const workflowForRefund = await tenantWorkflowStore.get(req.user.tenantId, booking.workflowId);
-    const refundResult = await refundIfPaid(req.user.tenantId, booking, {
-      initiatedBy: "provider",
-      refundPolicy: workflowForRefund?.refundPolicy,
-    });
-
-    // Notify the customer on WhatsApp.
-    const providerLabel = booking.providerName || "your provider";
-    const whenLabel = booking.visitDateLabel || booking.visitDate || booking.checkInIso || "";
-    const timeLabel = booking.visitTime ? ` at ${booking.visitTime}` : "";
-    const noteText = note ? `\n\nNote from provider: "${note}"` : "";
-    const refundText = refundResult.refunded ? `\n\n💳 A refund of ₹${refundResult.amount / 100} has been issued.` : "";
-    const msg =
-      `❌ Your booking (${booking.bookingId}) with ${providerLabel}` +
-      `${whenLabel ? " on " + whenLabel : ""}${timeLabel} has been cancelled by the provider.` +
-      noteText + refundText +
-      `\n\nIf you'd like to rebook, simply message us and we'll find you a new slot.`;
-
-    try {
-      await sendWhatsAppText(booking.tenantId, booking.waId, msg);
-    } catch (err) {
-      log("WARN", `WhatsApp notification failed for cancel of ${booking.bookingId}: ${err.message}`);
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
     }
 
-    await syncBookingCancelled(req.user.tenantId, booking);
-    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
-
-    return res.json({ ok: true, booking: updated, refund: refundResult });
-  }
-
-  if (action === "reschedule") {
-    if (!rescheduleDate || typeof rescheduleDate !== "string") {
-      return res.status(400).json({ error: "rescheduleDate (YYYY-MM-DD) is required for reschedule." });
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)) {
-      return res.status(400).json({ error: "rescheduleDate must be in YYYY-MM-DD format." });
-    }
-    // Same real bug as the cancel branch above, same fix (now via the
-    // shared isTerminal() check): a "done"/"no_show"/"cancelled" booking
-    // (a finished, historical record) could be silently rewritten back to
-    // "booked" with a new date/time, which is exactly the "un-complete a
-    // finished appointment" bug found live in this same pass. Live-verified
-    // before this fix: completing a booking, then rescheduling it, flipped
-    // its status straight back to "booked" with no warning. "serving" is
-    // additionally blocked here — a reschedule-specific rule, not a
-    // terminal-status one — since the customer is being served RIGHT NOW.
-    if (isTerminal(booking.status) || booking.status === "serving") {
-      return res.status(400).json({ error: `Cannot reschedule a booking that's ${booking.status === "serving" ? "currently being served" : `already marked ${booking.status.replace("_", "-")}`} — cancel and create a new booking instead.` });
-    }
-    // Reschedule moves a single time-slot booking to a new date/time — a
-    // hotel stay is a date RANGE (checkInIso + nights), a fundamentally
-    // different shape this single-date/single-time modal can't represent.
-    // Rather than silently write a half-correct visit_date onto a booking
-    // that doesn't actually use it, refuse outright (same call the
-    // dashboard already makes for hotel availability blocking — see
-    // README's Availability section).
-    if (!booking.visitTime || !booking.visitDate) {
-      return res.status(400).json({ error: "Reschedule only supports time-slot bookings, not hotel stays. Cancel and create a new booking for a date-range change." });
-    }
-
-    const oldWhen = (booking.visitDateLabel || booking.visitDate || "") + (booking.visitTime ? ` at ${booking.visitTime}` : "");
-
-    let updated;
-    try {
-      updated = await bookings.updateWithMeta(req.user.tenantId, id, {
-        // Back to "booked" — the appointment simply has a new date/time
-        // now. Not a distinct state anything else in the system (STATUS,
-        // queue position, arrival alerts) needs to know how to handle.
-        status: "booked",
-        cancelledBy: req.user.email,
-        rescheduledDate: rescheduleDate,
-        rescheduledTime: rescheduleTime || null,
-        rescheduleNote: note || null,
-        // The actual fix: visit_date/visit_time are what STATUS, the
-        // queue, the dashboard, and the UNIQUE slot index all read — they
-        // used to stay frozen at the ORIGINAL booking time forever, so a
-        // "rescheduled" booking silently reported stale info everywhere
-        // and its old slot stayed permanently blocked for other customers.
-        visitDate: rescheduleDate,
-        visitTime: rescheduleTime || null,
-        visitDateLabel: formatLongDate(parseIsoDate(rescheduleDate)),
+    // Providers may only manage their own bookings.
+    if (
+      req.user.role === "provider" &&
+      (
+        booking.workflowId !== req.user.workflowId ||
+        booking.providerId !== req.user.providerId
+      )
+    ) {
+      return res.status(403).json({
+        error: "You can only manage your own bookings.",
       });
-    } catch (err) {
-      if (err instanceof bookings.SlotTakenError) {
-        return res.status(409).json({ error: "That slot is already booked. Choose a different date/time." });
+    }
+
+    const {
+      action,
+      rescheduleDate,
+      rescheduleTime,
+      note,
+    } = req.body || {};
+
+    const cappedNote =
+      typeof note === "string"
+        ? note.slice(0, 500)
+        : null;
+
+    /*
+     * ------------------------------------------------------------
+     * CANCEL
+     * ------------------------------------------------------------
+     */
+    if (action === "cancel") {
+      if (booking.status === "cancelled") {
+        return res.status(400).json({
+          error: "Booking is already cancelled.",
+        });
       }
-      throw err;
+
+      // Terminal bookings cannot be changed.
+      if (isTerminal(booking.status)) {
+        return res.status(400).json({
+          error:
+            `Cannot cancel a booking that's already marked ` +
+            `${booking.status.replace("_", "-")} — ` +
+            `it's a completed record, not an active one.`,
+        });
+      }
+
+      const updated = await bookings.updateWithMeta(
+        req.user.tenantId,
+        id,
+        {
+          status: "cancelled",
+          cancelledBy: req.user.email,
+          rescheduleNote: cappedNote,
+        }
+      );
+
+      await recordAudit(
+        req.user.tenantId,
+        req.user,
+        "booking.cancel",
+        {
+          bookingId: booking.bookingId,
+          waId: booking.waId,
+          workflowId: booking.workflowId,
+          note: cappedNote,
+        }
+      );
+
+      log(
+        "INFO",
+        `${req.user.email} cancelled booking ` +
+        `${booking.bookingId} for ${booking.waId}`
+      );
+
+      // Provider cancellation refund policy.
+      const workflowForRefund =
+        await tenantWorkflowStore.get(
+          req.user.tenantId,
+          booking.workflowId
+        );
+
+      const refundResult = await refundIfPaid(
+        req.user.tenantId,
+        booking,
+        {
+          initiatedBy: "provider",
+          refundPolicy: workflowForRefund?.refundPolicy,
+        }
+      );
+
+      // Notify customer.
+      const providerLabel =
+        booking.providerName || "your provider";
+
+      const whenLabel =
+        booking.visitDateLabel ||
+        booking.visitDate ||
+        booking.checkInIso ||
+        "";
+
+      const timeLabel =
+        booking.visitTime
+          ? ` at ${booking.visitTime}`
+          : "";
+
+      const noteText = cappedNote
+        ? `\n\nNote from provider: "${cappedNote}"`
+        : "";
+
+      const refundText = refundResult.refunded
+        ? `\n\n💳 A refund of ₹${refundResult.amount / 100} has been issued.`
+        : "";
+
+      const msg =
+        `❌ Your booking (${booking.bookingId}) with ${providerLabel}` +
+        `${whenLabel ? " on " + whenLabel : ""}` +
+        `${timeLabel} has been cancelled by the provider.` +
+        noteText +
+        refundText +
+        `\n\nIf you'd like to rebook, simply message us and we'll find you a new slot.`;
+
+      try {
+        await sendWhatsAppText(
+          booking.tenantId,
+          booking.waId,
+          msg
+        );
+      } catch (err) {
+        log(
+          "WARN",
+          `WhatsApp notification failed for cancel of ` +
+          `${booking.bookingId}: ${err.message}`
+        );
+      }
+
+      await syncBookingCancelled(
+        req.user.tenantId,
+        booking
+      );
+
+      publishBookingEvent(
+        req.user.tenantId,
+        "booking.updated",
+        updated
+      );
+
+      return res.json({
+        ok: true,
+        booking: updated,
+        refund: refundResult,
+      });
     }
 
-    await recordAudit(req.user.tenantId, req.user, "booking.reschedule", {
-      bookingId: booking.bookingId, waId: booking.waId,
-      oldDate: booking.visitDate, oldTime: booking.visitTime,
-      newDate: rescheduleDate, newTime: rescheduleTime || null, note: note || null,
-    });
-    log("INFO", `${req.user.email} rescheduled booking ${booking.bookingId} for ${booking.waId} → ${rescheduleDate} ${rescheduleTime || ""}`);
+    /*
+     * ------------------------------------------------------------
+     * RESCHEDULE
+     * ------------------------------------------------------------
+     */
+    if (action === "reschedule") {
+      if (
+        !rescheduleDate ||
+        typeof rescheduleDate !== "string"
+      ) {
+        return res.status(400).json({
+          error:
+            "rescheduleDate (YYYY-MM-DD) is required for reschedule.",
+        });
+      }
 
-    // Notify the customer.
-    const providerLabel = booking.providerName || "your provider";
-    const newWhen = rescheduleDate + (rescheduleTime ? ` at ${rescheduleTime}` : "");
-    const noteText = note ? `\n\nMessage from provider: "${note}"` : "";
-    const msg =
-      `📅 Your booking (${booking.bookingId}) with ${providerLabel} has been rescheduled by the provider.` +
-      (oldWhen ? `\n\nOld: ${oldWhen}` : "") +
-      `\nNew: ${newWhen}` +
-      noteText +
-      `\n\nReply STATUS to see your updated booking details.`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)) {
+        return res.status(400).json({
+          error:
+            "rescheduleDate must be in YYYY-MM-DD format.",
+        });
+      }
 
-    try {
-      await sendWhatsAppText(booking.tenantId, booking.waId, msg);
-    } catch (err) {
-      log("WARN", `WhatsApp notification failed for reschedule of ${booking.bookingId}: ${err.message}`);
+      // Terminal bookings cannot be rescheduled.
+      // A booking currently being served also cannot be moved.
+      if (
+        isTerminal(booking.status) ||
+        booking.status === "serving"
+      ) {
+        return res.status(400).json({
+          error:
+            `Cannot reschedule a booking that's ` +
+            `${booking.status === "serving"
+              ? "currently being served"
+              : `already marked ${booking.status.replace("_", "-")}`
+            } — cancel and create a new booking instead.`,
+        });
+      }
+
+      // Rescheduling currently applies only to time-slot bookings.
+      if (!booking.visitTime || !booking.visitDate) {
+        return res.status(400).json({
+          error:
+            "Reschedule only supports time-slot bookings, not hotel stays. " +
+            "Cancel and create a new booking for a date-range change.",
+        });
+      }
+
+      const oldWhen =
+        (booking.visitDateLabel ||
+          booking.visitDate ||
+          "") +
+        (booking.visitTime
+          ? ` at ${booking.visitTime}`
+          : "");
+
+      let updated;
+
+      try {
+        updated = await bookings.updateWithMeta(
+          req.user.tenantId,
+          id,
+          {
+            status: "booked",
+
+            cancelledBy: req.user.email,
+
+            rescheduledDate: rescheduleDate,
+            rescheduledTime: rescheduleTime || null,
+
+            rescheduleNote: cappedNote,
+
+            // IMPORTANT:
+            // These are the actual fields used by STATUS,
+            // queue calculations, dashboard and slot locking.
+            visitDate: rescheduleDate,
+            visitTime: rescheduleTime || null,
+            visitDateLabel:
+              formatLongDate(
+                parseIsoDate(rescheduleDate)
+              ),
+          }
+        );
+      } catch (err) {
+        if (err instanceof bookings.SlotTakenError) {
+          return res.status(409).json({
+            error:
+              "That slot is already booked. Choose a different date/time.",
+          });
+        }
+
+        throw err;
+      }
+
+      await recordAudit(
+        req.user.tenantId,
+        req.user,
+        "booking.reschedule",
+        {
+          bookingId: booking.bookingId,
+          waId: booking.waId,
+          oldDate: booking.visitDate,
+          oldTime: booking.visitTime,
+          newDate: rescheduleDate,
+          newTime: rescheduleTime || null,
+          note: cappedNote,
+        }
+      );
+
+      log(
+        "INFO",
+        `${req.user.email} rescheduled booking ` +
+        `${booking.bookingId} for ${booking.waId} → ` +
+        `${rescheduleDate} ${rescheduleTime || ""}`
+      );
+
+      // Notify customer.
+      const providerLabel =
+        booking.providerName || "your provider";
+
+      const newWhen =
+        rescheduleDate +
+        (rescheduleTime
+          ? ` at ${rescheduleTime}`
+          : "");
+
+      const noteText = cappedNote
+        ? `\n\nMessage from provider: "${cappedNote}"`
+        : "";
+
+      const msg =
+        `📅 Your booking (${booking.bookingId}) with ` +
+        `${providerLabel} has been rescheduled by the provider.` +
+        (oldWhen
+          ? `\n\nOld: ${oldWhen}`
+          : "") +
+        `\nNew: ${newWhen}` +
+        noteText +
+        `\n\nReply STATUS to see your updated booking details.`;
+
+      try {
+        await sendWhatsAppText(
+          booking.tenantId,
+          booking.waId,
+          msg
+        );
+      } catch (err) {
+        log(
+          "WARN",
+          `WhatsApp notification failed for reschedule of ` +
+          `${booking.bookingId}: ${err.message}`
+        );
+      }
+
+      const workflowForCalendar =
+        await tenantWorkflowStore.get(
+          req.user.tenantId,
+          updated.workflowId
+        );
+
+      await syncBookingRescheduled(
+        req.user.tenantId,
+        updated,
+        workflowForCalendar
+      );
+
+      publishBookingEvent(
+        req.user.tenantId,
+        "booking.updated",
+        updated
+      );
+
+      return res.json({
+        ok: true,
+        booking: updated,
+      });
     }
 
-    const workflowForCalendar = await tenantWorkflowStore.get(req.user.tenantId, updated.workflowId);
-    await syncBookingRescheduled(req.user.tenantId, updated, workflowForCalendar);
-    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
+    /*
+     * ------------------------------------------------------------
+     * NO-SHOW
+     * ------------------------------------------------------------
+     */
+    if (action === "no_show") {
+      if (!booking.visitTime || !booking.visitDate) {
+        return res.status(400).json({
+          error:
+            "no_show only applies to a time-slot booking.",
+        });
+      }
 
-    return res.json({ ok: true, booking: updated });
-  }
+      if (isTerminal(booking.status)) {
+        return res.status(400).json({
+          error:
+            `Cannot mark a ${booking.status} booking as no-show.`,
+        });
+      }
 
-  if (action === "serve" || action === "complete") {
-    // "serve" (currently-being-seen, Section 3's queue) only makes sense
-    // for a time-slot booking. "complete" (Section 4's post-appointment
-    // notes/feedback) applies to a hotel stay too — a checkout is a
-    // completion worth asking about, it just doesn't participate in
-    // queue-position math the way a same-day appointment does.
-    if (action === "serve" && (!booking.visitTime || !booking.visitDate)) {
-      return res.status(400).json({ error: "Serve only applies to a time-slot booking." });
+      const updated = await bookings.updateWithMeta(
+        req.user.tenantId,
+        id,
+        {
+          status: "no_show",
+          providerNote: cappedNote,
+        }
+      );
+
+      const workflowForNoShow =
+        await tenantWorkflowStore.get(
+          req.user.tenantId,
+          booking.workflowId
+        );
+
+      const policy =
+        workflowForNoShow?.refundPolicy?.noShow;
+
+      let refundResult = {
+        refunded: false,
+      };
+
+      if (policy === "refund") {
+        refundResult = await refundIfPaid(
+          req.user.tenantId,
+          booking,
+          {
+            initiatedBy: "provider",
+            refundPolicy: {
+              providerCancellation: "full",
+            },
+          }
+        );
+      } else {
+        // Default: retain an already-paid deposit.
+        const paymentsForBooking =
+          await paymentStore.listForBooking(
+            req.user.tenantId,
+            booking.id
+          );
+
+        const hadPaidDeposit =
+          paymentsForBooking.some(
+            (p) => p.status === "paid"
+          );
+
+        if (hadPaidDeposit) {
+          log(
+            "INFO",
+            `Deposit retained for no-show booking ` +
+            `${booking.bookingId} ` +
+            `(policy: retain, the default).`
+          );
+        }
+      }
+
+      await recordAudit(
+        req.user.tenantId,
+        req.user,
+        "booking.no_show",
+        {
+          bookingId: booking.bookingId,
+          waId: booking.waId,
+          refunded: refundResult.refunded,
+        }
+      );
+
+      log(
+        "INFO",
+        `${req.user.email} marked booking ` +
+        `${booking.bookingId} as no-show.`
+      );
+
+      publishBookingEvent(
+        req.user.tenantId,
+        "booking.updated",
+        updated
+      );
+
+      return res.json({
+        ok: true,
+        booking: updated,
+        refund: refundResult,
+      });
     }
-    // Same terminal-status bug shape as the cancel/reschedule branches
-    // above, closed here too: this guard used to only name "cancelled"
-    // and "done", so a "no_show" booking could still be marked "serving"
-    // or "done" — business-nonsensical (a no-show is, by definition, a
-    // completed record of the customer never arriving) but not actually
-    // blocked before this. isTerminal() catches all three uniformly.
-    if (isTerminal(booking.status)) {
-      return res.status(400).json({ error: `Cannot ${action} a booking that's already marked ${booking.status.replace("_", "-")}.` });
-    }
 
-    // `note` already destructured from req.body above, alongside action/
-    // rescheduleDate/rescheduleTime — no separate `body` variable exists
-    // in this route (unlike the availability route, which does use one).
-    const cappedNote = typeof note === "string" ? note.slice(0, 500) : null;
-
-    // Handoff: only one booking is "being served" at a time per provider —
-    // starting a new one implicitly finishes whatever was previously in
-    // that state, rather than leaving two bookings simultaneously marked
-    // "serving" (which would double-count in the queue position math).
+    /*
+     * ------------------------------------------------------------
+     * SERVE
+     * ------------------------------------------------------------
+     */
     if (action === "serve") {
-      const allBookings = await bookings.values(req.user.tenantId);
+      const allBookings =
+        await bookings.values(
+          req.user.tenantId
+        );
+
       for (const other of allBookings) {
-        if (other.id !== booking.id && other.workflowId === booking.workflowId && other.providerId === booking.providerId &&
-            other.visitDate === booking.visitDate && other.status === "serving") {
-          await bookings.updateWithMeta(req.user.tenantId, other.id, { status: "done" });
+        if (
+          other.id !== booking.id &&
+          other.workflowId === booking.workflowId &&
+          other.providerId === booking.providerId &&
+          other.visitDate === booking.visitDate &&
+          other.status === "serving"
+        ) {
+          await bookings.updateWithMeta(
+            req.user.tenantId,
+            other.id,
+            {
+              status: "done",
+            }
+          );
         }
       }
     }
 
-    const newStatus = action === "serve" ? "serving" : "done";
-    const updated = await bookings.updateWithMeta(req.user.tenantId, id, {
-      status: newStatus,
-      providerNote: cappedNote,
-      feedbackRequestedAt: action === "complete" ? Date.now() : null,
-    });
-    await recordAudit(req.user.tenantId, req.user, `booking.${action}`, { bookingId: booking.bookingId, waId: booking.waId, note: cappedNote });
-    log("INFO", `${req.user.email} marked booking ${booking.bookingId} as ${newStatus}`);
-
-    if (action === "serve" && booking.visitTime) {
-      // Section 3.4 — everyone else in today's queue may have just moved
-      // up a position; find anyone who newly crossed into "you're next"
-      // and ping them, at most once each (tracked via alerted_next).
-      await notifyQueueShifts(req.user.tenantId, booking.workflowId, booking.providerId, booking.visitDate, id);
+    /*
+     * ------------------------------------------------------------
+     * COMPLETE / SERVE STATUS UPDATE
+     * ------------------------------------------------------------
+     */
+    if (action !== "serve" && action !== "complete") {
+      return res.status(400).json({
+        error:
+          'action must be "cancel", "reschedule", "serve", "complete", or "no_show".',
+      });
     }
 
+    const newStatus =
+      action === "serve"
+        ? "serving"
+        : "done";
+
+    const updated =
+      await bookings.updateWithMeta(
+        req.user.tenantId,
+        id,
+        {
+          status: newStatus,
+          providerNote: cappedNote,
+          feedbackRequestedAt:
+            action === "complete"
+              ? Date.now()
+              : null,
+        }
+      );
+
+    await recordAudit(
+      req.user.tenantId,
+      req.user,
+      `booking.${action}`,
+      {
+        bookingId: booking.bookingId,
+        waId: booking.waId,
+        note: cappedNote,
+      }
+    );
+
+    log(
+      "INFO",
+      `${req.user.email} marked booking ` +
+      `${booking.bookingId} as ${newStatus}`
+    );
+
+    /*
+     * ------------------------------------------------------------
+     * QUEUE SHIFT NOTIFICATION
+     * ------------------------------------------------------------
+     */
+    if (
+      action === "serve" &&
+      booking.visitTime
+    ) {
+      await notifyQueueShifts(
+        req.user.tenantId,
+        booking.workflowId,
+        booking.providerId,
+        booking.visitDate,
+        id
+      );
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * COMPLETION + FEEDBACK
+     * ------------------------------------------------------------
+     */
     if (action === "complete") {
-      // Section 4.2 — the provider's note (if any) plus a feedback ask.
-      // The customer's NEXT free-text reply gets captured as feedback by
-      // workflowEngine.js checking feedback_requested_at before running
-      // normal intent detection, not by anything tracked here.
-      const providerLabel = booking.providerName || "your provider";
-      const noteText = cappedNote ? `\n\n📝 Note from ${providerLabel}: "${cappedNote}"` : "";
+      const providerLabel =
+        booking.providerName ||
+        "your provider";
+
+      const noteText = cappedNote
+        ? `\n\n📝 Note from ${providerLabel}: "${cappedNote}"`
+        : "";
+
       const msg =
-        `✅ Your visit with ${providerLabel} is complete.${noteText}\n\n` +
-        "How was it? Reply with a quick rating (1-5) or a few words — it helps us improve.";
-      const sent = await sendWithRetry(booking.tenantId, booking.waId, msg);
-      if (!sent) log("WARN", `Completion/feedback-request message to ${booking.waId} for booking ${booking.bookingId} queued for durable retry after immediate attempts failed.`);
+        `✅ Your visit with ${providerLabel} is complete.` +
+        `${noteText}\n\n` +
+        "How was your visit? Please select a rating below, " +
+        "or reply with a few words.";
+
+      const sent = await sendWithRetry(
+        booking.tenantId,
+        booking.waId,
+        msg
+      );
+
+      if (!sent) {
+        log(
+          "WARN",
+          `Completion/feedback-request message to ` +
+          `${booking.waId} for booking ${booking.bookingId} ` +
+          `queued for durable retry after immediate attempts failed.`
+        );
+      }
+
+      // Send the clickable 1–5 rating list.
+      try {
+        await sendWhatsAppList(
+          booking.tenantId,
+          booking.waId,
+          "⭐ Please rate your visit",
+          "Rate Visit",
+          [
+            {
+              title: "Your Rating",
+              rows: [
+                {
+                  id: "feedback_rating_1",
+                  title: "1 ⭐",
+                  description: "Poor",
+                },
+                {
+                  id: "feedback_rating_2",
+                  title: "2 ⭐",
+                  description: "Needs improvement",
+                },
+                {
+                  id: "feedback_rating_3",
+                  title: "3 ⭐",
+                  description: "Good",
+                },
+                {
+                  id: "feedback_rating_4",
+                  title: "4 ⭐",
+                  description: "Very good",
+                },
+                {
+                  id: "feedback_rating_5",
+                  title: "5 ⭐",
+                  description: "Excellent",
+                },
+              ],
+            },
+          ]
+        );
+      } catch (err) {
+        log(
+          "WARN",
+          `Failed to send feedback rating list to ` +
+          `${booking.waId}: ${err.message}`
+        );
+      }
     }
 
-    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
-    return res.json({ ok: true, booking: updated });
+    publishBookingEvent(
+      req.user.tenantId,
+      "booking.updated",
+      updated
+    );
+
+    return res.json({
+      ok: true,
+      booking: updated,
+    });
+  })
+);
+
+// Hard delete — admin-only.
+// Providers should use cancel/no-show rather than permanently deleting
+// booking records.
+router.delete(
+  "/api/dashboard/bookings/:id",
+  requireAuth("admin"),
+  asyncHandler(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        error: "Invalid booking id",
+      });
+    }
+
+    const booking =
+      await bookings.getById(
+        req.user.tenantId,
+        id
+      );
+
+    if (!booking) {
+      return res.status(404).json({
+        error: "Booking not found",
+      });
+    }
+
+    await bookings.remove(
+      req.user.tenantId,
+      id
+    );
+
+    await recordAudit(
+      req.user.tenantId,
+      req.user,
+      "booking.delete",
+      {
+        bookingId: booking.bookingId,
+        waId: booking.waId,
+      }
+    );
+
+    log(
+      "INFO",
+      `${req.user.email} permanently deleted booking ` +
+      `${booking.bookingId}.`
+    );
+
+    res.json({
+      ok: true,
+    });
+  })
+);
+
+// Recomputes live queue position for everyone else still active
+// in this provider's queue for this date.
+async function notifyQueueShifts(
+  tenantId,
+  workflowId,
+  providerId,
+  date,
+  excludeId
+) {
+  const others =
+    await sameQueueBookings(
+      tenantId,
+      workflowId,
+      providerId,
+      date,
+      excludeId
+    );
+
+  for (const other of others) {
+    const position =
+      await computeQueuePosition(other);
+
+    if (position !== 0) {
+      continue;
+    }
+
+    if (
+      await wasAlerted(
+        tenantId,
+        other.id
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      await isOptedOutOfAlerts(
+        other.waId
+      )
+    ) {
+      continue;
+    }
+
+    // Mark first so repeated requests cannot create an alert storm.
+    await markAlerted(
+      tenantId,
+      other.id
+    );
+
+    const sent = await sendWithRetry(
+      tenantId,
+      other.waId,
+      `🔔 You're next! ${other.providerName} ` +
+      `will see you shortly for your ${other.visitTime} appointment.` +
+      `\n\n(Reply STOP ALERTS to turn these off.)`
+    );
+
+    if (!sent) {
+      log(
+        "WARN",
+        `"You're next" alert to ${other.waId} ` +
+        `for booking ${other.bookingId} queued for durable retry ` +
+        `after immediate attempts failed.`
+      );
+    }
   }
-
-  // Section 9.6 — no-show fee handling. Only makes sense for a time-slot
-  // booking (a hotel no-show is a different problem — a stay simply not
-  // checked into — not modeled here). Default policy is to RETAIN any
-  // deposit already collected, since that's the entire point of a
-  // no-show deterrent deposit; a workflow can explicitly opt back into
-  // refunding no-shows anyway via `refundPolicy.noShow: "refund"`.
-  //
-  // The plan's other no-show model — charging a SAVED payment method only
-  // when a no-show actually happens, for a workflow that doesn't want to
-  // collect anything upfront — is deliberately NOT implemented here: it
-  // needs Razorpay's card tokenization API and a real customer consent
-  // flow for storing a card on file, which is a materially different (and
-  // materially larger) feature than everything else in this section, not
-  // a same-shape extension of it. Flagged here rather than half-built.
-  if (action === "no_show") {
-    if (!booking.visitTime || !booking.visitDate) {
-      return res.status(400).json({ error: "no_show only applies to a time-slot booking." });
-    }
-    if (isTerminal(booking.status)) {
-      return res.status(400).json({ error: `Cannot mark a ${booking.status} booking as no-show.` });
-    }
-
-    const updated = await bookings.updateWithMeta(req.user.tenantId, id, { status: "no_show", providerNote: typeof note === "string" ? note.slice(0, 500) : null });
-    const workflowForNoShow = await tenantWorkflowStore.get(req.user.tenantId, booking.workflowId);
-    const policy = workflowForNoShow?.refundPolicy?.noShow;
-    let refundResult = { refunded: false };
-    if (policy === "refund") {
-      refundResult = await refundIfPaid(req.user.tenantId, booking, { initiatedBy: "provider", refundPolicy: { providerCancellation: "full" } });
-    } else {
-      const paymentsForBooking = await paymentStore.listForBooking(req.user.tenantId, booking.id);
-      const hadPaidDeposit = paymentsForBooking.some((p) => p.status === "paid");
-      if (hadPaidDeposit) log("INFO", `Deposit retained for no-show booking ${booking.bookingId} (policy: retain, the default).`);
-    }
-    await recordAudit(req.user.tenantId, req.user, "booking.no_show", { bookingId: booking.bookingId, waId: booking.waId, refunded: refundResult.refunded });
-    log("INFO", `${req.user.email} marked booking ${booking.bookingId} as no-show.`);
-    publishBookingEvent(req.user.tenantId, "booking.updated", updated);
-    return res.json({ ok: true, booking: updated, refund: refundResult });
-  }
-
-  return res.status(400).json({ error: 'action must be "cancel", "reschedule", "serve", "complete", or "no_show".' });
-}));
-
+}
 // Hard delete — admin-only (unlike the PATCH actions above, providers never
 // get this: a cancel/no-show is the correct provider-facing action, this is
 // strictly for an admin permanently clearing test/demo data). Removes the

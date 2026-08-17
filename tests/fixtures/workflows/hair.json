@@ -1,6 +1,6 @@
 {
   "id": "hair",
-  "description": "haircut, hair color, hairstyle, salon/barber services",
+  "description": "haircut, hair color, hairstyle, trim, salon or barber services in Noida Sector 62",
   "matchLabel": "a hair stylist",
   "label": "Haircut / Grooming",
   "keywords": [
@@ -13,7 +13,8 @@
     "salon",
     "barber",
     "beard",
-    "highlight"
+    "highlight",
+    "grooming"
   ],
   "businessHours": {
     "start": "10:00",
@@ -24,30 +25,27 @@
   "providers": [
     {
       "id": "p1",
-      "name": "Snip & Style",
-      "attribute": "Hair Stylist",
-      "fee": 400,
-      "address": "12 Brigade Road, Bangalore, Karnataka 560025",
-      "mapQuery": "Snip+and+Style+Salon+Brigade+Road+Bangalore",
-      "photo": "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&q=80"
+      "name": "HAIR COURT SALON",
+      "attribute": "Hair Styling & Grooming",
+      "fee": 500,
+      "address": "Ground Floor, Tower B, Galaxy Business Park, A-44/45, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "HAIR+COURT+SALON+Galaxy+Business+Park+Sector+62+Noida"
     },
     {
       "id": "p2",
-      "name": "The Barber Co.",
-      "attribute": "Men's Grooming & Haircut",
-      "fee": 300,
-      "address": "45 Commercial Street, Bangalore, Karnataka 560001",
-      "mapQuery": "The+Barber+Co+Commercial+Street+Bangalore",
-      "photo": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=80"
+      "name": "Renvic's Touch Salon",
+      "attribute": "Hair Styling & Beauty Services",
+      "fee": 500,
+      "address": "Shop No. 6, Plot No. RN22, Block-B Market, Rasoolpur Nawada, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "Renvics+Touch+Salon+Sector+62+Noida"
     },
     {
       "id": "p3",
-      "name": "TONI & GUY",
-      "attribute": "UNISEX Haircut & Styling",
-      "fee": 1000,
-      "address": "UB City Mall, Vittal Mallya Road, Bangalore, Karnataka 560001",
-      "mapQuery": "TONI+GUY+UB+City+Mall+Bangalore",
-      "photo": "https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=800&q=80"
+      "name": "Aashi Salon",
+      "attribute": "Unisex Hair & Beauty Services",
+      "fee": 400,
+      "address": "Shop No. 6, First Floor, City Plaza, B Block Market, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "Aashi+Salon+City+Plaza+Sector+62+Noida"
     }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
@@ -55,7 +53,7 @@
   "steps": [
     {
       "type": "select_provider",
-      "prompt": "Here are your options:"
+      "prompt": "Here are local salon options in Noida Sector 62:"
     },
     {
       "type": "select_date",

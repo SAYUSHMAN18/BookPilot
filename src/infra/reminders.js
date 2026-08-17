@@ -43,8 +43,31 @@ function reminderMessage(booking, which) {
   const whenLabel = booking.checkInIso
     ? `your check-in on ${booking.visitDateLabel || booking.checkInIso}`
     : `your ${booking.visitTime} appointment${booking.providerName ? ` with ${booking.providerName}` : ""}`;
-  const lead = which === "24h" ? "tomorrow" : "in about 2 hours";
-  return `⏰ Reminder: ${whenLabel} is ${which === "24h" ? "coming up " + lead : lead}. Reply STATUS for details, or CANCEL if your plans changed.`;
+
+  if (which === "24h") {
+    return `⏰ Reminder: ${whenLabel} is coming up tomorrow. Reply STATUS for details, or CANCEL if your plans changed.`;
+  }
+
+  const instant = appointmentInstant(booking);
+  const remainingMs = Math.max(0, instant - Date.now());
+  const remainingMinutes = Math.max(1, Math.round(remainingMs / 60000));
+
+  let lead;
+
+  if (remainingMinutes < 60) {
+    lead = `in about ${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"}`;
+  } else {
+    const hours = Math.floor(remainingMinutes / 60);
+    const minutes = remainingMinutes % 60;
+
+    if (minutes === 0) {
+      lead = `in about ${hours} hour${hours === 1 ? "" : "s"}`;
+    } else {
+      lead = `in about ${hours} hour${hours === 1 ? "" : "s"} ${minutes} minute${minutes === 1 ? "" : "s"}`;
+    }
+  }
+
+  return `⏰ Reminder: ${whenLabel} is ${lead}. Reply STATUS for details, or CANCEL if your plans changed.`;
 }
 
 // Exported for tests — the pure "is this booking due for this reminder

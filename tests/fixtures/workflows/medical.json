@@ -1,19 +1,85 @@
 {
   "id": "medical",
-  "description": "medical symptoms or wanting to see a doctor",
+  "description": "appointments with independent doctors and small medical clinics in Noida Sector 62",
   "matchLabel": "a doctor",
   "label": "Doctor Appointment",
-  "keywords": ["pain", "fever", "headache", "cough", "cold", "stomach", "chest", "breathing", "doctor", "appointment", "checkup", "sick", "injury", "skin", "rash", "vomit", "bukhar", "khansi", "dard", "jukam", "zukam", "ulti", "chot", "bimar"],
-  "businessName": "ABC Multispeciality Clinic",
-  "businessAddress": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054",
-  "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai",
-  "businessHours": { "start": "09:00", "end": "21:00" },
+  "keywords": [
+    "pain",
+    "fever",
+    "headache",
+    "cough",
+    "cold",
+    "stomach",
+    "chest",
+    "breathing",
+    "doctor",
+    "appointment",
+    "checkup",
+    "sick",
+    "injury",
+    "skin",
+    "rash",
+    "vomit",
+    "bukhar",
+    "khansi",
+    "dard",
+    "jukam",
+    "zukam",
+    "ulti",
+    "chot",
+    "bimar",
+    "clinic",
+    "dentist",
+    "gynae",
+    "dermatologist"
+  ],
+  "businessHours": {
+    "start": "09:00",
+    "end": "21:00"
+  },
   "slotMinutes": 30,
   "bookingIdPrefix": "APT",
   "providers": [
-    { "id": "p1", "name": "Dr. Rajesh Sharma", "attribute": "General Physician", "fee": 500, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=800&q=80" },
-    { "id": "p2", "name": "Dr. Neha Mehta", "attribute": "Orthopedic", "fee": 700, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=800&q=80" },
-    { "id": "p3", "name": "Dr. Imran Khan", "attribute": "Dermatologist", "fee": 600, "address": "15 Health Park, Linking Road, Mumbai, Maharashtra 400054", "mapQuery": "ABC+Multispeciality+Clinic+Linking+Road+Mumbai", "photo": "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=800&q=80" }
+    {
+      "id": "p1",
+      "name": "Sentinel Dental Clinic",
+      "attribute": "Dental Clinic",
+      "fee": 500,
+      "address": "Shop No. 16, First Floor, City Plaza Shopping Centre, B-Block Market, Rasoolpur Nawada, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "Sentinel+Dental+Clinic+Sector+62+Noida"
+    },
+    {
+      "id": "p2",
+      "name": "Santosh Gynae Clinic",
+      "attribute": "Gynecology / Obstetrics Clinic",
+      "fee": 800,
+      "address": "Tower C, ITHUM Tower, G-23 Ground Floor, Block A, A-40, Sector 62, Noida, Uttar Pradesh 201301",
+      "mapQuery": "Santosh+Gynae+Clinic+Sector+62+Noida"
+    },
+    {
+      "id": "p3",
+      "name": "The Viera Skin",
+      "attribute": "Dermatology Clinic",
+      "fee": 850,
+      "address": "RN01, Second Floor, B Block, above Mithaas, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "The+Viera+Skin+Sector+62+Noida"
+    },
+    {
+      "id": "p4",
+      "name": "Ummeed Mental Health Care",
+      "attribute": "Mental Health Clinic",
+      "fee": 600,
+      "address": "TOT Mall Shopping Complex, Shop No. 22, 1st Floor, C Block, 58/15A, Sector 62, Noida, Uttar Pradesh 201301",
+      "mapQuery": "Ummeed+Mental+Health+Care+Sector+62+Noida"
+    },
+    {
+      "id": "p5",
+      "name": "We Skin Clinic",
+      "attribute": "Dermatology Clinic",
+      "fee": 700,
+      "address": "Shop No. 10, First Floor, City Plaza Market, behind Mother Dairy, Rasoolpur Nawada, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "We+Skin+Clinic+Sector+62+Noida"
+    }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
@@ -23,29 +89,73 @@
   "refundPolicy": {
     "providerCancellation": "full",
     "customerCancellation": [
-      { "hoursBefore": 24, "refundPercent": 100 },
-      { "hoursBefore": 2, "refundPercent": 50 }
+      {
+        "hoursBefore": 24,
+        "refundPercent": 100
+      },
+      {
+        "hoursBefore": 2,
+        "refundPercent": 50
+      }
     ],
     "noShow": "retain"
   },
   "steps": [
     {
       "type": "select_provider",
-      "prompt": "Please select the doctor you'd like to consult.",
+      "prompt": "Please select the clinic or doctor you would like to consult.",
       "confirmCard": true,
       "confirmTemplate": "{provider.name}\n🩺 {provider.attribute}\n💰 Consultation Fee: ₹{provider.fee}"
     },
-    { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
-    { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
-    { "type": "text_input", "field": "customerName", "prompt": "What's your name?", "validate": "required", "validationError": "Please share your name.", "editTarget": true },
-    { "type": "text_input", "field": "age", "prompt": "What's your age?", "validate": "number", "validationError": "Please enter a valid age (numbers only)." },
-    { "type": "select_option", "field": "gender", "prompt": "Gender? (reply SKIP if you'd rather not say)", "options": ["Male", "Female", "Other"], "skippable": true },
-    { "type": "text_input", "field": "reason", "prompt": "What's the reason for your visit?", "validate": "required", "validationError": "Please share a reason for the visit." },
+    {
+      "type": "select_date",
+      "field": "visitDate",
+      "prompt": "Please select your preferred date."
+    },
+    {
+      "type": "select_time_slot",
+      "field": "visitTime",
+      "dateField": "visitDate",
+      "prompt": "Please choose a time slot."
+    },
+    {
+      "type": "text_input",
+      "field": "customerName",
+      "prompt": "What's your name?",
+      "validate": "required",
+      "validationError": "Please share your name.",
+      "editTarget": true
+    },
+    {
+      "type": "text_input",
+      "field": "age",
+      "prompt": "What's your age?",
+      "validate": "number",
+      "validationError": "Please enter a valid age (numbers only)."
+    },
+    {
+      "type": "select_option",
+      "field": "gender",
+      "prompt": "Gender? (reply SKIP if you would rather not say)",
+      "options": [
+        "Male",
+        "Female",
+        "Other"
+      ],
+      "skippable": true
+    },
+    {
+      "type": "text_input",
+      "field": "reason",
+      "prompt": "What's the reason for your visit?",
+      "validate": "required",
+      "validationError": "Please share a reason for the visit."
+    },
     {
       "type": "review_confirm",
       "prompt": "Please review your appointment.",
-      "template": "👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 Patient: {customerName}\n🎂 Age: {age}\n⚧️ Gender: {gender}\n📝 Reason: {reason}\n💰 Fee: ₹{provider.fee}"
+      "template": "👨‍⚕️ Clinic: {provider.name}\n🩺 Type: {provider.attribute}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 Patient: {customerName}\n🎂 Age: {age}\n⚧️ Gender: {gender}\n📝 Reason: {reason}\n💰 Fee: ₹{provider.fee}"
     }
   ],
-  "confirmationTemplate": "✅ Your appointment has been confirmed!\n\n🆔 Appointment ID: {bookingId}\n👨‍⚕️ Doctor: {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n💰 Consultation Fee: ₹{provider.fee}\n📍 {businessName}, {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply HERE when you arrive at the clinic.\nReply STATUS anytime to check your appointment."
+  "confirmationTemplate": "✅ Your appointment has been confirmed!\n\n🆔 Appointment ID: {bookingId}\n🏥 Clinic: {provider.name}\n🩺 Type: {provider.attribute}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n💰 Consultation Fee: ₹{provider.fee}\n📍 {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply HERE when you arrive at the clinic.\nReply STATUS anytime to check your appointment."
 }

@@ -1,27 +1,74 @@
 {
   "id": "makeup",
-  "description": "bridal/party/event makeup or beauty services",
+  "description": "makeup, makeover, beauty and salon services in Noida Sector 62",
   "matchLabel": "a makeup artist",
-  "label": "Makeup",
-  "keywords": ["makeup", "bridal", "wedding", "bride", "party look", "makeover", "engagement"],
-  "businessHours": { "start": "08:00", "end": "20:00" },
+  "label": "Makeup / Beauty",
+  "keywords": [
+    "makeup",
+    "bridal",
+    "wedding",
+    "bride",
+    "party look",
+    "makeover",
+    "beauty",
+    "engagement",
+    "facial",
+    "waxing"
+  ],
+  "businessHours": {
+    "start": "10:00",
+    "end": "21:00"
+  },
   "slotMinutes": 60,
   "bookingIdPrefix": "MKP",
   "providers": [
-    { "id": "p1", "name": "Priya Studio", "attribute": "Bridal Makeup Artist", "fee": 3500, "address": "28 Nungambakkam High Road, Chennai, Tamil Nadu 600034", "mapQuery": "Priya+Studio+Bridal+Makeup+Nungambakkam+Chennai", "photo": "https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=800&q=80" },
-    { "id": "p2", "name": "Glow & Grace", "attribute": "Party Makeup Artist", "fee": 2200, "address": "7 Kala Ghoda, Fort, Mumbai, Maharashtra 400001", "mapQuery": "Glow+Grace+Makeup+Studio+Kala+Ghoda+Mumbai", "photo": "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&q=80" }
+    {
+      "id": "p1",
+      "name": "ADORN UNISEX SALON",
+      "attribute": "Makeup, Hair & Beauty Services",
+      "fee": 800,
+      "address": "Basement B, Block Market Road, RN 41, behind Fortis Hospital, Rasoolpur Nawada, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "ADORN+UNISEX+SALON+Sector+62+Noida"
+    },
+    {
+      "id": "p2",
+      "name": "Beauty Craze",
+      "attribute": "Makeup, Facial & Beauty Services",
+      "fee": 700,
+      "address": "Ground Floor, TOT Mall, Shop No. 21, C Block, Phase 2, Sector 62, Noida, Uttar Pradesh 201301",
+      "mapQuery": "Beauty+Craze+TOT+Mall+Sector+62+Noida"
+    }
   ],
   "providerListItem": "{provider.name} — {provider.attribute} (₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (₹{provider.fee})",
   "steps": [
-    { "type": "select_provider", "prompt": "Here are your options:" },
-    { "type": "select_date", "field": "visitDate", "prompt": "Please select your preferred date." },
-    { "type": "select_time_slot", "field": "visitTime", "dateField": "visitDate", "prompt": "Please choose a time slot." },
-    { "type": "text_input", "field": "customerName", "prompt": "What name should I book this under?", "validate": "required", "validationError": "Please share a name.", "editTarget": true },
+    {
+      "type": "select_provider",
+      "prompt": "Here are local beauty and makeup options in Noida Sector 62:"
+    },
+    {
+      "type": "select_date",
+      "field": "visitDate",
+      "prompt": "Please select your preferred date."
+    },
+    {
+      "type": "select_time_slot",
+      "field": "visitTime",
+      "dateField": "visitDate",
+      "prompt": "Please choose a time slot."
+    },
+    {
+      "type": "text_input",
+      "field": "customerName",
+      "prompt": "What name should I book this under?",
+      "validate": "required",
+      "validationError": "Please share a name.",
+      "editTarget": true
+    },
     {
       "type": "review_confirm",
       "prompt": "Please review your booking.",
-      "template": "💄 Artist: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Fee: ₹{provider.fee}"
+      "template": "💄 Provider: {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n💰 Starting fee: ₹{provider.fee}"
     }
   ],
   "confirmationTemplate": "✅ Appointment confirmed!\n\nID: {bookingId}\nWith: {provider.name} ({provider.attribute})\nDate: {visitDateLabel}\nTime: {visitTime}\nFor: {customerName}\nFee: ₹{provider.fee}\n📍 {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n\nReply STATUS anytime to check your appointment."

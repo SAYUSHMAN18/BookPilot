@@ -1,7 +1,7 @@
 {
   "id": "service",
   "label": "Automobile",
-  "description": "all automobile servicing and spare parts",
+  "description": "automobile servicing and repairs in Noida Sector 62",
   "matchLabel": "our services",
   "keywords": [
     "car",
@@ -19,11 +19,9 @@
     "brake",
     "battery",
     "spare part",
-    "spare parts"
+    "spare parts",
+    "repair"
   ],
-  "businessName": "QuickFix Auto Care",
-  "businessAddress": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
-  "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
   "businessHours": {
     "start": "09:00",
     "end": "19:00"
@@ -33,20 +31,30 @@
   "providers": [
     {
       "id": "p1",
-      "name": "QuickFix Auto Care",
-      "attribute": "General Servicing & Repairs",
+      "name": "Garage Fix Care | Doorstep Bike & Car Service - Noida",
+      "attribute": "Bike & Car Service / Repairs",
       "fee": 500,
-      "address": "22 Industrial Layout, Whitefield, Bangalore, Karnataka 560066",
-      "mapQuery": "QuickFix+Auto+Care+Whitefield+Bangalore",
-      "photo": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlsp4sSvFbnbukm9p8dqgyHxhZFL7O1v3zfpzf2oOXYIHw_2NYNC6juVqPr0OlmyrS-THuHDgwnyX7Pww40dKVxWEa6IZ6i90S79wx_tWy0BOIBeRKoyRa_PFbH9jlkTywCCsyXevoC2rs=w228-h286-n-k-no-nu"
+      "address": "The Corenthum Tower-1, Block A, Industrial Area, Sector 62, Noida, Uttar Pradesh 201309",
+      "mapQuery": "Garage+Fix+Care+Sector+62+Noida"
+    },
+    {
+      "id": "p2",
+      "name": "Mosin Auto Repair",
+      "attribute": "Auto Repair",
+      "fee": 500,
+      "address": "112/3, Khera Colony Main Road, Institutional Area, Makanpur Colony, Sector 62, Noida, Uttar Pradesh 201020",
+      "mapQuery": "Mosin+Auto+Repair+Sector+62+Noida"
     }
   ],
+  "businessName": "Noida Sector 62 Auto Service",
+  "businessAddress": "Sector 62, Noida, Uttar Pradesh",
+  "mapQuery": "auto+service+Sector+62+Noida",
   "providerListItem": "{provider.name} — {provider.attribute} (from ₹{provider.fee})",
   "providerRowDescription": "{provider.attribute} (from ₹{provider.fee})",
   "steps": [
     {
       "type": "select_provider",
-      "prompt": "Choose a service center:"
+      "prompt": "Choose a local service center:"
     },
     {
       "type": "select_date",
@@ -80,5 +88,5 @@
       "template": "🔧 {provider.name} ({provider.attribute})\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n👤 For: {customerName}\n📝 Service needed: {reason}\n💰 Starting from: ₹{provider.fee}"
     }
   ],
-  "confirmationTemplate": "✅ Booking confirmed!\n\n🆔 Booking ID: {bookingId}\n🔧 {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n📝 Service: {reason}\n💰 Starting from: ₹{provider.fee}\n📍 {businessName}, {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply STATUS anytime to check your booking."
+  "confirmationTemplate": "✅ Booking confirmed!\n\n🆔 Booking ID: {bookingId}\n🔧 {provider.name}\n📅 Date: {visitDateLabel}\n⏰ Time: {visitTime}\n📝 Service: {reason}\n💰 Starting from: ₹{provider.fee}\n📍 {provider.address}\n🗺️ https://www.google.com/maps/search/?api=1&query={provider.mapQuery}\n🔑 Booking Code: {bookingCode}\n\nReply STATUS anytime to check your booking."
 }
