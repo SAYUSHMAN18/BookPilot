@@ -13,4 +13,15 @@ public/app
 *.log
 *.jsonl
 .claude
-tests
+
+# Excluding the bare "tests" directory would also block Dockerfile's
+# `COPY tests/fixtures/workflows/` from seeing into it at all — Docker's
+# ignore semantics (same limitation as .gitignore) can't un-ignore a path
+# inside an already-ignored parent directory via a later `!` line. Using
+# `tests/**` instead still excludes every test file, but leaves the
+# `tests/` and `tests/fixtures/` directory entries themselves
+# traversable so the exceptions below can actually take effect.
+tests/**
+!tests/fixtures
+!tests/fixtures/workflows
+!tests/fixtures/workflows/**
