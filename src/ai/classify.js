@@ -1,6 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // Keyword fallback: checks each workflow's own `keywords` list. Used when no
 // Groq key is set, or the AI call fails/returns something unrecognized — the
@@ -44,9 +44,9 @@ async function classifyBusiness(text, workflows) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
-      max_tokens: 8,
+      max_tokens: 40,
       messages: [
         {
           role: "system",

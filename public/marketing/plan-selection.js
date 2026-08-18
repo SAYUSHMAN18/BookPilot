@@ -59,8 +59,8 @@
       const actionHtml =
         plan.amount === null
           ? `<div class="btn-group-stack">
-               <a class="btn btn-outline btn-full" href="mailto:${CONTACT_EMAIL}">✉️ Email us</a>
-               <a class="btn btn-outline btn-full" href="${CONTACT_WHATSAPP}" target="_blank" rel="noopener">💬 WhatsApp us</a>
+               <a class="btn btn-outline btn-full" href="mailto:${CONTACT_EMAIL}"><svg class="icon"><use href="#icon-mail"/></svg> Email us</a>
+               <a class="btn btn-outline btn-full" href="${CONTACT_WHATSAPP}" target="_blank" rel="noopener"><svg class="icon"><use href="#icon-message"/></svg> WhatsApp us</a>
              </div>`
           : `<button class="btn btn-primary btn-full" type="button" data-plan="${plan.id}"><span>${plan.amount === 0 ? "Start free" : `Choose ${plan.label}`}</span></button>`;
 

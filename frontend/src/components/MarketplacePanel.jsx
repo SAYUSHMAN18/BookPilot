@@ -28,14 +28,16 @@ export default function MarketplacePanel({ workflows, refreshKey, onInstalled })
     load();
   }
 
+  const hasBusinesses = Object.keys(workflows).length > 0;
   return (
     <div className="card" style={{ marginTop: 18 }}>
       <div className="card-header">
-        <span className="card-title">🧩 Marketplace <span className="count-badge">{templates.length}</span></span>
-        <button className="btn-primary" onClick={() => setPublishOpen(true)}>＋ Publish a Business</button>
+        <span className="card-title">🧩 Reusable Templates <span className="count-badge">{templates.length}</span></span>
+        <button className="btn-secondary" disabled={!hasBusinesses} title={hasBusinesses ? "" : "Add a business first, then you can save it as a template"} onClick={() => setPublishOpen(true)}>＋ Save a Business as a Template</button>
       </div>
-      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-        Save a working business as a reusable template, then install it to spin up a new one. Installing copies the config — editing the new business never touches the template.
+      <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+        This is for <strong style={{ color: "var(--text)" }}>reusing</strong> a business you've already set up — save it as a template, then install copies to spin up similar ones fast.
+        {" "}Want to add a completely different kind of business? Use <strong style={{ color: "var(--profile)" }}>＋ Add Business</strong> above instead — any business, described in your own words, isn't limited to what's listed here.
       </div>
       {error && <div className="error-banner">{error}</div>}
       {templates.length === 0 ? (

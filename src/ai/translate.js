@@ -1,5 +1,5 @@
 const { log } = require("../infra/logger");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // Sarvam's own language codes, mapped to a readable name for the
 // translation prompt — the model doesn't reliably know what "or-IN" means,
@@ -42,7 +42,7 @@ async function translateForVoice(text, languageCode) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 400,
       messages: [
@@ -89,7 +89,7 @@ async function translateText(text, targetLang) {
 
   try {
     const { data } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0.1,
       max_tokens: 500,
       messages: [

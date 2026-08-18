@@ -11,6 +11,7 @@
 // incremental follow-up work, not something this one file's annotations
 // depend on.
 const { pool, query } = require("./db");
+const { TERMINAL_STATUSES } = require("../engine/bookingStateMachine");
 /** @typedef {import("../types").Booking} Booking */
 
 // Each booking is its own row (auto-increment `id`), keyed by `wa_id` as a
@@ -200,28 +201,48 @@ const bookings = {
     return rowToBooking(rows[0]);
   },
 
-  // What STATUS/HERE/CANCEL should actually operate on. A cancelled
-  // booking is history, not something to check into or cancel again —
-  // using mostRecentForCustomer() for those made the bot report a
-  // cancelled appointment as if it were upcoming.
+  // What STATUS/HERE/CANCEL should actually operate on. A terminal
+  // booking (done, cancelled, or no_show) is history, not something to
+  // check into, cancel, or resurface as "your current booking" — using
+  // mostRecentForCustomer() for those made the bot report a completed or
+  // cancelled appointment as if it were upcoming. The exclusion list is
+  // sourced from bookingStateMachine's TERMINAL_STATUSES (not hardcoded
+  // here a second time) so this and isTerminal() can never drift apart.
   /** @param {number} tenantId @param {string} waId @returns {Promise<Booking|undefined>} */
   async activeForCustomer(tenantId, waId) {
     const rows = await query(
-      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1",
-      [tenantId, waId]
+      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != ALL($3::text[]) ORDER BY created_at DESC LIMIT 1",
+      [tenantId, waId, [...TERMINAL_STATUSES]]
     );
     return rowToBooking(rows[0]);
   },
 
-  // Excludes cancelled deliberately. This drives the "looks like you
-  // already have a booking" nudge — counting cancelled ones meant a
-  // customer who cancelled everything was still told they had a booking,
-  // forever, with no way to make it stop.
+  // Every active booking, not just the most recent one — a customer can
+  // have more than one non-terminal booking at once (e.g. a haircut AND a
+  // hotel room). activeForCustomer()'s "most recent only" is right for
+  // STATUS/HERE (a customer only ever checks into/asks about one thing at
+  // a time), but CANCEL must see all of them: cancelling "whichever one
+  // happens to be newest" when two are active silently cancels the wrong
+  // one. Same TERMINAL_STATUSES exclusion as activeForCustomer/hasActive.
+  /** @param {number} tenantId @param {string} waId @returns {Promise<Booking[]>} */
+  async activeListForCustomer(tenantId, waId) {
+    const rows = await query(
+      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != ALL($3::text[]) ORDER BY visit_date ASC NULLS LAST, visit_time ASC NULLS LAST, created_at ASC",
+      [tenantId, waId, [...TERMINAL_STATUSES]]
+    );
+    return rows.map(rowToBooking);
+  },
+
+  // Excludes every terminal status deliberately. This drives the "looks
+  // like you already have a booking" nudge — counting done/cancelled/
+  // no_show ones meant a customer whose booking was finished or cancelled
+  // was still told they had a booking, forever, with no way to make it
+  // stop.
   /** @param {number} tenantId @param {string} waId @returns {Promise<boolean>} */
   async hasActive(tenantId, waId) {
     const rows = await query(
-      "SELECT 1 FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != 'cancelled' LIMIT 1",
-      [tenantId, waId]
+      "SELECT 1 FROM bookings WHERE tenant_id = $1 AND wa_id = $2 AND status != ALL($3::text[]) LIMIT 1",
+      [tenantId, waId, [...TERMINAL_STATUSES]]
     );
     return rows.length > 0;
   },
@@ -264,11 +285,21 @@ const bookings = {
    * @returns {Promise<Booking|undefined>}
    */
   async updateWithMeta(tenantId, id, { status, cancelledBy, rescheduledDate, rescheduledTime, rescheduleNote, providerNote, feedbackRequestedAt, visitDate, visitTime, visitDateLabel }) {
+    // Section 15 — a reschedule (the only caller that passes visitDate/
+    // visitTime at all; cancel/serve/complete/no_show don't) must clear
+    // any reminder already sent for the OLD time. Without this, a booking
+    // that already got its 24h reminder before being pushed to a later
+    // date would never be reminded again for the new time — isDue()'s
+    // "already sent" check has no way to know the time it was sent for is
+    // now stale.
+    const isReschedule = Boolean(visitDate || visitTime);
     try {
       const result = await pool.query(
         `UPDATE bookings
          SET status = $1, cancelled_by = $2, rescheduled_date = $3, rescheduled_time = $4, reschedule_note = $5, provider_note = $6, feedback_requested_at = $7,
-             visit_date = COALESCE($8, visit_date), visit_time = COALESCE($9, visit_time), visit_date_label = COALESCE($10, visit_date_label)
+             visit_date = COALESCE($8, visit_date), visit_time = COALESCE($9, visit_time), visit_date_label = COALESCE($10, visit_date_label),
+             reminder_24h_sent_at = CASE WHEN $13 THEN NULL ELSE reminder_24h_sent_at END,
+             reminder_2h_sent_at = CASE WHEN $13 THEN NULL ELSE reminder_2h_sent_at END
          WHERE id = $11 AND tenant_id = $12`,
         [
           status,
@@ -283,6 +314,7 @@ const bookings = {
           visitDateLabel || null,
           id,
           tenantId,
+          isReschedule,
         ]
       );
       if (result.rowCount === 0) return undefined; // no row matched this id for this tenant

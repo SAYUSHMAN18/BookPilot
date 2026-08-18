@@ -1,6 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // After we know which workflow a message belongs to, this makes one more
 // Groq call to see if the customer already answered some of that
@@ -43,7 +43,7 @@ async function extractContext(text, workflow) {
 
   try {
     const { data } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 150,
       response_format: { type: "json_object" },

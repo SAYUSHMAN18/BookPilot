@@ -24,6 +24,15 @@ src/data/*.db-wal
 src/data/*.db-shm
 backups/
 
+# Found live (final audit pass) — real uploaded business/provider photos
+# (src/infra/uploads.js's UPLOAD_DIR) land in data/uploads/<tenantId>/,
+# a path none of the db-file globs above match. Uncovered, this is
+# exactly the kind of thing a broad `git add .`/`git add -A` silently
+# commits — real customer-facing image files, potentially real business
+# photos, into git history.
+data/uploads/
+src/data/uploads/
+
 # Stray root-level redirected output from manually running `node server.js
 # > x.log` during local dev — not the app's own logger.js output (that's
 # logs/app.log, already covered above).

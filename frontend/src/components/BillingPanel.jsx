@@ -45,6 +45,25 @@ export default function BillingPanel({ refreshKey }) {
           />
         </div>
       )}
+      {/* Found live, audit pass: there was no way at all to move off the
+          Starter plan from inside the dashboard — the checkout endpoint
+          (POST /api/billing/checkout) only ever works pre-activation
+          ("awaiting_payment"), it explicitly rejects an already-active
+          tenant. A real self-serve upgrade/downgrade flow is real,
+          separate work (proration, an active Razorpay subscription
+          change, not a one-time order) — not something to improvise here.
+          Sales-assisted contact, the same pattern Enterprise already uses
+          on the marketing site, is the safe version of this that ships
+          today without touching payment logic at all. */}
+      {!isUnlimited && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "var(--muted)" }}>Need more room, or Growth/Enterprise features?</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <a className="btn-secondary" href="mailto:er.sayushman@gmail.com?subject=Upgrade%20my%20BookPilot%20plan" style={{ textDecoration: "none" }}>✉️ Email us to upgrade</a>
+            <a className="btn-secondary" href="https://wa.me/917838881412?text=Hi%2C%20I%27d%20like%20to%20upgrade%20my%20BookPilot%20plan" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>💬 WhatsApp us</a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

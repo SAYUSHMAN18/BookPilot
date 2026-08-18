@@ -248,6 +248,26 @@ async function sendWhatsAppList(tenantId, to, bodyText, buttonLabel, sections) {
   );
 }
 
+// Shared by every place that asks a customer to rate a completed visit
+// (dashboard.js's "complete" action, workflowEngine.js's STATUS reply for
+// a booking still awaiting feedback) — one real interactive list, not two
+// copies of the same five rows that could drift apart, and never a plain
+// "reply with a rating 1-5" the customer has to type correctly.
+async function sendFeedbackRatingList(tenantId, to, bodyText = "⭐ Please rate your visit") {
+  return sendWhatsAppList(tenantId, to, bodyText, "Rate Visit", [
+    {
+      title: "Your Rating",
+      rows: [
+        { id: "feedback_rating_1", title: "1 ⭐", description: "Poor" },
+        { id: "feedback_rating_2", title: "2 ⭐", description: "Needs improvement" },
+        { id: "feedback_rating_3", title: "3 ⭐", description: "Good" },
+        { id: "feedback_rating_4", title: "4 ⭐", description: "Very good" },
+        { id: "feedback_rating_5", title: "5 ⭐", description: "Excellent" },
+      ],
+    },
+  ]);
+}
+
 // Sends a spoken reply. WhatsApp needs the audio uploaded to its own
 // media endpoint first (two hops), then referenced by the returned id.
 // Best-effort by design: every caller ALSO sends the text version, so a
@@ -400,6 +420,7 @@ module.exports = {
   sendWhatsAppImage,
   sendWhatsAppButtons,
   sendWhatsAppList,
+  sendFeedbackRatingList,
   sendWhatsAppAudio,
   sendTypingIndicator,
   sendWithRetry,

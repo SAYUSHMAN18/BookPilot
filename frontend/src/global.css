@@ -1,19 +1,51 @@
 :root {
-  --bg: #f4f4f8;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+  --bg: #f3f3f9;
+  --bg-2: #eceefa;
   --card: #ffffff;
-  --border: #e4e4eb;
-  --text: #111827;
+  --card-2: #fbfbfe;
+  --border: #e6e6ef;
+  --border-strong: #d8d9e6;
+  --text: #14141f;
   --muted: #6b7280;
   --subtle: #9ca3af;
   --profile: #4f46e5;
+  --profile-2: #7c3aed;
+  --profile-soft: rgba(79, 70, 229, 0.09);
+  --spark: #06b6d4;
+  --spark-2: #22d3ee;
+  --spark-soft: rgba(6, 182, 212, 0.1);
   --admin-accent: #d97706;
   --danger: #dc2626;
+  --danger-soft: #fee2e2;
   --success: #16a34a;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.09);
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-xs: 6px;
+  --success-soft: #dcfce7;
+  --info: #2563eb;
+
+  /* Dark "console" surface — the sidebar rail, sitting in high contrast
+     against the light content area (Linear/Vercel/Stripe-dashboard
+     pattern), instead of a same-tone white-on-white sidebar. */
+  --ink: #0a0a12;
+  --ink-2: #14141f;
+  --ink-3: #1c1c2a;
+  --ink-border: rgba(255, 255, 255, 0.08);
+  --ink-text: #f1f1f6;
+  --ink-muted: rgba(241, 241, 246, 0.56);
+
+  --shadow-xs: 0 1px 2px rgba(20, 20, 40, 0.05);
+  --shadow-sm: 0 1px 3px rgba(20, 20, 40, 0.07), 0 1px 2px rgba(20, 20, 40, 0.04);
+  --shadow-md: 0 6px 18px rgba(20, 20, 40, 0.08), 0 2px 6px rgba(20, 20, 40, 0.05);
+  --shadow-lg: 0 20px 44px rgba(24, 20, 60, 0.14), 0 4px 12px rgba(24, 20, 60, 0.06);
+  --shadow-glow: 0 8px 24px rgba(79, 70, 229, 0.18);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+  --radius-lg: 20px;
+  --ease: cubic-bezier(.2, .7, .3, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 
 * {
@@ -22,9 +54,24 @@
   padding: 0;
 }
 
+/* CSS-only grain — an SVG feTurbulence filter as a data URI, tiled at
+   fixed size and blended with soft-light at very low opacity. No image
+   asset, no request; this is the single biggest "does this look designed
+   or default" tell on a flat gradient background, and costs nothing. */
+.grain-overlay {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.035; mix-blend-mode: overlay;
+}
+
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--bg);
+  font-family: var(--font-body);
+  background:
+    radial-gradient(1100px circle at 100% -5%, rgba(124, 58, 237, 0.07), transparent 52%),
+    radial-gradient(800px circle at -5% 105%, rgba(6, 182, 212, 0.06), transparent 52%),
+    radial-gradient(700px circle at 100% 100%, rgba(79, 70, 229, 0.05), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
@@ -34,36 +81,67 @@ body {
 button {
   font-family: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   border: none;
   border-radius: var(--radius-xs);
-  padding: 7px 14px;
+  padding: 8px 15px;
+  transition: transform .15s var(--ease-spring), box-shadow .15s var(--ease), background .15s var(--ease), filter .15s var(--ease), opacity .15s var(--ease);
 }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
+button:not(:disabled):active { transform: scale(0.96); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--profile); outline-offset: 2px;
+}
 
-.btn-primary { background: var(--profile); color: #fff; }
-.btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
-.btn-danger { background: #fee2e2; color: var(--danger); }
-.btn-link { background: none; color: var(--muted); text-decoration: underline; padding: 4px; }
+.btn-primary {
+  background: linear-gradient(135deg, var(--profile), var(--profile-2));
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.28);
+  position: relative; overflow: hidden; isolation: isolate;
+}
+.btn-primary::after {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.35) 50%, transparent 60%);
+  background-size: 250% 100%; background-position: 100% 0; transition: background-position .55s var(--ease);
+  pointer-events: none;
+}
+.btn-primary:not(:disabled):hover { filter: brightness(1.08); box-shadow: 0 4px 14px rgba(79, 70, 229, 0.36); transform: translateY(-1px); }
+.btn-primary:not(:disabled):hover::after { background-position: -50% 0; }
+@media (prefers-reduced-motion: reduce) { .btn-primary::after { transition: none; } }
+.btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border-strong); box-shadow: var(--shadow-xs); }
+.btn-secondary:not(:disabled):hover { border-color: var(--profile); color: var(--profile); background: var(--profile-soft); }
+.btn-danger { background: var(--danger-soft); color: var(--danger); }
+.btn-danger:not(:disabled):hover { filter: brightness(0.97); box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2); }
+.btn-link { background: none; color: var(--muted); text-decoration: underline; padding: 4px; font-weight: 500; }
+.btn-link:hover { color: var(--profile); }
 
 input, select, textarea {
   font-family: inherit;
   font-size: 13px;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
+  padding: 8px 11px;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-xs);
   background: var(--card);
   color: var(--text);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--profile); box-shadow: 0 0 0 3px var(--profile-soft); outline: none;
+}
+input::placeholder, textarea::placeholder { color: var(--subtle); }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 18px 20px;
+  padding: 20px 22px;
   margin-bottom: 18px;
+  animation: card-in .4s var(--ease) both;
 }
+@keyframes card-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 
 .card-header {
   display: flex;
@@ -72,16 +150,21 @@ input, select, textarea {
   margin-bottom: 14px;
 }
 
-.card-title { font-size: 15px; font-weight: 700; }
+.card-title { font-family: var(--font-display); font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.table-scroll { overflow-x: auto; }
+th { text-align: left; color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px; border-bottom: 1px solid var(--border); background: var(--card-2); position: sticky; top: 0; }
+td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody tr { transition: background .12s var(--ease); }
+tbody tr:hover { background: var(--profile-soft); }
+tbody tr:last-child td { border-bottom: none; }
+.table-scroll { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.table-scroll table { border-radius: var(--radius-sm); }
 
-.empty { color: var(--subtle); padding: 20px 0; text-align: center; font-size: 13px; }
+.empty { color: var(--subtle); padding: 32px 0; text-align: center; font-size: 13px; }
 
-.status-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; }
+.status-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; }
+.status-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-booked { background: #dbeafe; color: #1e40af; }
 .status-arrived { background: #dcfce7; color: #15803d; }
 .status-cancelled { background: #fee2e2; color: #991b1b; }
@@ -91,9 +174,10 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 .status-no_show { background: #fee2e2; color: #991b1b; }
 .status-payment_pending { background: #fef3c7; color: #92400e; }
 
-.count-badge { background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.count-badge { background: var(--profile-soft); color: var(--profile); font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
 
-.error-banner { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px; margin-bottom: 14px; }
+.error-banner { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.error-banner::before { content: "⚠️"; }
 
 /* New plan — subtle animated background for every full-page shell (login,
    dashboard, platform admin). Pure CSS, no extra markup: a blurred,
@@ -158,35 +242,90 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
    (DashboardLayout.jsx), replacing the old single sticky header. */
 .app-shell-sidebar { min-height: 100vh; display: flex; }
 
+/* Dark "console" rail against the light content area — a deliberate,
+   high-contrast pairing (Linear/Vercel/Stripe-dashboard pattern) that
+   reads as a considered product surface, not a same-tone panel that
+   blends into the page. */
 .sidebar {
-  width: 220px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  width: 232px; flex-shrink: 0; background: linear-gradient(180deg, var(--ink) 0%, var(--ink-2) 100%);
+  border-right: 1px solid var(--ink-border); position: relative; overflow: hidden;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; box-shadow: 4px 0 24px rgba(0,0,0,0.12);
 }
-.sidebar-brand { font-weight: 800; font-size: 16px; color: var(--profile); padding: 20px 20px 12px; }
-.sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; flex: 1; overflow-y: auto; }
+.sidebar::before {
+  content: ""; position: absolute; top: -20%; left: -30%; width: 260px; height: 260px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(124,58,237,0.35), transparent 70%); filter: blur(40px); pointer-events: none;
+}
+.sidebar-brand {
+  font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: -.01em;
+  padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; color: var(--ink-text); position: relative; z-index: 1;
+}
+.sidebar-brand-ai { color: var(--spark-2); }
+.sidebar-brand-mark {
+  width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: linear-gradient(135deg, var(--profile), var(--profile-2)); box-shadow: 0 3px 12px rgba(124,58,237,0.5);
+}
+.sidebar-brand-mark svg { width: 16px; height: 16px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; flex: 1; overflow-y: auto; position: relative; z-index: 1; }
 .sidebar-link {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius-xs);
-  color: var(--muted); font-weight: 600; font-size: 13.5px; text-decoration: none;
+  display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: var(--radius-xs);
+  color: var(--ink-muted); font-weight: 600; font-size: 13.5px; text-decoration: none; position: relative;
+  transition: background .15s var(--ease), color .15s var(--ease), padding-left .15s var(--ease);
 }
-.sidebar-link:hover { background: var(--bg); color: var(--text); }
-.sidebar-link.active { background: rgba(79,70,229,0.1); color: var(--profile); }
-.sidebar-icon { font-size: 15px; width: 18px; text-align: center; }
+.sidebar-link:hover { background: rgba(255,255,255,0.06); color: var(--ink-text); padding-left: 15px; }
+.sidebar-link.active { background: linear-gradient(90deg, rgba(124,58,237,0.28), rgba(124,58,237,0.06)); color: #fff; }
+.sidebar-link.active::before {
+  content: ""; position: absolute; left: -12px; top: 50%; translate: 0 -50%;
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: linear-gradient(var(--spark-2), var(--profile-2));
+  box-shadow: 0 0 10px var(--spark-2);
+}
+.sidebar-icon { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.9; }
+.sidebar-icon svg { width: 17px; height: 17px; }
 
-.sidebar-footer { padding: 14px 16px 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
-.sidebar-user { font-size: 12px; color: var(--text); margin-top: 4px; }
-.sidebar-role { color: var(--muted); }
+.sidebar-footer { padding: 14px 14px 18px; border-top: 1px solid var(--ink-border); display: flex; flex-direction: column; gap: 9px; position: relative; z-index: 1; }
+.sidebar-user-row { display: flex; align-items: center; gap: 9px; margin-top: 2px; }
+.sidebar-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--spark), var(--profile-2)); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 12.5px;
+}
+.sidebar-user { min-width: 0; flex: 1; }
+.sidebar-user-name { font-size: 12.5px; color: var(--ink-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-role { color: var(--ink-muted); font-size: 11px; text-transform: capitalize; }
+.sidebar-logout {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; background: transparent; border: none;
+  color: var(--ink-muted); display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.sidebar-logout:hover { background: rgba(220,38,38,0.18); color: #fca5a5; }
+.sidebar-logout svg { width: 15px; height: 15px; }
+.live-indicator { color: var(--ink-muted); }
 
 .app-main-sidebar { flex: 1; max-width: 1200px; }
 
 .btn-full { width: 100%; }
 
+/* Refresh button — see DashboardLayout.jsx's comment: bump() always
+   worked, this is purely the felt-response layer so a click visibly
+   does something instead of looking dead. */
+.btn-refresh { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-refresh-icon { display: inline-block; font-size: 13px; }
+.btn-refresh.is-spinning .btn-refresh-icon { animation: refresh-spin .6s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn-refresh.is-spinning .btn-refresh-icon { animation: none; } }
+.sidebar-footer .btn-refresh { background: rgba(255,255,255,0.06); border-color: var(--ink-border); color: var(--ink-text); }
+.sidebar-footer .btn-refresh:hover:not(:disabled) { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.18); color: #fff; }
+
 .quick-link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .quick-link-tile {
-  display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); text-decoration: none; color: var(--text); transition: border-color .15s ease, background .15s ease;
+  display: flex; align-items: center; gap: 13px; padding: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); text-decoration: none; color: var(--text); background: var(--card);
+  transition: border-color .18s var(--ease), transform .18s var(--ease), box-shadow .18s var(--ease);
 }
-.quick-link-tile:hover { border-color: var(--profile); background: rgba(79,70,229,0.03); }
-.quick-link-icon { font-size: 20px; }
+.quick-link-tile:hover { border-color: transparent; background: var(--card); transform: translateY(-2px); box-shadow: var(--shadow-md), 0 0 0 1.5px var(--profile); }
+.quick-link-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--profile-soft); color: var(--profile);
+}
+.quick-link-icon svg { width: 18px; height: 18px; }
 .quick-link-label { font-weight: 700; font-size: 13.5px; }
 .quick-link-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
@@ -198,23 +337,130 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
   .app-main-sidebar { max-width: 100%; }
 }
 
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-.login-card { width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 32px; }
-.login-card h1 { font-size: 18px; margin-bottom: 4px; }
-.login-card p { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+/* Login — one continuous ink canvas (not a hard split into a colored
+   panel + a flat white panel) with a mesh of drifting gradient blobs and
+   a faint grid, headline/features sitting directly on it, and the
+   sign-in form as a frosted glass card floating over the same canvas —
+   so the whole page reads as one designed scene instead of two stitched-
+   together halves. Below ~960px the showcase hides and the card
+   recenters on its own. */
+.login-wrap {
+  min-height: 100vh; display: flex; position: relative; overflow: hidden;
+  background: var(--ink);
+}
+.login-wrap::before {
+  /* the mesh: three saturated blobs drifting slowly, plus a faint grid
+     for the "engineered product" texture recent award-winning dev-tool
+     sites lean on. */
+  content: ""; position: absolute; inset: -10%; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(640px circle at 12% 22%, rgba(124, 58, 237, 0.55), transparent 60%),
+    radial-gradient(560px circle at 82% 12%, rgba(6, 182, 212, 0.32), transparent 58%),
+    radial-gradient(680px circle at 60% 92%, rgba(79, 70, 229, 0.5), transparent 60%),
+    linear-gradient(155deg, #0a0a14 0%, #120f24 45%, #1a1030 100%);
+  animation: aurora-drift 30s ease-in-out infinite;
+}
+.login-wrap::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 30% 40%, #000 0%, transparent 75%);
+}
+.login-showcase {
+  flex: 1.15; position: relative; z-index: 1; overflow: hidden; display: flex; flex-direction: column;
+  justify-content: center; gap: 26px; padding: 56px 64px; color: #fff;
+}
+.showcase-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.16);
+  padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  letter-spacing: .02em; position: relative; z-index: 1; backdrop-filter: blur(8px);
+}
+.showcase-headline {
+  font-family: var(--font-display); font-size: 42px; font-weight: 700; line-height: 1.12; letter-spacing: -.02em;
+  position: relative; z-index: 1; max-width: 500px;
+  background: linear-gradient(135deg, #fff 30%, #c4b5fd 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.showcase-sub { font-size: 15px; color: rgba(255,255,255,0.72); line-height: 1.65; max-width: 420px; position: relative; z-index: 1; }
+.showcase-features { display: flex; flex-direction: column; gap: 13px; position: relative; z-index: 1; margin-top: 4px; }
+.showcase-feature { display: flex; align-items: center; gap: 12px; font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,0.92); }
+.showcase-feature-icon {
+  width: 32px; height: 32px; border-radius: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--spark-2);
+}
+.showcase-feature-icon svg { width: 16px; height: 16px; }
+
+/* A tiny self-contained "product screenshot": a fake WhatsApp thread
+   proving what the product actually does, not just decorative shapes. */
+.chat-mock {
+  position: relative; z-index: 1; margin-top: 8px; width: 280px; background: rgba(255,255,255,0.98);
+  border-radius: var(--radius); box-shadow: 0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08);
+  padding: 14px; display: flex; flex-direction: column; gap: 8px;
+  animation: chat-mock-in .7s var(--ease) both .15s;
+}
+.chat-mock-header { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+.chat-mock-avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, var(--profile), var(--profile-2)); flex-shrink: 0; }
+.chat-mock-name { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.chat-mock-status { font-size: 10.5px; color: var(--success); }
+.chat-bubble { max-width: 84%; padding: 7px 10px; border-radius: 12px; font-size: 12px; line-height: 1.4; color: var(--text); animation: chat-mock-in .5s var(--ease) both; }
+.chat-bubble.in { align-self: flex-start; background: #f0f0f5; border-bottom-left-radius: 3px; }
+.chat-bubble.out { align-self: flex-end; background: #d9fdd3; border-bottom-right-radius: 3px; }
+.chat-bubble:nth-child(2) { animation-delay: .35s; }
+.chat-bubble:nth-child(3) { animation-delay: .6s; }
+.chat-bubble:nth-child(4) { animation-delay: .85s; }
+@keyframes chat-mock-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.login-card-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; position: relative; z-index: 1; }
+.login-card {
+  width: 380px; background: rgba(255,255,255,0.86); backdrop-filter: blur(22px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,0.5); border-radius: var(--radius-lg);
+  box-shadow: 0 30px 70px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06);
+  padding: 34px 32px;
+}
+.login-card h1 { font-family: var(--font-display); font-size: 21px; font-weight: 700; margin-bottom: 4px; letter-spacing: -.01em; }
+.login-card p { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .field input { width: 100%; }
 
-.live-indicator { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+@media (max-width: 960px) {
+  .login-showcase { display: none; }
+  .login-card-wrap { flex: 1; }
+}
+
+.live-indicator { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; font-weight: 600; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--subtle); display: inline-block; transition: background .2s; }
+.live-dot[style*="success"] { animation: live-pulse 1.8s ease-in-out infinite; box-shadow: 0 0 0 0 rgba(22,163,74,0.5); }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,0.45); } 70% { box-shadow: 0 0 0 5px rgba(22,163,74,0); } 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
 
 .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 8px; }
 
 .stat-bar { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
-.stat-tile { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 18px; min-width: 110px; }
-.stat-tile .n { font-size: 22px; font-weight: 800; }
-.stat-tile .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.stat-tile {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 16px 20px; min-width: 140px; flex: 1; position: relative; overflow: hidden;
+  transition: transform .2s var(--ease-spring), box-shadow .2s var(--ease);
+}
+.stat-tile::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px;
+  background: linear-gradient(135deg, var(--profile), var(--spark-2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: 0; transition: opacity .25s var(--ease); pointer-events: none;
+}
+.stat-tile:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.stat-tile:hover::before { opacity: 1; }
+.stat-tile-icon {
+  width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  background: var(--profile-soft); color: var(--profile); margin-bottom: 10px;
+}
+.stat-tile-icon svg { width: 16px; height: 16px; }
+.stat-tile-icon.good { background: var(--success-soft); color: var(--success); }
+.stat-tile-icon.bad { background: var(--danger-soft); color: var(--danger); }
+.stat-tile .n { font-family: var(--font-mono); font-size: 25px; font-weight: 700; letter-spacing: -.01em; color: var(--text); }
+.stat-tile .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 700; margin-top: 3px; }
 
 .filters-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 
@@ -223,19 +469,161 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: 
    reusable classes either — inline-styled there); real shared classes
    here since this rewrite has more than one modal that needs them. */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(17, 17, 27, 0.45);
+  position: fixed; inset: 0; background: rgba(15, 14, 30, 0.55); backdrop-filter: blur(3px);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 40px 16px; overflow-y: auto; z-index: 100;
+  animation: modal-overlay-in .18s var(--ease) both;
 }
+@keyframes modal-overlay-in { from { opacity: 0; } to { opacity: 1; } }
 .modal-card {
-  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-md);
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg);
   padding: 22px 24px; width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 14px;
+  animation: modal-card-in .22s var(--ease-spring) both;
+}
+@keyframes modal-card-in { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .modal-overlay, .modal-card { animation: none; } }
+
+/* "Maximize the popup" — WorkflowEditorModal (Add/Edit Business)
+   specifically: a form with an AI-generate box, business basics, N
+   provider cards (each with two of its own collapsible sub-panels), and
+   an advanced/raw-JSON section badly needed more room than the 640px
+   every other, much simpler modal on this page uses — cramped enough
+   that it read as confusing rather than just dense. A modifier, not a
+   change to the shared .modal-card, so the smaller publish/install
+   modals stay exactly as compact as they already were. */
+.modal-card-lg { max-width: 1040px; }
+.modal-card-lg .card-header {
+  position: sticky; top: -22px; margin: -22px -24px 0; padding: 22px 24px 14px;
+  background: var(--card); z-index: 2; border-bottom: 1px solid var(--border);
+}
+@media (max-width: 720px) {
+  .modal-overlay { padding: 0; align-items: stretch; }
+  .modal-card-lg { max-width: none; min-height: 100vh; border-radius: 0; }
 }
 .form-label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 4px; }
 .form-input, .form-select, .form-textarea {
-  width: 100%; font-family: inherit; font-size: 13px; padding: 7px 10px;
-  border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--card); color: var(--text);
+  width: 100%; font-family: inherit; font-size: 13px; padding: 8px 11px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-xs); background: var(--card); color: var(--text);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--profile); box-shadow: 0 0 0 3px var(--profile-soft); outline: none; }
 .form-textarea { resize: vertical; }
 .form-group-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 560px) { .form-group-row { grid-template-columns: 1fr; } }
+
+/* Checklist (SetupChecklistPanel) — real checkbox circles + progress bar
+   instead of ⬜/✅ emoji text. */
+.checklist-progress { height: 6px; border-radius: 999px; background: var(--bg); overflow: hidden; margin-bottom: 4px; }
+.checklist-progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--profile), var(--profile-2)); transition: width .4s var(--ease); }
+.checklist-item { display: flex; gap: 11px; align-items: flex-start; }
+.checklist-check {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
+  border: 2px solid var(--border-strong); color: transparent; transition: all .2s var(--ease-spring);
+}
+.checklist-check.done { background: var(--success); border-color: var(--success); color: #fff; }
+.checklist-label { font-size: 13px; font-weight: 600; color: var(--text); transition: color .2s ease; }
+.checklist-label.done { color: var(--muted); text-decoration: line-through; }
+.checklist-hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* Collapsible sub-section used by simplified forms (WorkflowEditorModal's
+   per-provider photo/location details) — closed by default so the common
+   path only shows the essentials, without hiding the fields entirely. */
+.details-toggle {
+  display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--profile);
+  background: none; border: none; padding: 4px 0; width: auto;
+}
+.details-toggle-arrow { display: inline-block; transition: transform .2s var(--ease); font-size: 10px; }
+.details-toggle.open .details-toggle-arrow { transform: rotate(90deg); }
+.details-panel { animation: card-in .25s var(--ease) both; }
+
+/* WorkflowEditorModal — the ✨ AI-generate callout and the per-provider
+   card the simplified "Name + Fee first, everything else collapsed"
+   layout is built from. */
+.ai-generate-box {
+  background: linear-gradient(135deg, rgba(79,70,229,0.07), rgba(124,58,237,0.03));
+  border: 1px solid rgba(79,70,229,0.22); border-radius: var(--radius-sm);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 9px;
+}
+.provider-card {
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px;
+  display: flex; flex-direction: column; gap: 8px; background: var(--card-2);
+  transition: border-color .15s var(--ease);
+}
+.provider-card:focus-within { border-color: var(--profile); }
+.provider-card-main { display: flex; align-items: flex-end; gap: 10px; }
+.provider-avatar {
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; overflow: hidden;
+  background: linear-gradient(135deg, var(--profile), var(--profile-2)); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px;
+}
+.provider-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.provider-remove-btn {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; background: var(--card);
+  border: 1px solid var(--border-strong); color: var(--muted); font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.provider-remove-btn:hover { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+
+/* Per-provider extra-questions editor (WorkflowEditorModal) — one row
+   per question: short label, the actual question text, a required
+   toggle, remove. */
+.extra-field-row { display: grid; grid-template-columns: 1fr 1.6fr auto auto; gap: 8px; align-items: center; }
+@media (max-width: 640px) { .extra-field-row { grid-template-columns: 1fr; } }
+.extra-field-required { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.extra-field-required input { width: auto; }
+
+/* "What's already covered" — sits between the providers section header
+   and the provider cards, so adding a per-provider extra question is
+   never a guess about what the business itself already asks everyone. */
+.base-questions-box {
+  font-size: 12.5px; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); padding: 9px 12px; margin-bottom: 10px; line-height: 1.5;
+}
+.base-questions-box strong { color: var(--muted); font-weight: 700; }
+
+/* Suggested-question quick-add chips (WorkflowEditorModal) — business-
+   aware starting points instead of one generic hardcoded example, still
+   fully editable once picked. */
+.suggestion-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.suggestion-chip {
+  font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+  background: var(--profile-soft); color: var(--profile); border: 1px solid transparent;
+}
+.suggestion-chip:hover { background: var(--profile); color: #fff; }
+
+/* NumberStepperInput — free typing still works, the ±buttons are just a
+   faster way to nudge a value without relying on inconsistent native
+   number-spinner chrome. */
+.number-stepper { display: flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: var(--radius-xs); overflow: hidden; background: var(--card); transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+.number-stepper:focus-within { border-color: var(--profile); box-shadow: 0 0 0 3px var(--profile-soft); }
+.number-stepper-prefix { display: flex; align-items: center; padding: 0 0 0 11px; color: var(--muted); font-size: 13px; }
+.number-stepper-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent; padding: 8px 6px;
+  font-family: inherit; font-size: 13px; color: var(--text); text-align: center;
+}
+.number-stepper-input::-webkit-inner-spin-button, .number-stepper-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.number-stepper-input { -moz-appearance: textfield; }
+.number-stepper-btn {
+  width: 30px; flex-shrink: 0; background: var(--bg); border: none; color: var(--muted);
+  font-size: 15px; font-weight: 700; padding: 0; display: flex; align-items: center; justify-content: center;
+}
+.number-stepper-btn:hover { background: var(--profile-soft); color: var(--profile); }
+.number-stepper-btn:active { background: var(--profile); color: #fff; }
+
+/* TimeInput — a styled, actually-scrollable replacement for the native
+   <input type="time"> picker (inconsistent scroll-wheel/stepper chrome
+   across browsers). Typing still works; this dropdown is a shortcut. */
+.time-input { position: relative; }
+.time-input-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; width: 140px; max-height: 240px;
+  overflow-y: auto; background: var(--card); border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; gap: 1px;
+  animation: card-in .15s var(--ease) both;
+}
+.time-input-option {
+  text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 6px;
+  font-size: 12.5px; font-weight: 500; color: var(--text); width: 100%;
+}
+.time-input-option:hover { background: var(--profile-soft); color: var(--profile); }
+.time-input-option.selected { background: var(--profile); color: #fff; font-weight: 700; }

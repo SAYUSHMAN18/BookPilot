@@ -1,6 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // Turns a plain-language business description into a draft workflow JSON
 // matching the exact shape workflows/*.json already uses — same schema
@@ -60,7 +60,7 @@ async function generateWorkflowFromDescription(description) {
 
   const { data } = await groqChatCompletion(
     {
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0.3,
       max_tokens: 2000,
       response_format: { type: "json_object" },

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useOutletContext, Link } from "react-router-dom";
 import { get } from "../lib/api";
 import SetupChecklistPanel from "../components/SetupChecklistPanel";
+import { IconCalendar, IconClock, IconTrendUp, IconMessage, IconCheckCircle, IconXCircle, IconBuilding } from "../components/Icons";
 
 const QUICK_LINKS = [
-  { to: "/bookings", icon: "📋", label: "Bookings", hint: "Every booking, filterable and searchable" },
-  { to: "/availability", icon: "🗓️", label: "Availability", hint: "Blocked slots and calendar sync" },
-  { to: "/analytics", icon: "📈", label: "Analytics", hint: "Popular slots, no-show rate, revenue" },
-  { to: "/support", icon: "💬", label: "Support", hint: "Callback requests and customer feedback" },
+  { to: "/bookings", Icon: IconCalendar, label: "Bookings", hint: "Every booking, filterable and searchable" },
+  { to: "/availability", Icon: IconClock, label: "Availability", hint: "Blocked slots and calendar sync" },
+  { to: "/analytics", Icon: IconTrendUp, label: "Analytics", hint: "Popular slots, no-show rate, revenue" },
+  { to: "/support", Icon: IconMessage, label: "Support", hint: "Callback requests and customer feedback" },
 ];
 
 // New plan, Stream 4 — the "high level, more interactable" landing view
@@ -54,22 +55,22 @@ export default function OverviewPage() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="stat-bar">
-        <div className="stat-tile"><div className="n">{stats.total}</div><div className="l">Total bookings</div></div>
-        <div className="stat-tile"><div className="n">{stats.today}</div><div className="l">Today</div></div>
-        <div className="stat-tile"><div className="n">{stats.arrived}</div><div className="l">Arrived</div></div>
-        <div className="stat-tile"><div className="n">{stats.cancelled}</div><div className="l">Cancelled</div></div>
-        {isAdminAccount && <div className="stat-tile"><div className="n">{providers.length}</div><div className="l">Businesses</div></div>}
+        <div className="stat-tile"><div className="stat-tile-icon"><IconCalendar /></div><div className="n">{stats.total}</div><div className="l">Total bookings</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon"><IconClock /></div><div className="n">{stats.today}</div><div className="l">Today</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon good"><IconCheckCircle /></div><div className="n">{stats.arrived}</div><div className="l">Arrived</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon bad"><IconXCircle /></div><div className="n">{stats.cancelled}</div><div className="l">Cancelled</div></div>
+        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconBuilding /></div><div className="n">{providers.length}</div><div className="l">Businesses</div></div>}
       </div>
 
       <div className="card">
         <div className="card-header"><span className="card-title">Quick links</span></div>
         <div className="quick-link-grid">
-          {QUICK_LINKS.map((link) => (
-            <Link key={link.to} to={link.to} className="quick-link-tile">
-              <span className="quick-link-icon">{link.icon}</span>
+          {QUICK_LINKS.map(({ to, Icon, label, hint }) => (
+            <Link key={to} to={to} className="quick-link-tile">
+              <span className="quick-link-icon"><Icon /></span>
               <div>
-                <div className="quick-link-label">{link.label}</div>
-                <div className="quick-link-hint">{link.hint}</div>
+                <div className="quick-link-label">{label}</div>
+                <div className="quick-link-hint">{hint}</div>
               </div>
             </Link>
           ))}

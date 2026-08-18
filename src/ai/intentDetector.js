@@ -1,6 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // The full set of intents this module can return.  Callers should handle
 // every value — a new intent added here that a caller ignores falls through
@@ -84,9 +84,9 @@ async function detectGeneralIntent(text, hasActiveBooking) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
-      max_tokens: 10,
+      max_tokens: 40,
       messages: [
         {
           role: "system",
@@ -207,4 +207,4 @@ function isPlainAcknowledgment(text) {
   return ACKNOWLEDGMENT_RE.test(text.trim());
 }
 
-module.exports = { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion, isPriceObjection, isPlainAcknowledgment };
+module.exports = { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion, isPriceObjection, isPlainAcknowledgment, GREETING_RE, keywordIntent };

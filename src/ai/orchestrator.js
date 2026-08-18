@@ -1,6 +1,6 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // Agentic orchestration — the AI plans WHICH action to take when a
 // customer says something that doesn't fit the step they're on, and the
@@ -74,7 +74,7 @@ async function planNextAction(text, workflow, session) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 60,
       response_format: { type: "json_object" },

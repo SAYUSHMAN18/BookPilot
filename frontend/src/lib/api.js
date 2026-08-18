@@ -24,9 +24,9 @@ export const del = (path) => api(path, { method: "DELETE" });
 // Content-Type header (the browser sets its own multipart boundary) —
 // setting "Content-Type": "application/json" like every other call here
 // would send a malformed request the server can't parse as multipart.
-export async function uploadFile(path, file) {
+export async function uploadFile(path, file, fieldName = "image") {
   const formData = new FormData();
-  formData.append("image", file);
+  formData.append(fieldName, file);
   const resp = await fetch(path, { credentials: "include", method: "POST", body: formData });
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));

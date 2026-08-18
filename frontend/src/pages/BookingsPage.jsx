@@ -49,11 +49,47 @@ export default function BookingsPage() {
 
   const businesses = useMemo(() => [...new Map(providers.map((p) => [p.workflowId, p.workflowLabel])).entries()], [providers]);
 
+  // CSV export — a real, recurring need for a small business (taxes,
+  // bookkeeping, a monthly report to an owner who doesn't use this
+  // dashboard themselves) that had no way out of the app at all before.
+  // Exports exactly what's currently on screen (respects every active
+  // filter/search), not a separate "export everything" endpoint — what
+  // you're looking at is what you get.
+  function exportCsv() {
+    const cols = [
+      ...(isAdminAccount ? [["Business", (b) => workflowLabel(b.workflowId)]] : []),
+      ["Booking ID", (b) => b.bookingId || ""],
+      ["Customer", (b) => b.customerName || ""],
+      ["Phone", (b) => b.waId || ""],
+      ["Provider", (b) => b.providerName || b.hotelName || ""],
+      ["Date", (b) => b.checkInIso || b.visitDate || ""],
+      ["Time", (b) => b.visitTime || ""],
+      ["Status", (b) => b.status || ""],
+      ["Payment", (b) => b.paymentStatus || ""],
+      ["Booked At", (b) => (b.createdAt ? new Date(b.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "")],
+    ];
+    const escape = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [
+      cols.map(([label]) => escape(label)).join(","),
+      ...filtered.map((b) => cols.map(([, get]) => escape(get(b))).join(",")),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-title">📋 Bookings</span>
         <span className="count-badge">{filtered.length === bookings.length ? `${bookings.length} total` : `${filtered.length} of ${bookings.length}`}</span>
+        <button className="btn-secondary" style={{ marginLeft: "auto" }} disabled={!filtered.length} onClick={exportCsv}>⬇ Export CSV</button>
       </div>
       <div className="filters-row">
         <input placeholder="Search customer or booking ID…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 220 }} />

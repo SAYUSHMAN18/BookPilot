@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { get, post, del } from "../lib/api";
+import { get, post, del, uploadFile } from "../lib/api";
 
 export default function KnowledgeBasePanel({ refreshKey, provider, isAdmin, workflowLabel }) {
   const [rows, setRows] = useState([]);
@@ -7,6 +7,29 @@ export default function KnowledgeBasePanel({ refreshKey, provider, isAdmin, work
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [extracting, setExtracting] = useState(false);
+
+  // Pulls text out of an uploaded PDF/DOCX/TXT and drops it straight into
+  // the same title/content fields a hand-typed entry would use — nothing
+  // is saved until the provider hits Save below, since PDF text
+  // extraction isn't always clean (tables, columns, scanned images) and
+  // this gives them a chance to fix it up first, same "draft, then
+  // explicitly confirm" pattern the AI business-generator already uses.
+  async function handleDocumentUpload(file) {
+    if (!file) return;
+    setExtracting(true);
+    setError("");
+    try {
+      const result = await uploadFile("/api/dashboard/knowledge/extract-document", file, "document");
+      setTitle((t) => t || result.title);
+      setContent(result.content);
+      setAdding(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   async function load() {
     try {
@@ -31,19 +54,32 @@ export default function KnowledgeBasePanel({ refreshKey, provider, isAdmin, work
       <div className="card-header">
         <span className="card-title">📚 Knowledge Base</span>
         <span className="count-badge">{rows.length}</span>
-        {!isAdmin && <button className="btn-primary" onClick={() => setAdding((a) => !a)} style={{ marginLeft: "auto" }}>＋ Add Entry</button>}
+        {!isAdmin && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <label className="btn-secondary" style={{ cursor: extracting ? "not-allowed" : "pointer", opacity: extracting ? 0.6 : 1, display: "inline-flex", alignItems: "center" }}>
+              {extracting ? "Reading document…" : "📄 Upload a document"}
+              <input
+                type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                disabled={extracting} style={{ display: "none" }}
+                onChange={(e) => { handleDocumentUpload(e.target.files?.[0]); e.target.value = ""; }}
+              />
+            </label>
+            <button className="btn-primary" onClick={() => setAdding((a) => !a)}>＋ Add Entry</button>
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
         FAQs, policies, and pricing the WhatsApp bot can answer customers from. The bot only answers from what's written here plus your business config — it won't invent anything.
+        {!isAdmin && " Upload a PDF, Word doc, or text file and we'll pull the text out for you to review before saving."}
       </div>
       {error && <div className="error-banner">{error}</div>}
       {adding && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14, background: "var(--bg)", padding: 12, borderRadius: "var(--radius-sm)" }}>
-          <input placeholder="Title (e.g. 'Do you accept insurance?')" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea placeholder="Content" rows={3} value={content} onChange={(e) => setContent(e.target.value)} />
+          <input className="form-input" placeholder="Title (e.g. 'Do you accept insurance?')" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <textarea className="form-textarea" placeholder="Content — type it yourself, or upload a document above to fill this in" rows={6} value={content} onChange={(e) => setContent(e.target.value)} />
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-primary" onClick={save}>Save</button>
-            <button className="btn-secondary" onClick={() => setAdding(false)}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setAdding(false); setTitle(""); setContent(""); }}>Cancel</button>
           </div>
         </div>
       )}

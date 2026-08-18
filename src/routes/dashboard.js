@@ -20,7 +20,7 @@ const { getErrorRate } = require("../infra/alerting");
 const { MAX_DOC_CHARS } = require("../ai/factualQA");
 const {
   sendWhatsAppText,
-  sendWhatsAppList,
+  sendFeedbackRatingList,
   sendWithRetry
 } = require("../infra/whatsapp");
 const outboundQueueStore = require("../store/outboundQueueStore");
@@ -30,7 +30,8 @@ const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const paymentStore = require("../store/paymentStore");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
 const { refundIfPaid } = require("../engine/paymentRefunds");
-const { uploadImage } = require("../infra/uploads");
+const { uploadImage, uploadDocument } = require("../infra/uploads");
+const { extractTextFromDocument } = require("../infra/documentExtract");
 const { resolveMapsLink } = require("../infra/mapsLinkResolver");
 const apiKeys = require("../store/apiKeyStore");
 const { syncBookingRescheduled, syncBookingCancelled } = require("../engine/calendarSync");
@@ -922,6 +923,17 @@ router.patch(
       });
     }
 
+    if (
+      (action === "serve" || action === "complete") &&
+      isTerminal(booking.status)
+    ) {
+      return res.status(400).json({
+        error:
+          `Cannot mark a booking that's already ` +
+          `${booking.status.replace("_", "-")} as ${action === "serve" ? "serving" : "complete"}.`,
+      });
+    }
+
     /*
      * ------------------------------------------------------------
      * SERVE
@@ -1055,44 +1067,7 @@ router.patch(
 
       // Send the clickable 1–5 rating list.
       try {
-        await sendWhatsAppList(
-          booking.tenantId,
-          booking.waId,
-          "⭐ Please rate your visit",
-          "Rate Visit",
-          [
-            {
-              title: "Your Rating",
-              rows: [
-                {
-                  id: "feedback_rating_1",
-                  title: "1 ⭐",
-                  description: "Poor",
-                },
-                {
-                  id: "feedback_rating_2",
-                  title: "2 ⭐",
-                  description: "Needs improvement",
-                },
-                {
-                  id: "feedback_rating_3",
-                  title: "3 ⭐",
-                  description: "Good",
-                },
-                {
-                  id: "feedback_rating_4",
-                  title: "4 ⭐",
-                  description: "Very good",
-                },
-                {
-                  id: "feedback_rating_5",
-                  title: "5 ⭐",
-                  description: "Excellent",
-                },
-              ],
-            },
-          ]
-        );
+        await sendFeedbackRatingList(booking.tenantId, booking.waId);
       } catch (err) {
         log(
           "WARN",
@@ -1236,23 +1211,6 @@ async function notifyQueueShifts(
     }
   }
 }
-// Hard delete — admin-only (unlike the PATCH actions above, providers never
-// get this: a cancel/no-show is the correct provider-facing action, this is
-// strictly for an admin permanently clearing test/demo data). Removes the
-// row outright rather than soft-transitioning status, so it also disappears
-// from billing usage counts and analytics, not just the bookings list.
-router.delete("/api/dashboard/bookings/:id", requireAuth("admin"), asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid booking id" });
-
-  const booking = await bookings.getById(req.user.tenantId, id);
-  if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-  await bookings.remove(req.user.tenantId, id);
-  await recordAudit(req.user.tenantId, req.user, "booking.delete", { bookingId: booking.bookingId, waId: booking.waId });
-  log("INFO", `${req.user.email} permanently deleted booking ${booking.bookingId}.`);
-  res.json({ ok: true });
-}));
 
 // Recomputes live queue position for everyone else still active in this
 // provider's queue for this date and sends a one-time "you're next" alert
@@ -1699,6 +1657,42 @@ function resolveKnowledgeWorkflowId(req, requested) {
   if (req.user.role === "provider") return req.user.workflowId;
   return requested;
 }
+
+// Document upload for the knowledge base — extracts text from a PDF/
+// DOCX/TXT file so an admin/provider can hand the bot a real policy
+// document, price list, or FAQ sheet instead of retyping it by hand. This
+// route only extracts and returns the text for review (same "draft, then
+// the admin explicitly saves" pattern the AI workflow-generator already
+// uses) — it never writes a knowledge_documents row itself; the existing
+// POST /api/dashboard/knowledge above does that once the admin has had a
+// chance to check the extracted text actually reads correctly (PDF text
+// extraction is not always clean — tables/columns/scanned-image PDFs can
+// come out garbled or empty).
+router.post("/api/dashboard/knowledge/extract-document", requireAuth("admin", "provider"), (req, res) => {
+  uploadDocument.single("document")(req, res, async (err) => {
+    if (err) {
+      const message =
+        err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+          ? "Document must be 10MB or smaller."
+          : err.message || "Upload failed.";
+      return res.status(400).json({ error: message });
+    }
+    if (!req.file) return res.status(400).json({ error: "No document provided." });
+    try {
+      const text = await extractTextFromDocument(req.file.buffer, req.file.mimetype);
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return res.status(422).json({ error: "Couldn't find any readable text in that document — it may be a scanned image rather than real text." });
+      }
+      const title = req.file.originalname.replace(/\.[^.]+$/, "").slice(0, 200);
+      await recordAudit(req.user.tenantId, req.user, "knowledge.extract", { filename: req.file.originalname, extractedChars: trimmed.length });
+      res.json({ title, content: trimmed.slice(0, MAX_KNOWLEDGE_CONTENT) });
+    } catch (err) {
+      log("ERROR", `Knowledge document extraction failed for ${req.file.originalname}: ${err.message}`);
+      res.status(400).json({ error: "Couldn't read that document — make sure it's a valid PDF, DOCX, or plain text file." });
+    }
+  });
+});
 
 router.get("/api/dashboard/knowledge", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const workflowId = resolveKnowledgeWorkflowId(req, req.query.workflowId);

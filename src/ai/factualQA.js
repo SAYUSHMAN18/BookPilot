@@ -1,7 +1,7 @@
 const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
 const knowledgeStore = require("../store/knowledgeStore");
-const { groqChatCompletion } = require("./groqClient");
+const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
 
 // Per-document and total caps so an admin pasting a huge policy doc (or
 // several businesses each with a full FAQ page) can't blow up the prompt
@@ -87,7 +87,7 @@ async function tryAnswerFactually(tenantId, text, workflows, history = []) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 150,
       messages: [
@@ -162,7 +162,7 @@ async function tryAnswerAboutBooking(text, booking, history = []) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0,
       max_tokens: 100,
       messages: [

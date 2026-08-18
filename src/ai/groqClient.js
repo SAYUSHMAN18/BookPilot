@@ -8,6 +8,17 @@ const GROQ_URL = process.env.GROQ_API_URL || "https://api.groq.com/openai/v1/cha
 // default's several seconds, to actually be a fast test suite.
 const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS) || 5000;
 
+// Single source of truth for which model every one of this codebase's ~12
+// Groq call sites uses — was hardcoded as the literal string
+// "llama-3.1-8b-instant" at every one of those call sites independently
+// until Groq decommissioned that model (confirmed live: every call was
+// failing with a 404 "model_not_found", which is why so much of the
+// natural-language handling — classification, intent detection, AI chat —
+// was silently falling back to keyword matching or the generic failure
+// reply). Centralized here so the next model deprecation is a one-line
+// fix, not a grep-and-replace across nine files again.
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+
 // Every Groq call in this codebase shares the same endpoint, auth header
 // shape, and now the same hard timeout — centralized so "every Groq call
 // needs a timeout" is one change, not four copies of fetch() boilerplate
@@ -70,13 +81,24 @@ async function attemptGroqCall(body, timeoutMs) {
 async function groqChatCompletion(body, { timeoutMs = GROQ_TIMEOUT_MS } = {}) {
   if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY is not set");
 
+  // The current model (see GROQ_MODEL above) is a reasoning model: it
+  // spends part of max_tokens on a hidden "reasoning" pass before writing
+  // the visible answer, and every call site here asks for a short,
+  // deterministic answer (a category word, an intent, a translated
+  // sentence) rather than open-ended reasoning. Defaulting reasoning_effort
+  // to "low" (a caller can still override it) keeps that hidden pass small
+  // so it doesn't eat the whole token budget and return empty content on
+  // the tightest call sites (classify.js/intentDetector.js ask for as few
+  // as 8-10 tokens for just the answer word).
+  const requestBody = { reasoning_effort: "low", ...body };
+
   try {
-    return await attemptGroqCall(body, timeoutMs);
+    return await attemptGroqCall(requestBody, timeoutMs);
   } catch (err) {
     if (err.status !== 429) throw err;
     await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
-    return attemptGroqCall(body, timeoutMs); // one retry only — a second 429 here propagates to the caller as-is
+    return attemptGroqCall(requestBody, timeoutMs); // one retry only — a second 429 here propagates to the caller as-is
   }
 }
 
-module.exports = { groqChatCompletion, GROQ_TIMEOUT_MS };
+module.exports = { groqChatCompletion, GROQ_TIMEOUT_MS, GROQ_MODEL };

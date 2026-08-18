@@ -3,6 +3,7 @@ const {
   sendWhatsAppText,
   sendWhatsAppButtons,
   sendWhatsAppList,
+  sendFeedbackRatingList,
   sendWhatsAppImage,
   isReplyCaptureActive,
   beginReplyCapture,
@@ -20,8 +21,8 @@ const { recordResponseTime } = require("../infra/perf");
 const { isDayBlocked, blockedRangesForDay } = require("../store/availabilityStore");
 const { tryAnswerFactually, tryAnswerAboutBooking, buildKnowledgeBase } = require("../ai/factualQA");
 const { planNextAction, ACTIONS } = require("../ai/orchestrator");
-const { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion, isPriceObjection, isPlainAcknowledgment } = require("../ai/intentDetector");
-const { groqChatCompletion } = require("../ai/groqClient");
+const { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion, isPriceObjection, isPlainAcknowledgment, GREETING_RE, keywordIntent } = require("../ai/intentDetector");
+const { groqChatCompletion, GROQ_MODEL } = require("../ai/groqClient");
 const { translateText, LANG_CODE_MAP } = require("../ai/translate");
 const supportRequests = require("../store/supportRequestStore");
 const { computeQueuePosition, isOptedOutOfAlerts, setAlertsOptedOut } = require("../store/queueStore");
@@ -155,9 +156,27 @@ function defaultConfirmationMessage(session, workflow) {
 }
 
 function confirmationMessageFor(session, workflow) {
-  return workflow.confirmationTemplate
+  const base = workflow.confirmationTemplate
     ? fillTemplate(workflow.confirmationTemplate, session, workflow)
     : defaultConfirmationMessage(session, workflow);
+  return base + extraFieldsSummary(session);
+}
+
+// Renders the selected provider's own extra questions (label: answer)
+// as a plain block appended after the business's own template — the
+// business's confirmationTemplate/review_confirm template is static text
+// written once at business-setup time, so it has no way to reference a
+// field a specific provider defined dynamically. Appending, rather than
+// requiring every business to hand-write a matching placeholder, is what
+// makes a provider's own extra question actually show up without the
+// business owner needing to know it exists.
+function extraFieldsSummary(session) {
+  const extraFields = session.selectedProvider?.extraFields || [];
+  const lines = extraFields
+    .map((f) => [f.label || f.field, session.data[f.field]])
+    .filter(([, value]) => value !== undefined && value !== "")
+    .map(([label, value]) => `${label}: ${value}`);
+  return lines.length ? `\n${lines.join("\n")}` : "";
 }
 
 // A confirmation is more useful with a face/place attached — hotels carry
@@ -410,8 +429,8 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
   if (!process.env.GROQ_API_KEY) {
     await sendWhatsAppText(
       tenantId, waId,
-      "🤖 The AI assistant isn't available right now (no API key configured). " +
-      "Please choose a service from the menu or reply RESTART to start over."
+      "That's not available right now. " +
+      "Please choose a service from the menu, or reply RESTART to start over."
     );
     return;
   }
@@ -429,7 +448,7 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
 
   try {
     const { data, elapsedMs } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0.7,
       max_tokens: 250,
       messages: [
@@ -451,10 +470,10 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
     const reply = (data.choices?.[0]?.message?.content || "").trim();
     await sendWhatsAppText(tenantId, waId, reply || "I'm not sure about that — try asking in a different way, or reply RESTART to go back to the menu.");
   } catch (err) {
-    log("WARN", `AI Chat Groq call failed (${err.message}) — sending fallback.`);
+    log("ERROR", `AI Chat Groq call failed for tenant=${tenantId} waId=${waId}: ${err.message}\n${err.stack || ""}`);
     await sendWhatsAppText(
       tenantId, waId,
-      "😅 The AI assistant ran into an issue. Please try again in a moment, or reply RESTART to choose a service."
+      "Sorry, we couldn't process that just now. Please try again in a moment, or reply RESTART to choose a service."
     );
   }
   // Keep session in AI-chat sub-mode so follow-up messages stay here.
@@ -499,7 +518,7 @@ async function handleAiViewBooking(tenantId, waId, session, workflows) {
     // picker actually lists.
     const targetLang = LANG_CODE_MAP[session.lang] || "English";
     const { data } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0.3,
       max_tokens: 200,
       messages: [
@@ -548,7 +567,7 @@ async function handleAiLocationLookup(tenantId, waId, trimmed, session, workflow
   try {
     const targetLang = LANG_CODE_MAP[session.lang] || "English"; // same all-9-languages fix as handleAiViewBooking above
     const { data } = await groqChatCompletion({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_MODEL,
       temperature: 0.2,
       max_tokens: 200,
       messages: [
@@ -855,7 +874,7 @@ async function sendStepPrompt(tenantId, waId, workflow, step, session, preamble 
   }
 
   if (step.type === "review_confirm") {
-    const body = `${prompt}\n\n${fillTemplate(step.template, session, workflow)}`;
+    const body = `${prompt}\n\n${fillTemplate(step.template, session, workflow)}${extraFieldsSummary(session)}`;
     await sendWhatsAppButtons(tenantId, waId, await t(session, body), [
       { id: "confirm", title: "✅ Confirm" },
       { id: "edit", title: "✏️ Edit Details" },
@@ -897,6 +916,7 @@ async function applyStepInput(tenantId, workflow, step, session, text) {
     const provider = byId || byIndex || byName;
     if (!provider) return "Sorry, I didn't recognize that provider — please tap one from the list, or type their name.";
     session.selectedProvider = provider;
+    session.extraFieldIndex = 0; // this provider's own extra questions (if any) start over — see maybeAskNextExtraField
     return null;
   }
 
@@ -920,6 +940,7 @@ async function applyStepInput(tenantId, workflow, step, session, text) {
     const room = byId || byIndex || byName;
     if (!room) return "Sorry, I didn't recognize that room — please tap one from the list, or type its name.";
     session.selectedProvider = room; // rooms reuse the same "provider" concept for templates/records
+    session.extraFieldIndex = 0;
     return null;
   }
 
@@ -1358,10 +1379,50 @@ async function advanceOrFinish(tenantId, waId, session, workflow) {
   }
 
   if (session.stepIndex < workflow.steps.length) {
-    await sendStepPrompt(tenantId, waId, workflow, currentStep(workflow, session), session);
+    const next = currentStep(workflow, session);
+    // Provider-level extra questions (see maybeAskNextExtraField's own
+    // comment) run right before review_confirm, not after workflow.steps
+    // is exhausted — that way the customer sees everything, including
+    // their answers to the provider's own questions, on the one review
+    // screen, instead of being asked more questions AFTER already
+    // reviewing/confirming.
+    if (next.type === "review_confirm" && (await maybeAskNextExtraField(tenantId, waId, session, workflow))) return;
+    await sendStepPrompt(tenantId, waId, workflow, next, session);
     return;
   }
 
+  await finalizeBooking(tenantId, waId, session, workflow);
+}
+
+// A provider can define its own extra questions (session.selectedProvider
+// .extraFields) on top of whatever the business's own steps[] already
+// ask — e.g. a specific doctor wants "reason for visit" even though the
+// clinic's shared template doesn't. Deliberately NOT spliced into
+// workflow.steps/session.stepIndex: that array is read by index all over
+// this file (GO_TO_STEP, isStepAlreadyAnswered, the SlotTakenError/
+// DateRangeConflictError rewinds, the editTarget jump) and every one of
+// those would need to agree on a per-session "effective steps" list to
+// stay correct — a lot of surface area to get subtly wrong in a flow
+// that's already been hardened through real production bugs. Tracking
+// progress with its own session.extraFieldIndex, entirely decoupled from
+// stepIndex, means none of that existing machinery needs to know these
+// exist at all: stepIndex sits pinned at review_confirm's index for the
+// whole time extra fields are being asked, so a mid-flow "change the
+// doctor"/"actually change the date" GO_TO_STEP jump still lands exactly
+// where it always did.
+async function maybeAskNextExtraField(tenantId, waId, session, workflow) {
+  const extraFields = session.selectedProvider?.extraFields || [];
+  const idx = session.extraFieldIndex ?? 0;
+  if (idx >= extraFields.length) return false;
+  await sendStepPrompt(tenantId, waId, workflow, extraFields[idx], session);
+  return true;
+}
+
+// Formerly the tail of advanceOrFinish — split out so the extra-fields
+// loop above (handleRunning) can reach the exact same booking-creation
+// path once a provider's own questions are answered, without duplicating
+// slot-conflict handling, payment gating, or confirmation sending.
+async function finalizeBooking(tenantId, waId, session, workflow) {
   if (await rejectIfSlotUnavailable(tenantId, waId, session, workflow)) return;
 
   session.bookingId = generateBookingId(workflow, session);
@@ -1485,9 +1546,11 @@ async function sendPaymentRequest(tenantId, waId, workflow, session, booking, pa
 // computed by src/engine/paymentRefunds.js — the same policy math the
 // provider-initiated path in server.js uses, so the refund percentage a
 // customer gets never depends on which side of the app cancelled it.
-async function cancelActiveBooking(tenantId, waId, workflows) {
-  const booking = await bookings.activeForCustomer(tenantId, waId);
-  if (!booking) return null;
+// Shared by every "actually cancel this row" call site (cancelActiveBooking
+// below, and beginCancelFlow's confirmed-selection handler further down) —
+// one place doing the status update, refund, calendar sync, and event
+// publish, so a new caller can never do only some of those steps.
+async function cancelBookingRow(tenantId, booking, workflows) {
   await bookings.updateStatus(tenantId, booking.id, "cancelled");
   const refundResult = await refundIfPaid(tenantId, booking, {
     initiatedBy: "customer",
@@ -1496,6 +1559,145 @@ async function cancelActiveBooking(tenantId, waId, workflows) {
   await syncBookingCancelled(tenantId, booking);
   publishBookingEvent(tenantId, "booking.updated", { ...booking, status: "cancelled" });
   return { booking, refundResult };
+}
+
+// Still used by call sites where ambiguity genuinely isn't a concern — the
+// review_confirm Cancel button and the orchestrator's CANCEL action both
+// only ever fire mid-flow, about the one booking that flow itself just
+// created, never a cold "cancel my appointment" out of nowhere (that's
+// beginCancelFlow below, which can't just grab "the most recent one").
+async function cancelActiveBooking(tenantId, waId, workflows) {
+  const booking = await bookings.activeForCustomer(tenantId, waId);
+  if (!booking) return null;
+  return cancelBookingRow(tenantId, booking, workflows);
+}
+
+// Section 10 — a cold "cancel my appointment"/"cancel all previous
+// bookings" must never just grab whichever booking activeForCustomer()'s
+// "most recent" happens to resolve to: a customer can have more than one
+// active booking (different businesses), and blindly cancelling the wrong
+// one is worse than asking. Always confirms before cancelling anything,
+// and lists every active booking by name/date/time when there's more than
+// one, rather than guessing. session.pendingCancelIds (checked early in
+// processMessage, alongside the feedback-capture check) is what makes the
+// customer's next reply resolve back to this specific decision.
+function describeBookingForCancelPrompt(b) {
+  const when = b.visitDateLabel || b.visitDate || (b.checkInIso ? `check-in ${b.checkInIso}` : "");
+  const time = b.visitTime ? ` at ${b.visitTime}` : "";
+  return `${b.providerName || "your provider"}${when ? ` on ${when}` : ""}${time} (${b.bookingId})`;
+}
+
+async function beginCancelFlow(tenantId, waId, session, workflows) {
+  const activeBookings = await bookings.activeListForCustomer(tenantId, waId);
+
+  if (activeBookings.length === 0) {
+    session.pendingCancelIds = null;
+    await sendWhatsAppText(tenantId, waId,
+      "You don't have any active booking to cancel. Would you like to make a new booking? Here's what we offer:"
+    );
+    session.awaitingBusinessPick = true;
+    await sendBusinessMenu(tenantId, waId, workflows);
+    return;
+  }
+
+  if (activeBookings.length === 1) {
+    session.pendingCancelIds = [activeBookings[0].id];
+    // Every choice the bot hands the customer should be a tap, not a word
+    // they have to type correctly — buttons, not "reply YES/NO".
+    await sendWhatsAppButtons(tenantId, waId,
+      `You have an appointment with ${describeBookingForCancelPrompt(activeBookings[0])}. Would you like to cancel it?`,
+      [
+        { id: "cancel_confirm_yes", title: "Yes, cancel it" },
+        { id: "cancel_confirm_no", title: "No, keep it" },
+      ]
+    );
+    return;
+  }
+
+  session.pendingCancelIds = activeBookings.map((b) => b.id);
+  const bookingRows = activeBookings.map((b) => ({
+    id: `cancel_pick_${b.id}`,
+    title: `${b.providerName || "Booking"}`.slice(0, 24),
+    description: `${b.visitDateLabel || b.visitDate || ""}${b.visitTime ? ` at ${b.visitTime}` : ""} · ${b.bookingId}`,
+  }));
+  await sendWhatsAppList(tenantId, waId,
+    `You have ${activeBookings.length} active bookings. Which one would you like to cancel?`,
+    "Choose",
+    [
+      { title: "Active bookings", rows: bookingRows },
+      { title: "Other options", rows: [
+        { id: "cancel_pick_all", title: "Cancel all", description: `Cancel all ${activeBookings.length} bookings` },
+        { id: "cancel_pick_none", title: "Keep them all", description: "Don't cancel anything" },
+      ] },
+    ]
+  );
+}
+
+// Resolves session.pendingCancelIds against the customer's reply. Returns
+// true if it handled the message (caller should stop), false to fall
+// through to normal handling — an unrecognized reply drops the pending
+// cancel rather than trapping the customer in a loop; they can just say
+// "cancel" again if they still want to.
+async function resolvePendingCancel(tenantId, waId, session, trimmed, workflows) {
+  const pendingIds = session.pendingCancelIds;
+  if (!pendingIds || pendingIds.length === 0) return false;
+
+  const t = trimmed.trim().toLowerCase();
+  session.pendingCancelIds = null; // one-shot either way — re-fetched fresh if they ask to cancel again
+
+  // A tapped button/list row always arrives as its machine id (see
+  // webhook.js: interactive.button_reply.id / list_reply.id take priority
+  // over the tapped title) — matched first. The word-based regexes below
+  // stay too, since WhatsApp always still accepts free-typed text even
+  // when buttons are shown, and that must keep working identically.
+  const isNoTap = t === "cancel_confirm_no" || t === "cancel_pick_none";
+  const isYesTap = t === "cancel_confirm_yes";
+  const allTap = t === "cancel_pick_all";
+  const pickMatch = t.match(/^cancel_pick_(\d+)$/);
+
+  if (isNoTap || /^(no|n|nevermind|never\s*mind|keep it|don'?t cancel)[.!\s]*$/i.test(t)) {
+    await sendWhatsAppText(tenantId, waId, pendingIds.length > 1 ? "No problem — your bookings are still active." : "No problem — your booking is still active.");
+    return true;
+  }
+
+  let targetId = null;
+  if (pendingIds.length === 1) {
+    if (isYesTap || /^(yes|y|confirm|confirm cancel)[.!\s]*$/i.test(t)) targetId = pendingIds[0];
+    else {
+      // Restore the pending state — an unrelated reply to a single-booking
+      // confirmation is ambiguous enough to be worth one re-ask rather than
+      // silently dropping it (unlike the multi-booking case below, there's
+      // no list for a stray reply to plausibly be answering instead).
+      session.pendingCancelIds = pendingIds;
+      return false;
+    }
+  } else if (allTap || /^all$/i.test(t)) {
+    for (const id of pendingIds) {
+      const booking = await bookings.getById(tenantId, id);
+      if (booking && !isTerminal(booking.status)) await cancelBookingRow(tenantId, booking, workflows);
+    }
+    await sendWhatsAppText(tenantId, waId, `❌ Done — all ${pendingIds.length} bookings have been cancelled. Message me anytime if you'd like to make a new one.`);
+    return true;
+  } else if (pickMatch) {
+    const pickedId = Number(pickMatch[1]);
+    if (pendingIds.includes(pickedId)) targetId = pickedId;
+  } else {
+    const n = parseInt(t, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= pendingIds.length) targetId = pendingIds[n - 1];
+  }
+
+  if (!targetId) return false; // dropped — genuinely didn't match, let it fall through
+
+  const booking = await bookings.getById(tenantId, targetId);
+  if (!booking || isTerminal(booking.status)) {
+    await sendWhatsAppText(tenantId, waId, "That booking's already been handled — nothing to cancel there anymore.");
+    return true;
+  }
+
+  const cancelResult = await cancelBookingRow(tenantId, booking, workflows);
+  const refundNote = refundStatusNote(cancelResult.refundResult);
+  await sendWhatsAppText(tenantId, waId, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`);
+  return true;
 }
 
 // Found live: every cancellation message in this file only ever checked
@@ -1606,7 +1808,7 @@ async function handleGlobalSpecialActions(tenantId, waId, session, trimmed, work
   // 3. AI Chat
   if (lc === SPECIAL_OPT_AI_CHAT || AI_CHAT_QUERY_PHRASES.has(lc)) {
     session.awaitingBusinessPick = false;
-    const greeting = await t(session, "🤖 You're now chatting with our AI assistant! Ask me anything about our services, pricing, or availability. Reply RESTART anytime to return to the main menu.");
+    const greeting = await t(session, "You can ask us anything about our services, pricing, or availability here. Reply RESTART anytime to return to the main menu.");
     await sendWhatsAppText(tenantId, waId, greeting);
     session.subStage = "AI_CHAT";
     return true;
@@ -1689,8 +1891,25 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   // greeting handling further down this function). Clearing subStage
   // here is exactly what RESTART already does elsewhere — this is just a
   // second, actually-discoverable way to trigger the identical reset.
-  const isGreeting = /^(hi|hello|hey|hiya|hii|hiii|good\s+(morning|afternoon|evening)|namaste|namaskar|raam\s*raam|ram\s*ram|kya\s*hal|kaise\s*ho|radhe\s*radhe|jai\s*shree\s*ram|pranam|sat\s*sri|adaab|khamma\s*ghani)[\s!,.?]*$/i.test(trimmed);
-  if (isGreeting && (session.subStage === "AI_CHAT" || session.subStage === "AWAITING_PHOTO")) {
+  const isGreeting = GREETING_RE.test(trimmed);
+  // Found live: once subStage is AI_CHAT, ONLY a fresh greeting broke out
+  // of it before dispatching to handleAiChat below — a natural "cancel my
+  // appointment"/"cancel today's appointment" typed while stuck in AI_CHAT
+  // went straight to Groq instead of the deterministic CANCEL_RE/STATUS_RE/
+  // RESTART_RE handling further down this function, and if Groq itself was
+  // rate-limited (reproduced live: a 429), the customer got a generic
+  // apology with no way to cancel except the bare word "cancel". Widened
+  // the same escape hatch to also fire for cancel/status/restart phrasing —
+  // reusing keywordIntent() (the same deterministic classifier
+  // detectGeneralIntent() falls back to when Groq is unavailable), not a
+  // second hardcoded phrase list.
+  const escapeIntent = keywordIntent(trimmed);
+  const shouldEscapeSubStage =
+    isGreeting ||
+    escapeIntent === INTENTS.CANCEL_BOOKING ||
+    escapeIntent === INTENTS.CHECK_STATUS ||
+    escapeIntent === INTENTS.RESTART;
+  if (shouldEscapeSubStage && (session.subStage === "AI_CHAT" || session.subStage === "AWAITING_PHOTO")) {
     session.subStage = null;
   }
 
@@ -1763,20 +1982,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   }
 
   if (intent === INTENTS.CANCEL_BOOKING) {
-    if (hasActive) {
-      const cancelResult = await cancelActiveBooking(tenantId, waId, workflows);
-      sessions.delete(mapKey(tenantId, waId));
-      const refundNote = refundStatusNote(cancelResult?.refundResult);
-      await sendWhatsAppText(tenantId, waId,
-        `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`
-      );
-    } else {
-      await sendWhatsAppText(tenantId, waId,
-        "You don't have any active booking to cancel. Would you like to make a new booking? Here's what we offer:"
-      );
-      session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows);
-    }
+    await beginCancelFlow(tenantId, waId, session, workflows);
     return;
   }
 
@@ -1979,6 +2185,25 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
   // this broader, substring-matching intercept.
   const workflow = workflows[session.workflowId];
   const step = currentStep(workflow, session);
+
+  // Mid provider-extra-question loop — stepIndex is pinned at
+  // review_confirm's index the whole time (see maybeAskNextExtraField's
+  // comment), so this has to be checked before treating `step` as "the
+  // thing currently being answered" the way every branch below does.
+  if (step.type === "review_confirm" && (session.extraFieldIndex ?? 0) < (session.selectedProvider?.extraFields?.length || 0)) {
+    const extraFields = session.selectedProvider.extraFields;
+    const field = extraFields[session.extraFieldIndex];
+    const error = await applyStepInput(tenantId, workflow, field, session, trimmed);
+    if (error) {
+      await sendWhatsAppText(tenantId, waId, error);
+      await sendStepPrompt(tenantId, waId, workflow, field, session);
+      return;
+    }
+    session.extraFieldIndex += 1;
+    if (await maybeAskNextExtraField(tenantId, waId, session, workflow)) return;
+    await sendStepPrompt(tenantId, waId, workflow, step, session); // all answered — now actually show review_confirm
+    return;
+  }
 
   if (session.subStage === "CONFIRM_PROVIDER") {
     const choice = normalizeConfirmProviderChoice(trimmed);
@@ -2197,6 +2422,24 @@ async function handleStatusCommand(tenantId, waId) {
   const session = getSession(tenantId, waId);
   const booking = await bookings.activeForCustomer(tenantId, waId);
   if (!booking) {
+    // No active/payment-pending booking (activeForCustomer already excludes
+    // every terminal status). Before falling back to the generic "no active
+    // booking" reply, check for the one other state STATUS should still
+    // surface: a just-completed visit still awaiting feedback — the same
+    // feedbackRequestedAt signal the feedback-capture handler above uses,
+    // so this and that can never disagree about which booking is "pending
+    // feedback." Anything else (rated already, cancelled, no-show) is true
+    // history and gets the plain fallback, same as before.
+    const allForCustomer = (await bookings.values(tenantId))
+      .filter((b) => b.waId === waId && b.status === "done" && b.feedbackRequestedAt)
+      .sort((a, b) => Number(b.feedbackRequestedAt || 0) - Number(a.feedbackRequestedAt || 0));
+    const pendingFeedback = allForCustomer[0];
+    if (pendingFeedback) {
+      await sendFeedbackRatingList(tenantId, waId, await t(session,
+        `Your${pendingFeedback.visitTime ? ` ${pendingFeedback.visitTime}` : ""} appointment with ${pendingFeedback.providerName} is complete. How was your visit?`
+      ));
+      return;
+    }
     await sendWhatsAppText(tenantId, waId, await t(session, "No active booking found. Send a message anytime describing what you'd like to book."));
     return;
   }
@@ -2222,10 +2465,11 @@ async function handleStatusCommand(tenantId, waId) {
     return;
   }
 
-  if (booking.status === "done") {
-    await sendWhatsAppText(tenantId, waId, await t(session, `Your ${booking.visitTime} appointment with ${booking.providerName} is complete. Message me anytime to book another.`));
-    return;
-  }
+  // booking.status === "done" is unreachable here — activeForCustomer()
+  // now excludes every terminal status (bookingStateMachine.js's
+  // TERMINAL_STATUSES), so a completed visit is handled by the
+  // pendingFeedback branch above (or the plain "no active booking" reply
+  // once feedback's been given), never by falling through to this point.
 
   if (booking.status === "serving") {
     await sendWhatsAppText(tenantId, waId, await t(session, `You're currently being seen by ${booking.providerName}.`));
@@ -2331,8 +2575,32 @@ async function processMessage(tenantId, waId, text, workflows) {
 
   try {
     if (/^restart$/i.test(trimmed) || /^menu$/i.test(trimmed)) {
+      // Full reset: drop the in-memory session (booking flow state, selected
+      // service/provider/date/time, subStage, pending confirmation/reschedule/
+      // feedback state, support-attempt counter — everything) rather than
+      // clearing individual fields, so nothing stale can leak into the next
+      // conversation. Then immediately show a real, tappable menu of this
+      // tenant's services — not just a bare "what do you need?" prompt — so
+      // the customer always has a working next step, even if RESTART was
+      // sent to escape a stuck/crashed state.
+      //
+      // Found live (via this session's own testing): deleting the session
+      // and calling sendBusinessMenu directly, without a session to mark
+      // awaitingBusinessPick on, meant TAPPING the very menu row this just
+      // showed fell through to full AI classification instead of the
+      // deterministic id-match short-circuit at the top of handleDetecting
+      // — a one-word business id like "hair" got read as a factual
+      // question ("what is hair service") instead of "start that
+      // booking." getSession() below recreates the fresh object (same
+      // shape sessions.delete()'d — nothing carries over except the
+      // language pick) so the flag has somewhere to live for the very
+      // next message.
+      const priorLang = session?.lang;
       sessions.delete(mapKey(tenantId, waId));
-      await sendWhatsAppText(tenantId, waId, "🔄 Okay, starting over. What do you need?");
+      const freshSession = getSession(tenantId, waId);
+      if (priorLang) freshSession.lang = priorLang;
+      freshSession.awaitingBusinessPick = true;
+      await sendBusinessMenu(tenantId, waId, workflows, freshSession);
       return;
     }
 
@@ -2350,14 +2618,13 @@ async function processMessage(tenantId, waId, text, workflows) {
     // abandoning an in-progress booking never depends on AI availability —
     // same as those three already don't.
     if (/^(cancel|stop|abort)$/i.test(trimmed)) {
-      const cancelResult = await cancelActiveBooking(tenantId, waId, workflows);
-      if (cancelResult) {
-        // A real, already-confirmed booking existed — cancel it for real
-        // (DB status, refund attempt, calendar sync), same as every other
-        // cancellation path.
-        sessions.delete(mapKey(tenantId, waId));
-        const refundNote = refundStatusNote(cancelResult.refundResult);
-        await sendWhatsAppText(tenantId, waId, await t(session, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`));
+      const activeBookings = await bookings.activeListForCustomer(tenantId, waId);
+      if (activeBookings.length > 0) {
+        // A real, already-confirmed booking exists — Section 10: never
+        // cancel it outright on a bare "cancel", confirm first (and
+        // disambiguate if there's more than one), same flow as the
+        // natural-language "cancel my appointment" path.
+        await beginCancelFlow(tenantId, waId, session, workflows);
       } else if (session.stage === "RUNNING") {
         // Nothing confirmed yet — just an in-progress flow to abandon.
         // Nothing to refund or mark cancelled in the database.
@@ -2397,6 +2664,15 @@ async function processMessage(tenantId, waId, text, workflows) {
       return;
     }
 
+    // Section 10 — if beginCancelFlow just asked "which one?" or "are you
+    // sure?", THIS message is that answer, not a new request — checked
+    // before feedback/intent detection for the same reason those are:
+    // a reply that only means something in context must not get
+    // misrouted by a classifier with no way to know that context applies.
+    if (await resolvePendingCancel(tenantId, waId, session, trimmed, workflows)) {
+      return;
+    }
+
     // Section 4.3 — if the provider just completed this customer's most
     // recent booking and asked for feedback, THIS message is that
     // feedback, not a new booking attempt or a question. Checked here,
@@ -2430,12 +2706,25 @@ async function processMessage(tenantId, waId, text, workflows) {
 
     const feedbackBooking = pendingFeedbackBookings[0];
 
-    if (feedbackBooking) {
+    // Handle clickable WhatsApp rating selections.
+    const ratingMatch = trimmed.match(/^feedback_rating_([1-5])$/i);
+
+    // Found live: this used to capture ANY message as the feedback comment
+    // whenever a completed booking had feedbackRequestedAt set — a bare
+    // "hi" or "ok"/"thanks" (neither an explicit rating tap nor an exact
+    // global command like RESTART/STATUS) got silently swallowed as the
+    // feedback text, clearing the one-shot flag and replying "Thank you for
+    // the feedback!" instead of the greeting/acknowledgment reply the
+    // customer actually needed. A rating tap or real free-text feedback
+    // still gets captured normally; a greeting or plain acknowledgment
+    // falls through to the rest of the handler instead (GREETING_RE/
+    // isPlainAcknowledgment are the same shared checks handleDetecting
+    // uses, not a second hardcoded list).
+    if (feedbackBooking && !ratingMatch && (GREETING_RE.test(trimmed) || isPlainAcknowledgment(trimmed))) {
+      // fall through — not feedback, handle as a normal message below
+    } else if (feedbackBooking) {
       let rating = null;
       let feedbackText = trimmed;
-
-      // Handle clickable WhatsApp rating selections.
-      const ratingMatch = trimmed.match(/^feedback_rating_([1-5])$/i);
 
       if (ratingMatch) {
         rating = Number(ratingMatch[1]);

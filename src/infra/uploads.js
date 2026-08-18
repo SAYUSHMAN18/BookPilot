@@ -46,4 +46,25 @@ const uploadImage = multer({
   },
 });
 
-module.exports = { uploadImage, UPLOAD_DIR };
+// Knowledge-base document upload — deliberately memory storage, not disk:
+// unlike a business/provider photo (which needs a persistent URL to show
+// customers later), a KB doc is only ever read ONCE, at upload time, to
+// extract its text — nothing downstream ever needs the original file
+// again, so there's nothing worth writing to disk or cleaning up later.
+const DOCUMENT_MIMETYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "text/plain",
+]);
+const uploadDocument = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // text-heavy PDFs run bigger than a photo; still bounded
+  fileFilter(req, file, cb) {
+    if (!DOCUMENT_MIMETYPES.has(file.mimetype)) {
+      return cb(new Error("Only PDF, DOCX, or plain text (.txt) files are allowed."));
+    }
+    cb(null, true);
+  },
+});
+
+module.exports = { uploadImage, uploadDocument, UPLOAD_DIR };

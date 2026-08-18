@@ -220,7 +220,7 @@ function createWebhookRouter() {
       // log, so a thrown error meant the customer got silently nothing —
       // five consecutive messages including a real symptom report vanished
       // with no reply at all. An error here must never mean total silence.
-      log("ERROR", `Webhook processing error: ${err.stack || err.message}`);
+      log("ERROR", `Webhook processing error [tenant=${tenantId ?? "?"} waId=${waId ?? "?"}]: ${err.message}\n${err.stack || ""}`);
       if (waId && tenantId) {
         try {
           await sendWhatsAppText(tenantId, waId, "Sorry, something went wrong on my end — could you try that again?");

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { get, post, del } from "../lib/api";
+import TimeInput from "./TimeInput";
 
 export default function AvailabilityPanel({ provider }) {
   const [blocks, setBlocks] = useState([]);
@@ -42,11 +43,11 @@ export default function AvailabilityPanel({ provider }) {
     <div className="card">
       <div className="card-header"><span className="card-title">🗓 Availability</span></div>
       <div className="filters-row">
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <input type="time" placeholder="Start (optional)" value={time} onChange={(e) => setTime(e.target.value)} title="Start time — leave blank to block the whole day" />
+        <input className="form-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <TimeInput placeholder="Start (optional)" value={time} onChange={setTime} title="Start time — leave blank to block the whole day" />
         <span style={{ color: "var(--muted)", fontSize: 13 }}>to</span>
-        <input type="time" placeholder="End" value={endTime} onChange={(e) => setEndTime(e.target.value)} title="End time — leave blank to block just the start time" />
-        <input type="text" placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: 190 }} />
+        <TimeInput placeholder="End" value={endTime} onChange={setEndTime} title="End time — leave blank to block just the start time" />
+        <input className="form-input" type="text" placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: 190 }} />
         <button className="btn-primary" onClick={addBlock}>Block</button>
       </div>
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>

@@ -26,6 +26,82 @@
 </head>
 <body>
 
+  <!-- A single stroke-icon sprite instead of emoji throughout this page —
+       emoji render differently per OS/browser (Windows vs. Mac vs.
+       Android glyphs are visually inconsistent with each other and with
+       everything else on the page), which is exactly the kind of tell
+       that reads as "template" rather than "designed." One considered
+       icon language, referenced via <use>, same visual language as the
+       dashboard's own icon set for brand consistency across both. -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="icon-calendar" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4" width="15" height="13.5" rx="2"/><path d="M2.5 8h15"/><path d="M6.5 2.5v3M13.5 2.5v3"/><path d="M6.5 11.5h2M11.5 11.5h2M6.5 14.5h2M11.5 14.5h2"/>
+    </symbol>
+    <symbol id="icon-calendar-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4" width="15" height="13.5" rx="2"/><path d="M2.5 8h15"/><path d="M6.5 2.5v3M13.5 2.5v3"/><path d="M6.8 12.2l1.8 1.8 3.7-4"/>
+    </symbol>
+    <symbol id="icon-scissors" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="5" cy="5" r="2.3"/><circle cx="5" cy="15" r="2.3"/><path d="M6.6 6.5L17 17M6.6 13.5L17 3"/>
+    </symbol>
+    <symbol id="icon-hotel" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 17.5V8.5l6-4.5 6 4.5v9"/><path d="M2.5 17.5h12"/><path d="M6 17.5v-5h5v5"/><path d="M15.5 10.5H17a1 1 0 0 1 1 1v6"/>
+    </symbol>
+    <symbol id="icon-pill" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="8.5" width="14" height="6" rx="3" transform="rotate(-35 10 11.5)"/><path d="M9 8.2l3 5"/>
+    </symbol>
+    <symbol id="icon-sparkle" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 2.5l1.6 4.9 4.9 1.6-4.9 1.6-1.6 4.9-1.6-4.9-4.9-1.6 4.9-1.6z"/><path d="M16.5 14.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>
+    </symbol>
+    <symbol id="icon-car" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12.5l1.3-4.8A2 2 0 0 1 6.2 6.2h7.6a2 2 0 0 1 1.9 1.5l1.3 4.8"/><rect x="2" y="12.5" width="16" height="4" rx="1.2"/><circle cx="6" cy="16.5" r="1.3"/><circle cx="14" cy="16.5" r="1.3"/>
+    </symbol>
+    <symbol id="icon-check-circle" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="7.5"/><path d="M6.8 10.2l2.1 2.1 4.3-4.6"/>
+    </symbol>
+    <symbol id="icon-zap" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 2.5L4 11.5h5.2L9 17.5l7-9.5h-5.2z"/>
+    </symbol>
+    <symbol id="icon-alert" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="7.5"/><path d="M10 6.5v4.2"/><circle cx="10" cy="13.6" r="0.15" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-phone" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 3.5h2.8l1.2 3.5-2 1.5a11 11 0 0 0 5.5 5.5l1.5-2 3.5 1.2v2.8a1.5 1.5 0 0 1-1.6 1.5A13.5 13.5 0 0 1 2.5 5.1 1.5 1.5 0 0 1 4 3.5z"/>
+    </symbol>
+    <symbol id="icon-clipboard" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="12" height="14" rx="1.5"/><rect x="7" y="2.5" width="6" height="3" rx="1"/><path d="M7 9.5h6M7 12.5h6M7 15.5h4"/>
+    </symbol>
+    <symbol id="icon-banknote" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="5.5" width="16" height="9" rx="1.5"/><circle cx="10" cy="10" r="2.3"/><path d="M4.5 5.5v9M15.5 5.5v9"/>
+    </symbol>
+    <symbol id="icon-bot" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="7" width="13" height="9.5" rx="2.5"/><path d="M10 7V4"/><circle cx="10" cy="3" r="1"/><circle cx="7.3" cy="11.3" r="1"/><circle cx="12.7" cy="11.3" r="1"/><path d="M7.5 14.2h5"/><path d="M1.5 10v3M18.5 10v3"/>
+    </symbol>
+    <symbol id="icon-mic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="7.3" y="2.5" width="5.4" height="9.5" rx="2.7"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0"/><path d="M10 15v3"/><path d="M7 18h6"/>
+    </symbol>
+    <symbol id="icon-card" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4.5" width="15" height="11" rx="2"/><path d="M2.5 8h15"/><path d="M5.5 12h4"/>
+    </symbol>
+    <symbol id="icon-bell" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 8a5 5 0 0 1 10 0c0 4 1.5 5.5 1.5 5.5h-13S5 12 5 8z"/><path d="M8.2 16.5a1.9 1.9 0 0 0 3.6 0"/>
+    </symbol>
+    <symbol id="icon-bar-chart" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 17.5V3M3 17.5h14"/><rect x="6" y="11" width="2.5" height="6.5"/><rect x="10.5" y="7.5" width="2.5" height="10"/><path d="M15 9v8.5"/>
+    </symbol>
+    <symbol id="icon-mail" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4.5" width="15" height="11" rx="2"/><path d="M3 5.5l7 5.5 7-5.5"/>
+    </symbol>
+    <symbol id="icon-message" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 5.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8l-4 3v-3H4.5a2 2 0 0 1-2-2z"/>
+    </symbol>
+    <symbol id="icon-send" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M17.5 2.5L2.5 9.2l6 2.3 2.3 6L17.5 2.5z"/><path d="M8.5 11.5L17.5 2.5"/>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 3.5v13M3.5 10h13"/>
+    </symbol>
+  </svg>
+
   <div class="grain"></div>
   <div class="cursor-glow" id="cursorGlow"></div>
 
@@ -33,7 +109,7 @@
   <header class="nav" id="nav">
     <div class="nav-inner">
       <a href="#top" class="brand">
-        <span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span>
+        <span class="brand-mark"><svg class="icon"><use href="#icon-calendar-check"/></svg></span> BookPilot <span class="brand-accent">AI</span>
       </a>
       <nav class="nav-links">
         <a href="#how">How it works</a>
@@ -85,7 +161,7 @@
         </div>
         <div class="hero-trust">
           <div class="avatars">
-            <span>💇</span><span>🏨</span><span>💊</span><span>💄</span><span>🚗</span>
+            <span><svg class="icon"><use href="#icon-scissors"/></svg></span><span><svg class="icon"><use href="#icon-hotel"/></svg></span><span><svg class="icon"><use href="#icon-pill"/></svg></span><span><svg class="icon"><use href="#icon-sparkle"/></svg></span><span><svg class="icon"><use href="#icon-car"/></svg></span>
           </div>
           <span>Built for salons, clinics, hotels, studios &amp; service shops</span>
         </div>
@@ -96,7 +172,7 @@
           <div class="phone-notch"></div>
           <div class="phone-screen">
             <div class="wa-header">
-              <div class="wa-avatar">💇</div>
+              <div class="wa-avatar"><svg class="icon"><use href="#icon-scissors"/></svg></div>
               <div>
                 <div class="wa-name">Snip &amp; Style</div>
                 <div class="wa-status" id="waStatus">online</div>
@@ -106,11 +182,11 @@
           </div>
         </div>
         <div class="floating-card fc-1">
-          <div class="fc-icon">✅</div>
+          <div class="fc-icon"><svg class="icon"><use href="#icon-check-circle"/></svg></div>
           <div><div class="fc-title">Booking confirmed</div><div class="fc-sub">Auto-synced to calendar</div></div>
         </div>
         <div class="floating-card fc-2">
-          <div class="fc-icon">⚡</div>
+          <div class="fc-icon"><svg class="icon"><use href="#icon-zap"/></svg></div>
           <div><div class="fc-title">6s avg. reply time</div><div class="fc-sub">24/7, every language</div></div>
         </div>
       </div>
@@ -131,22 +207,22 @@
       <p class="section-sub" data-reveal>Every missed message is a customer who books somewhere else instead.</p>
       <div class="problem-grid">
         <div class="problem-card" data-reveal>
-          <div class="problem-x">😤</div>
+          <div class="problem-x"><svg class="icon"><use href="#icon-alert"/></svg></div>
           <h3>Customers message after hours</h3>
           <p>and you don't see it until the slot's already gone.</p>
         </div>
         <div class="problem-card" data-reveal>
-          <div class="problem-x">📞</div>
+          <div class="problem-x"><svg class="icon"><use href="#icon-phone"/></svg></div>
           <h3>Your staff is on the phone all day</h3>
           <p>instead of doing the work that actually pays.</p>
         </div>
         <div class="problem-card" data-reveal>
-          <div class="problem-x">📋</div>
+          <div class="problem-x"><svg class="icon"><use href="#icon-clipboard"/></svg></div>
           <h3>Double-bookings and no-shows</h3>
           <p>because there's no single source of truth for who's coming when.</p>
         </div>
         <div class="problem-card" data-reveal>
-          <div class="problem-x">💸</div>
+          <div class="problem-x"><svg class="icon"><use href="#icon-banknote"/></svg></div>
           <h3>Chasing payment after the fact</h3>
           <p>instead of collecting a deposit the moment they book.</p>
         </div>
@@ -194,7 +270,7 @@
           <div class="phone-notch"></div>
           <div class="phone-screen">
             <div class="wa-header">
-              <div class="wa-avatar">💊</div>
+              <div class="wa-avatar"><svg class="icon"><use href="#icon-pill"/></svg></div>
               <div>
                 <div class="wa-name">ABC Multispeciality Clinic</div>
                 <div class="wa-status" id="demoStatus">online</div>
@@ -203,17 +279,17 @@
             <div class="wa-body" id="demoBody"></div>
             <form class="wa-input-row" id="liveDemoForm">
               <input id="liveDemoInput" type="text" placeholder="Type a message to try it live…" maxlength="500" autocomplete="off" />
-              <button type="submit" id="liveDemoSend" aria-label="Send">➤</button>
+              <button type="submit" id="liveDemoSend" aria-label="Send"><svg class="icon"><use href="#icon-send"/></svg></button>
             </form>
           </div>
         </div>
         <div class="demo-side">
-          <button class="btn btn-primary btn-lg" id="demoReplay"><span>▶ Replay the conversation</span></button>
+          <button class="btn btn-primary btn-lg" id="demoReplay"><span class="play-ring play-ring-light"><span class="play-tri play-tri-light"></span></span><span>Replay the conversation</span></button>
           <ul class="demo-points">
-            <li>✅ Understood a symptom, suggested the right doctor</li>
-            <li>✅ Tappable date &amp; time — no back-and-forth typing</li>
-            <li>✅ Confirmation with map link, sent instantly</li>
-            <li>💬 Or type your own message above — it's a real, live conversation</li>
+            <li><svg class="icon"><use href="#icon-check-circle"/></svg> Understood a symptom, suggested the right doctor</li>
+            <li><svg class="icon"><use href="#icon-check-circle"/></svg> Tappable date &amp; time — no back-and-forth typing</li>
+            <li><svg class="icon"><use href="#icon-check-circle"/></svg> Confirmation with map link, sent instantly</li>
+            <li><svg class="icon"><use href="#icon-message"/></svg> Or type your own message above — it's a real, live conversation</li>
           </ul>
           <a href="/signup" class="btn btn-outline">Try it with your own business →</a>
         </div>
@@ -228,32 +304,32 @@
       <p class="section-sub" data-reveal>One dashboard. Every business type. No developer required.</p>
       <div class="feature-grid">
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">🤖</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-bot"/></svg></div>
           <h3>AI that actually understands</h3>
           <p>Not a rigid menu bot — customers type naturally, in Hindi, English, or a mix, and still get booked correctly.</p>
         </div>
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">🎙️</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-mic"/></svg></div>
           <h3>Voice notes, transcribed</h3>
           <p>Customers who'd rather speak than type get replied to in the same spoken language, automatically.</p>
         </div>
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">📆</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-calendar"/></svg></div>
           <h3>Real-time availability</h3>
           <p>Per-provider slots, blackout ranges, and double-booking protection — the calendar is always the truth.</p>
         </div>
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">💳</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-card"/></svg></div>
           <h3>Payments built in</h3>
           <p>Optional deposits collected at booking time via a secure payment link — fewer no-shows, guaranteed.</p>
         </div>
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">🔔</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-bell"/></svg></div>
           <h3>Reminders that send themselves</h3>
           <p>Automatic "you're next" and appointment reminders — nobody on your team has to remember to text.</p>
         </div>
         <div class="feature-card" data-reveal>
-          <div class="feature-icon">📊</div>
+          <div class="feature-icon"><svg class="icon"><use href="#icon-bar-chart"/></svg></div>
           <h3>One dashboard, full visibility</h3>
           <p>Bookings, feedback, live queue, and analytics — for a single provider or your whole business.</p>
         </div>
@@ -266,12 +342,12 @@
     <div class="section-inner">
       <h2 data-reveal>Built for how your business actually runs</h2>
       <div class="industry-row" data-reveal>
-        <div class="industry-pill">💇 Salons &amp; Grooming</div>
-        <div class="industry-pill">🏨 Hotels &amp; Stays</div>
-        <div class="industry-pill">💊 Clinics &amp; Doctors</div>
-        <div class="industry-pill">💄 Makeup &amp; Studios</div>
-        <div class="industry-pill">🚗 Auto Service</div>
-        <div class="industry-pill">➕ Your industry, in minutes</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-scissors"/></svg> Salons &amp; Grooming</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-hotel"/></svg> Hotels &amp; Stays</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-pill"/></svg> Clinics &amp; Doctors</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-sparkle"/></svg> Makeup &amp; Studios</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-car"/></svg> Auto Service</div>
+        <div class="industry-pill"><svg class="icon"><use href="#icon-plus"/></svg> Your industry, in minutes</div>
       </div>
     </div>
   </section>
@@ -287,10 +363,10 @@
           <div class="price-amount">Free</div>
           <div class="price-desc">For a single provider getting started</div>
           <ul class="price-features">
-            <li>✓ 1 WhatsApp number</li>
-            <li>✓ Up to 100 bookings/mo</li>
-            <li>✓ Core AI booking flow</li>
-            <li>✓ Email support</li>
+            <li>1 WhatsApp number</li>
+            <li>Up to 100 bookings/mo</li>
+            <li>Core AI booking flow</li>
+            <li>Email support</li>
           </ul>
           <a href="/signup" class="btn btn-outline btn-full">Start free</a>
         </div>
@@ -300,12 +376,12 @@
           <div class="price-amount">₹1,999<span>/mo</span></div>
           <div class="price-desc">For a business with a real front desk</div>
           <ul class="price-features">
-            <li>✓ Everything in Starter</li>
-            <li>✓ Unlimited bookings</li>
-            <li>✓ Voice notes &amp; multilingual AI</li>
-            <li>✓ Payments &amp; deposits</li>
-            <li>✓ Calendar sync</li>
-            <li>✓ Priority support</li>
+            <li>Everything in Starter</li>
+            <li>Unlimited bookings</li>
+            <li>Voice notes &amp; multilingual AI</li>
+            <li>Payments &amp; deposits</li>
+            <li>Calendar sync</li>
+            <li>Priority support</li>
           </ul>
           <a href="/signup" class="btn btn-primary btn-full">Start free trial</a>
         </div>
@@ -314,14 +390,14 @@
           <div class="price-amount">Custom</div>
           <div class="price-desc">Multi-location, custom workflows</div>
           <ul class="price-features">
-            <li>✓ Everything in Growth</li>
-            <li>✓ Multiple locations/providers</li>
-            <li>✓ Custom workflow design</li>
-            <li>✓ Dedicated onboarding</li>
+            <li>Everything in Growth</li>
+            <li>Multiple locations/providers</li>
+            <li>Custom workflow design</li>
+            <li>Dedicated onboarding</li>
           </ul>
           <div class="btn-group-stack">
-            <a href="mailto:er.sayushman@gmail.com" class="btn btn-outline btn-full">✉️ Email us</a>
-            <a href="https://wa.me/917838881412" class="btn btn-outline btn-full" target="_blank" rel="noopener">💬 WhatsApp us</a>
+            <a href="mailto:er.sayushman@gmail.com" class="btn btn-outline btn-full"><svg class="icon"><use href="#icon-mail"/></svg> Email us</a>
+            <a href="https://wa.me/917838881412" class="btn btn-outline btn-full" target="_blank" rel="noopener"><svg class="icon"><use href="#icon-message"/></svg> WhatsApp us</a>
           </div>
         </div>
       </div>
@@ -371,7 +447,7 @@
   <footer class="footer">
     <div class="footer-inner">
       <div class="footer-brand">
-        <a href="#top" class="brand"><span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span></a>
+        <a href="#top" class="brand"><span class="brand-mark"><svg class="icon"><use href="#icon-calendar-check"/></svg></span> BookPilot <span class="brand-accent">AI</span></a>
         <p>The WhatsApp front desk for local businesses.</p>
       </div>
       <div class="footer-col">

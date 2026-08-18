@@ -57,14 +57,16 @@ export default function App() {
   if (pending) {
     return (
       <div className="login-wrap">
-        <div className="login-card">
-          <h1>Almost there 👋</h1>
-          <p>
-            {user ? `Thanks, ${user.name || user.email} — your` : "Your"} account is pending activation. Our team
-            reviews every new business and will be in touch shortly to get you fully set up. You'll get an email
-            once you're activated and ready to log in.
-          </p>
-          <button className="btn-link" onClick={logout} style={{ marginTop: 14 }}>Log out</button>
+        <div className="login-card-wrap">
+          <div className="login-card">
+            <h1>Almost there 👋</h1>
+            <p>
+              {user ? `Thanks, ${user.name || user.email} — your` : "Your"} account is pending activation. Our team
+              reviews every new business and will be in touch shortly to get you fully set up. You'll get an email
+              once you're activated and ready to log in.
+            </p>
+            <button className="btn-link" onClick={logout} style={{ marginTop: 14 }}>Log out</button>
+          </div>
         </div>
       </div>
     );

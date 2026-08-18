@@ -15,44 +15,75 @@
 <body class="auth-body">
   <div class="grain"></div>
 
-  <a href="/" class="auth-brand"><span class="brand-mark">📅</span> BookPilot <span class="brand-accent">AI</span></a>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="icon-calendar-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4" width="15" height="13.5" rx="2"/><path d="M2.5 8h15"/><path d="M6.5 2.5v3M13.5 2.5v3"/><path d="M6.8 12.2l1.8 1.8 3.7-4"/>
+    </symbol>
+    <symbol id="icon-check-circle" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="7.5"/><path d="M6.8 10.2l2.1 2.1 4.3-4.6"/>
+    </symbol>
+  </svg>
+
+  <a href="/" class="auth-brand"><span class="brand-mark"><svg class="icon"><use href="#icon-calendar-check"/></svg></span> BookPilot <span class="brand-accent">AI</span></a>
 
   <div class="auth-wrap">
     <div class="auth-side">
       <h1>Start taking bookings<br />on WhatsApp today.</h1>
       <p>Free to start. No credit card, no developer, no app for your customers to install.</p>
       <ul class="auth-checklist">
-        <li>✅ Live in minutes, not weeks</li>
-        <li>✅ Works with the WhatsApp number you already have</li>
-        <li>✅ Cancel anytime, no lock-in</li>
+        <li><svg class="icon"><use href="#icon-check-circle"/></svg> Live in minutes, not weeks</li>
+        <li><svg class="icon"><use href="#icon-check-circle"/></svg> Works with the WhatsApp number you already have</li>
+        <li><svg class="icon"><use href="#icon-check-circle"/></svg> Cancel anytime, no lock-in</li>
       </ul>
     </div>
 
     <form class="auth-card" id="signupForm" novalidate>
-      <h2>Create your business account</h2>
-      <p class="auth-sub">Already have one? <a href="/app">Log in</a></p>
+      <div class="auth-steps" id="authSteps">
+        <div class="auth-step active" id="authStep1"><span class="auth-step-num">1</span> Your business</div>
+        <div class="auth-step-line"></div>
+        <div class="auth-step" id="authStep2"><span class="auth-step-num">2</span> Verify email</div>
+      </div>
+      <h2 id="authHeading">Create your business account</h2>
+      <p class="auth-sub" id="authSub">Already have one? <a href="/app">Log in</a></p>
 
-      <div class="field">
-        <label for="businessName">Business name</label>
-        <input id="businessName" name="businessName" type="text" placeholder="e.g. Snip &amp; Style Salon" required autofocus />
+      <div id="preOtpFields">
+        <div class="field">
+          <label for="businessName">Business name</label>
+          <input id="businessName" name="businessName" type="text" placeholder="e.g. Snip &amp; Style Salon" required autofocus />
+        </div>
+        <div class="field">
+          <label for="ownerName">Your name</label>
+          <input id="ownerName" name="ownerName" type="text" placeholder="e.g. Aisha Khan" />
+        </div>
+        <div class="field">
+          <label for="email">Work email</label>
+          <input id="email" name="email" type="email" placeholder="you@yourbusiness.com" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="At least 8 characters" minlength="8" required />
+        </div>
       </div>
-      <div class="field">
-        <label for="ownerName">Your name</label>
-        <input id="ownerName" name="ownerName" type="text" placeholder="e.g. Aisha Khan" />
-      </div>
-      <div class="field">
-        <label for="email">Work email</label>
-        <input id="email" name="email" type="email" placeholder="you@yourbusiness.com" required />
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" placeholder="At least 8 characters" minlength="8" required />
+
+      <!-- Shown in place of the 4 fields above once the code is sent —
+           they're already submitted, re-showing all of them (plus the
+           OTP field) at once was what pushed the actual submit button
+           off-screen. A compact "here's what you're creating" summary
+           plus an Edit link covers the same information in far less
+           height. -->
+      <div class="auth-summary" id="authSummary" hidden>
+        <div class="auth-summary-row"><span>Business</span><strong id="authSummaryBiz"></strong></div>
+        <div class="auth-summary-row"><span>Email</span><strong id="authSummaryEmail"></strong></div>
+        <button type="button" class="btn-link" id="authEditBtn">← Edit details</button>
       </div>
 
       <div class="field" id="otpField" hidden>
         <label for="otp">Verification code</label>
-        <input id="otp" name="otp" type="text" inputmode="numeric" placeholder="6-digit code" maxlength="6" />
-        <p class="auth-fineprint" style="margin-top:4px">Sent to your email — enter it below to finish creating your account.</p>
+        <input id="otp" name="otp" type="text" inputmode="numeric" placeholder="6-digit code" maxlength="6" autocomplete="one-time-code" />
+        <div class="auth-otp-row">
+          <p class="auth-fineprint">Sent to your email.</p>
+          <button type="button" class="btn-link" id="resendBtn">Resend code</button>
+        </div>
       </div>
 
       <div class="error-banner" id="errorBanner" hidden></div>

@@ -14,6 +14,14 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
   const [workflows, setWorkflows] = useState({});
   const [error, setError] = useState("");
   const [editorState, setEditorState] = useState(null); // null closed, {} = add, {...workflow} = edit
+  // Found live: shown open by default, this competed for attention with
+  // the actual "Add Business" button right above it and its own
+  // "＋ Publish a Business"-style button read as a second, confusing way
+  // to add a business — most tenants never touch it (starts at 0
+  // templates and stays there). Collapsed by default, one explicit click
+  // away, so the primary Add Business flow is the only thing anyone sees
+  // unless they deliberately go looking for template reuse.
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   async function load() {
     try {
@@ -49,6 +57,9 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
           <span className="card-title">🏪 Manage Businesses <span className="count-badge">{list.length}</span></span>
           <button className="btn-primary" onClick={() => setEditorState({})}>＋ Add Business</button>
         </div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 12, marginTop: -8 }}>
+          Add any kind of business here — restaurant, gym, clinic, whatever you run. You're never limited to what's already listed below.
+        </div>
         {error && <div className="error-banner">{error}</div>}
         <div className="table-scroll">
           <table>
@@ -71,7 +82,17 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
         </div>
       </div>
 
-      <MarketplacePanel workflows={workflows} refreshKey={refreshKey} onInstalled={handleSaved} />
+      <div style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          className={"details-toggle" + (templatesOpen ? " open" : "")}
+          onClick={() => setTemplatesOpen((o) => !o)}
+        >
+          <span className="details-toggle-arrow">▸</span>
+          {templatesOpen ? "Hide reusable templates" : "Advanced: reuse a business as a template for new ones"}
+        </button>
+      </div>
+      {templatesOpen && <MarketplacePanel workflows={workflows} refreshKey={refreshKey} onInstalled={handleSaved} />}
 
       {editorState !== null && (
         <WorkflowEditorModal

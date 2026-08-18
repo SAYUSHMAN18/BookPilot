@@ -28,6 +28,32 @@ export default function AnalyticsPanel({ refreshKey, queryParams }) {
   if (error) return <div className="card"><div className="error-banner">{error}</div></div>;
   if (!data) return <div className="card"><div className="empty">Loading…</div></div>;
 
+  // Same reasoning as Bookings' CSV export — a small business owner needs
+  // this for records/reporting outside the app, and there was no way out
+  // before. Exports exactly the window currently selected (7/30/90 days).
+  function exportCsv() {
+    const escape = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [`Analytics — last ${days} days`, ""];
+    lines.push("Metric,Value");
+    lines.push(`${escape("No-show rate")},${escape(data.noShowRate === null ? "" : `${data.noShowRate}% of ${data.noShowSampleSize}`)}`);
+    lines.push(`${escape("Average rating")},${escape(data.avgRating === null ? "" : `${data.avgRating} from ${data.ratingSampleSize}`)}`);
+    lines.push(`${escape("Revenue collected")},${escape(data.paidBookingCount > 0 ? `₹${data.revenue} from ${data.paidBookingCount} bookings` : "")}`);
+    if (data.providers?.length) {
+      lines.push("");
+      lines.push(["Provider", "Total", "Arrived", "Cancelled"].map(escape).join(","));
+      data.providers.forEach((p) => lines.push([p.providerName, p.total, p.arrived, p.cancelled].map(escape).join(",")));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `analytics-${days}d-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="card">
       <div className="card-header">
@@ -37,6 +63,7 @@ export default function AnalyticsPanel({ refreshKey, queryParams }) {
           <option value={30}>Last 30 days</option>
           <option value={90}>Last 90 days</option>
         </select>
+        <button className="btn-secondary" disabled={data.total === 0} onClick={exportCsv}>⬇ Export CSV</button>
       </div>
 
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 14 }}>
