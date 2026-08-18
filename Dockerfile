@@ -57,11 +57,20 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # Backend source + static assets actually served (server.js references
-# each of these — see its express.static() calls). No workflows/ here —
-# that was the old auto-seeded demo catalog; it's a test fixture now
-# (tests/fixtures/workflows/), not something the running server reads.
+# each of these — see its express.static() calls).
 COPY server.js marketingServer.js ./
 COPY src/ ./src/
+
+# Found live (first real container deploy): despite this file's own
+# stale comment claiming "not something the running server reads",
+# ensureDemoTenant() (src/infra/demoTenant.js) DOES call
+# tenantWorkflowStore.seedDefaultsForTenant() on every boot — for the
+# public marketing site's live-chat demo tenant — which reads this exact
+# directory via loadWorkflows.js. Without it in the image, every boot
+# crashed with ENOENT before the server ever started listening. Small
+# (~28KB, 5 JSON files), so just include it rather than fork the demo
+# tenant onto a separate, duplicated content source.
+COPY tests/fixtures/workflows/ ./tests/fixtures/workflows/
 COPY public/marketing/ ./public/marketing/
 COPY --from=frontend-builder /build/public/app ./public/app
 
