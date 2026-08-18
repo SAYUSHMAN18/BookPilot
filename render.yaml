@@ -1,0 +1,84 @@
+# Render Blueprint — deploys BookPilot AI's two existing Docker-built
+# services (server.js, marketingServer.js — see Dockerfile) as two free
+# web services, and a free-tier Postgres alternative supplies DATABASE_URL
+# separately (see DEPLOY_FREE.md — Render's own free Postgres expires
+# after 30 days, so this intentionally does NOT declare a Render database;
+# a Neon/Supabase connection string is pasted in as a secret instead).
+#
+# Every secret-shaped var below is `sync: false` — Render then just shows
+# an empty field for it in the dashboard for a human to fill in by hand.
+# This file only exists so the two services, their build source (this
+# repo's Dockerfile), health checks, and the non-secret plumbing between
+# them don't have to be re-typed by hand in Render's UI one field at a
+# time. See DEPLOY_FREE.md for the exact walkthrough.
+services:
+  - type: web
+    name: bookpilot-dashboard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node server.js
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8081
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: ADMIN_BOOTSTRAP_PASSWORD
+        sync: false
+      - key: PLATFORM_ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: PLATFORM_ADMIN_BOOTSTRAP_PASSWORD
+        sync: false
+      # Filled in after both services have deployed once and Render has
+      # assigned their real *.onrender.com URLs — see DEPLOY_FREE.md.
+      - key: DASHBOARD_URL
+        sync: false
+      - key: MARKETING_URL
+        sync: false
+
+  - type: web
+    name: bookpilot-marketing
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node marketingServer.js
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MARKETING_PORT
+        value: 8082
+      - key: PORT
+        value: 8082
+      - key: TRUST_PROXY
+        value: "1"
+      # Same Postgres database as bookpilot-dashboard above — signup
+      # writes tenants that the dashboard service must see immediately.
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: DASHBOARD_URL
+        sync: false
+      - key: MARKETING_URL
+        sync: false
