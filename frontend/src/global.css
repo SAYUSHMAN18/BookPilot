@@ -174,8 +174,8 @@ input::placeholder, textarea::placeholder { color: var(--subtle); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 20px 22px;
-  margin-bottom: 18px;
+  padding: 24px 26px;
+  margin-bottom: 20px;
   animation: card-in .4s var(--ease) both;
 }
 @keyframes card-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -191,13 +191,28 @@ input::placeholder, textarea::placeholder { color: var(--subtle); }
 .card-title { font-family: var(--font-display); font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px; border-bottom: 1px solid var(--border); background: var(--card-2); position: sticky; top: 0; }
-td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { text-align: left; color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 13px 16px; border-bottom: 1px solid var(--border); background: var(--card-2); position: sticky; top: 0; }
+td { padding: 14px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tbody tr { transition: background .12s var(--ease); }
 tbody tr:hover { background: var(--profile-soft); }
 tbody tr:last-child td { border-bottom: none; }
 .table-scroll { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
 .table-scroll table { border-radius: var(--radius-sm); }
+
+/* Business identity cell (ManageBusinessesPanel) — an icon+label+id
+   grouping, same "colored icon box next to text" language as
+   .provider-avatar/.quick-link-icon elsewhere, instead of two bare plain-
+   text columns (Business ID, Label) that carried no visual hierarchy and
+   made the row read as a flat data dump rather than a real business. */
+.business-row-id { display: flex; align-items: center; gap: 11px; }
+.business-row-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  background: var(--profile-soft);
+}
+.business-row-label { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.business-row-slug { font-family: var(--font-mono); font-size: 11px; color: var(--subtle); margin-top: 1px; }
+.business-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .empty { color: var(--subtle); padding: 32px 0; text-align: center; font-size: 13px; }
 
@@ -213,6 +228,27 @@ tbody tr:last-child td { border-bottom: none; }
 .status-payment_pending { background: #fef3c7; color: #92400e; }
 
 .count-badge { background: var(--profile-soft); color: var(--profile); font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+
+/* AuditLogPanel — found live: the Action/Detail columns were bare text
+   and a raw JSON.stringify() dump ({"workflowId":"medical"}), the one
+   spot in the whole dashboard that reads as an unstyled database export
+   rather than a designed table. Action gets the same status-badge pill
+   language every other status column already uses (colored by what kind
+   of action it is — create/delete/update/session read very differently
+   at a glance); Detail becomes small key:value chips instead of raw JSON
+   syntax non-technical staff shouldn't have to parse. */
+.audit-action-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.audit-action-create { background: var(--success-soft); color: var(--success); }
+.audit-action-delete { background: var(--danger-soft); color: var(--danger); }
+.audit-action-update { background: #dbeafe; color: #1e40af; }
+.audit-action-session { background: var(--bg-2); color: var(--muted); }
+.audit-action-default { background: var(--profile-soft); color: var(--profile); }
+.audit-detail-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.audit-detail-chip {
+  font-family: var(--font-mono); font-size: 10.5px; background: var(--bg); color: var(--muted);
+  padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border); white-space: nowrap;
+}
+.audit-detail-chip b { color: var(--text); font-weight: 600; }
 
 .error-banner { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid #fecaca; font-size: 13px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
 .error-banner::before { content: "⚠️"; }
@@ -274,7 +310,7 @@ tbody tr:last-child td { border-bottom: none; }
 .role-toggle button.active { color: var(--text); }
 .role-slider { position: absolute; top: 3px; bottom: 3px; background: var(--card); border-radius: var(--radius-xs); box-shadow: var(--shadow-sm); transition: left .18s ease, width .18s ease; }
 
-.app-main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+.app-main { padding: 24px 28px; max-width: 1400px; margin: 0 auto; }
 
 /* New plan, Stream 4 — the multi-page dashboard's sidebar shell
    (DashboardLayout.jsx), replacing the old single sticky header. */
@@ -285,7 +321,7 @@ tbody tr:last-child td { border-bottom: none; }
    reads as a considered product surface, not a same-tone panel that
    blends into the page. */
 .sidebar {
-  width: 232px; flex-shrink: 0; background: linear-gradient(180deg, var(--ink) 0%, var(--ink-2) 100%);
+  width: 252px; flex-shrink: 0; background: linear-gradient(180deg, var(--ink) 0%, var(--ink-2) 100%);
   border-right: 1px solid var(--ink-border); position: relative; overflow: hidden;
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; box-shadow: 4px 0 24px rgba(0,0,0,0.12);
 }
@@ -526,6 +562,30 @@ tbody tr:last-child td { border-bottom: none; }
 
 .filters-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 
+/* AnalyticsPanel's per-category bar rows (popular slots, busiest weekdays)
+   — found live: these were a raw flat-color div bar with no hover state
+   and hardcoded hex colors that never adapted to dark mode (var(--spark)/
+   var(--profile) do). Pill-shaped track + gradient fill matches the
+   pill/gradient language already used everywhere else (chips, badges,
+   .btn-primary); the row-level hover highlight plus a title tooltip on
+   the fill (set inline where rendered) is this component's whole
+   "interactive" surface — a bare bar list has nothing else worth
+   hovering. */
+.chart-bar-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: var(--radius-xs); transition: background .15s var(--ease); }
+.chart-bar-row:hover { background: var(--bg); }
+.chart-bar-row:hover .chart-bar-label { color: var(--text); }
+.chart-bar-label { width: 58px; flex-shrink: 0; font-size: 12px; color: var(--muted); font-weight: 600; transition: color .15s var(--ease); }
+.chart-bar-track { flex: 1; background: var(--bg); border-radius: 999px; height: 11px; overflow: hidden; }
+.chart-bar-fill { height: 100%; border-radius: 999px; transition: width .5s var(--ease); background: linear-gradient(90deg, var(--profile), var(--profile-2)); }
+.chart-bar-fill.spark { background: linear-gradient(90deg, var(--spark), var(--spark-2)); }
+.chart-bar-value { width: 26px; flex-shrink: 0; font-size: 12px; font-weight: 700; text-align: right; color: var(--text); font-family: var(--font-mono); }
+
+/* A metric with no numeric data yet (e.g. no ratings, no payments) — a
+   dashed placeholder instead of leaving a stat-tile visually identical to
+   one that's just genuinely zero, which reads as broken/loading rather
+   than "nothing here yet". */
+.stat-tile-empty { color: var(--subtle); font-size: 12px; padding-top: 2px; }
+
 /* Item 4 — added for the workflow editor + marketplace modals ported from
    the classic dashboard (public/dashboard.html never had these as
    reusable classes either — inline-styled there); real shared classes
@@ -562,6 +622,61 @@ tbody tr:last-child td { border-bottom: none; }
   .modal-overlay { padding: 0; align-items: stretch; }
   .modal-card-lg { max-width: none; min-height: 100vh; border-radius: 0; }
 }
+/* Found live: AddProviderModal/AddRoomModal ("+ Provider"/"+ Room" from
+   Manage Businesses) were just a bare card-title + stacked inputs — every
+   other modal here (WorkflowEditorModal's provider-card, the AI-generate
+   box) has real visual structure; these two didn't, and reads as an
+   afterthought next to them. A reusable header (icon badge + two-line
+   title) and a live preview chip give these the same "designed" feel
+   without a bespoke one-off for each. */
+.modal-icon-header { display: flex; align-items: center; gap: 13px; margin-bottom: 2px; }
+.modal-icon-badge {
+  width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; font-size: 19px;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: linear-gradient(135deg, var(--profile), var(--profile-2));
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.32);
+}
+.modal-icon-badge.hotel { background: linear-gradient(135deg, #0891b2, #22d3ee); box-shadow: 0 4px 14px rgba(8, 145, 178, 0.32); }
+.modal-title-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.modal-title-main { font-family: var(--font-display); font-size: 16.5px; font-weight: 800; letter-spacing: -.01em; color: var(--text); }
+.modal-title-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-close-btn {
+  margin-left: auto; width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; background: transparent;
+  border: none; color: var(--muted); font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.modal-close-btn:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* Sections within a modal body — replaces the old flat gap:12 stack of
+   inputs with real breathing room and a divider before the trailing
+   optional/advanced bits, so the form reads as grouped steps, not a
+   dumped field list. */
+.modal-section { display: flex; flex-direction: column; gap: 13px; padding: 2px 2px 4px; }
+.modal-section + .modal-section { padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* A live "here's what you're adding" preview — mirrors provider-avatar's
+   gradient-circle language instead of leaving the form as pure data
+   entry with no sense of the result until after saving. */
+.modal-preview-card {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--card-2); border: 1px dashed var(--border-strong);
+}
+.modal-preview-icon {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; font-size: 17px;
+  display: flex; align-items: center; justify-content: center; background: var(--profile-soft); color: var(--profile);
+  overflow: hidden;
+}
+.modal-preview-icon img { width: 100%; height: 100%; object-fit: cover; }
+.modal-preview-body { min-width: 0; }
+.modal-preview-name { font-weight: 700; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-preview-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* "Adding to <business>" — a chip instead of a plain muted text line,
+   consistent with .count-badge/.suggestion-chip's pill language elsewhere. */
+.modal-target-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
+  background: var(--profile-soft); color: var(--profile); font-size: 12px; font-weight: 700; width: fit-content;
+}
+
 .form-label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 4px; }
 .form-input, .form-select, .form-textarea {
   width: 100%; font-family: inherit; font-size: 13px; padding: 8px 11px;

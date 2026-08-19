@@ -68,17 +68,31 @@ export default function AddProviderModal({ workflow, onClose, onSaved }) {
     }
   }
 
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-card">
-        <div className="card-header" style={{ marginBottom: 0 }}>
-          <span className="card-title">＋ Add Provider to {workflow.label}</span>
-          <button className="btn-link" style={{ fontSize: 20, fontWeight: "bold" }} onClick={onClose}>×</button>
+        <div className="modal-icon-header">
+          <div className="modal-icon-badge">🧑‍💼</div>
+          <div className="modal-title-group">
+            <span className="modal-title-main">Add a provider</span>
+            <span className="modal-title-sub">A new team member for {workflow.label}</span>
+          </div>
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         {error && <div className="error-banner">{error}</div>}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
+        <div className="modal-preview-card">
+          <div className="modal-preview-icon">{photo ? <img src={photo} alt="" /> : initials}</div>
+          <div className="modal-preview-body">
+            <div className="modal-preview-name">{name.trim() || "Provider name"}</div>
+            <div className="modal-preview-sub">{attribute.trim() || "Role / specialty"} · ₹{fee || 0}</div>
+          </div>
+        </div>
+
+        <div className="modal-section">
           <div>
             <label className="form-label">Name</label>
             <input className="form-input" placeholder="e.g. Dr. Meera Iyer" value={name} onChange={(e) => setName(e.target.value)} />
@@ -91,7 +105,9 @@ export default function AddProviderModal({ workflow, onClose, onSaved }) {
             <label className="form-label">Fee (₹)</label>
             <NumberStepperInput prefix="₹" step={50} min={0} value={fee} onChange={(next) => setFee(next === "" ? "" : next)} />
           </div>
+        </div>
 
+        <div className="modal-section">
           <button
             type="button"
             className={"details-toggle" + (detailsOpen ? " open" : "")}
@@ -127,7 +143,7 @@ export default function AddProviderModal({ workflow, onClose, onSaved }) {
           )}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn-primary" disabled={saving} onClick={handleSave}>{saving ? "Adding…" : "Add Provider"}</button>
         </div>

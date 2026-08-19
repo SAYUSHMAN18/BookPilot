@@ -3,6 +3,7 @@ import { useOutletContext, Link } from "react-router-dom";
 import { get } from "../lib/api";
 import SetupChecklistPanel from "../components/SetupChecklistPanel";
 import { IconCalendar, IconClock, IconTrendUp, IconMessage, IconCheckCircle, IconXCircle, IconBuilding } from "../components/Icons";
+import AnimatedNumber from "../components/AnimatedNumber";
 
 const QUICK_LINKS = [
   { to: "/bookings", Icon: IconCalendar, label: "Bookings", hint: "Every booking, filterable and searchable" },
@@ -55,11 +56,11 @@ export default function OverviewPage() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="stat-bar">
-        <div className="stat-tile"><div className="stat-tile-icon"><IconCalendar /></div><div className="n">{stats.total}</div><div className="l">Total bookings</div></div>
-        <div className="stat-tile"><div className="stat-tile-icon"><IconClock /></div><div className="n">{stats.today}</div><div className="l">Today</div></div>
-        <div className="stat-tile"><div className="stat-tile-icon good"><IconCheckCircle /></div><div className="n">{stats.arrived}</div><div className="l">Arrived</div></div>
-        <div className="stat-tile"><div className="stat-tile-icon bad"><IconXCircle /></div><div className="n">{stats.cancelled}</div><div className="l">Cancelled</div></div>
-        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconBuilding /></div><div className="n">{providers.length}</div><div className="l">Businesses</div></div>}
+        <div className="stat-tile"><div className="stat-tile-icon"><IconCalendar /></div><div className="n"><AnimatedNumber value={stats.total} /></div><div className="l">Total bookings</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon"><IconClock /></div><div className="n"><AnimatedNumber value={stats.today} /></div><div className="l">Today</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon good"><IconCheckCircle /></div><div className="n"><AnimatedNumber value={stats.arrived} /></div><div className="l">Arrived</div></div>
+        <div className="stat-tile"><div className="stat-tile-icon bad"><IconXCircle /></div><div className="n"><AnimatedNumber value={stats.cancelled} /></div><div className="l">Cancelled</div></div>
+        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconBuilding /></div><div className="n"><AnimatedNumber value={providers.length} /></div><div className="l">Businesses</div></div>}
       </div>
 
       <div className="card">

@@ -1,17 +1,27 @@
 import { useEffect, useState } from "react";
 import { get } from "../lib/api";
+import { IconCalendar, IconClock, IconCard, IconXCircle, IconTrendUp } from "./Icons";
+import AnimatedNumber from "./AnimatedNumber";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function BarRow({ label, count, max, color }) {
-  const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+// Found live (redesign pass): this used to be a flat-color div bar with
+// hardcoded hex (#0891b2/#a855f7) that never adapted to dark mode — now
+// pulls from the same --profile/--spark tokens every gradient elsewhere in
+// the app uses, so it stays consistent across light/dark instead of being
+// the one chart that doesn't. `tone` picks which gradient (kept as a prop,
+// not two copy-pasted components) so the two charts on this page read as
+// visually distinct series, matching how Overview already color-codes its
+// own stat tiles by meaning (good/bad) rather than arbitrarily.
+function BarRow({ label, count, max, tone }) {
+  const pct = max > 0 ? Math.max(Math.round((count / max) * 100), count ? 4 : 0) : 0;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-      <div style={{ width: 60, fontSize: 12, color: "var(--muted)" }}>{label}</div>
-      <div style={{ flex: 1, background: "var(--bg)", borderRadius: 4, height: 10, overflow: "hidden" }}>
-        <div style={{ width: `${Math.max(pct, count ? 3 : 0)}%`, height: "100%", background: color }} />
+    <div className="chart-bar-row">
+      <div className="chart-bar-label">{label}</div>
+      <div className="chart-bar-track">
+        <div className={"chart-bar-fill" + (tone === "spark" ? " spark" : "")} style={{ width: `${pct}%` }} title={`${label}: ${count}`} />
       </div>
-      <div style={{ width: 24, fontSize: 12, textAlign: "right" }}>{count}</div>
+      <div className="chart-bar-value">{count}</div>
     </div>
   );
 }
@@ -55,62 +65,77 @@ export default function AnalyticsPanel({ refreshKey, queryParams }) {
   }
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-title">📈 Analytics</span>
-        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
-        </select>
-        <button className="btn-secondary" disabled={data.total === 0} onClick={exportCsv}>⬇ Export CSV</button>
-      </div>
-
-      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 14 }}>
-        Reply time — p50 {data.responseTime?.p50 ?? "—"}ms, p95 {data.responseTime?.p95 ?? "—"}ms, max {data.responseTime?.max ?? "—"}ms ({data.responseTime?.sampleSize ?? 0} samples since last restart)
-      </div>
-
-      {data.total === 0 ? (
-        <div className="empty">No bookings yet — analytics appear here as bookings come in.</div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 22 }}>
-          <div>
-            <div className="section-label">Most-booked slots</div>
-            {data.popularSlots.length
-              ? data.popularSlots.map((s) => <BarRow key={s.time} label={s.time} count={s.count} max={Math.max(...data.popularSlots.map((x) => x.count), 1)} color="#0891b2" />)
-              : <div className="empty" style={{ padding: "12px 0" }}>No time-slot data (hotel stays don't use slots).</div>}
-          </div>
-          <div>
-            <div className="section-label">Busiest weekdays</div>
-            {data.weekdayCounts.map((c, i) => <BarRow key={i} label={WEEKDAY_NAMES[i]} count={c} max={Math.max(...data.weekdayCounts, 1)} color="#a855f7" />)}
-          </div>
-          <div>
-            <div className="section-label">No-show rate</div>
-            {data.noShowRate === null
-              ? <span style={{ fontSize: 12, color: "var(--muted)" }}>No past appointments yet</span>
-              : <><span style={{ fontSize: 22, fontWeight: 700, color: data.noShowRate > 25 ? "var(--danger)" : "var(--success)" }}>{data.noShowRate}%</span>
-                 <span style={{ fontSize: 11, color: "var(--muted)" }}> of {data.noShowSampleSize} past</span></>}
-          </div>
-          <div>
-            <div className="section-label">Average rating</div>
-            {data.avgRating === null
-              ? <span style={{ fontSize: 12, color: "var(--muted)" }}>No feedback yet</span>
-              : <><span style={{ fontSize: 22, fontWeight: 700, color: "#d97706" }}>⭐ {data.avgRating}</span>
-                 <span style={{ fontSize: 11, color: "var(--muted)" }}> from {data.ratingSampleSize} rating{data.ratingSampleSize === 1 ? "" : "s"}</span></>}
-          </div>
-          <div>
-            <div className="section-label">Revenue collected</div>
-            {data.paidBookingCount > 0
-              ? <><span style={{ fontSize: 22, fontWeight: 700, color: "var(--success)" }}>₹{data.revenue.toLocaleString("en-IN")}</span>
-                 <span style={{ fontSize: 11, color: "var(--muted)" }}> from {data.paidBookingCount} paid booking{data.paidBookingCount === 1 ? "" : "s"}</span></>
-              : <span style={{ fontSize: 12, color: "var(--muted)" }}>No payments collected yet</span>}
-          </div>
+    <>
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">📈 Analytics</span>
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+          <button className="btn-secondary" disabled={data.total === 0} onClick={exportCsv}>⬇ Export CSV</button>
         </div>
-      )}
+
+        {data.total === 0 ? (
+          <div className="empty">No bookings yet — analytics appear here as bookings come in.</div>
+        ) : (
+          <>
+            {/* Headline numbers as real stat tiles — same component
+                OverviewPage's own stat-bar uses, so this reads as one
+                consistent dashboard rather than Analytics being the one
+                page still doing plain-text metrics. */}
+            <div className="stat-bar">
+              <div className="stat-tile">
+                <div className="stat-tile-icon"><IconCalendar /></div>
+                <div className="n"><AnimatedNumber value={data.total} /></div>
+                <div className="l">Bookings ({days}d)</div>
+              </div>
+              <div className="stat-tile">
+                <div className={"stat-tile-icon" + (data.noShowRate === null ? "" : data.noShowRate > 25 ? " bad" : " good")}><IconXCircle /></div>
+                {data.noShowRate === null
+                  ? <div className="stat-tile-empty">No past appointments yet</div>
+                  : <><div className="n"><AnimatedNumber value={data.noShowRate} format={(n) => `${n}%`} /></div><div className="l">No-shows · {data.noShowSampleSize} past</div></>}
+              </div>
+              <div className="stat-tile">
+                <div className="stat-tile-icon good"><IconTrendUp /></div>
+                {data.avgRating === null
+                  ? <div className="stat-tile-empty">No feedback yet</div>
+                  : <><div className="n">⭐ {data.avgRating}</div><div className="l">{data.ratingSampleSize} rating{data.ratingSampleSize === 1 ? "" : "s"}</div></>}
+              </div>
+              <div className="stat-tile">
+                <div className="stat-tile-icon good"><IconCard /></div>
+                {data.paidBookingCount > 0
+                  ? <><div className="n"><AnimatedNumber value={data.revenue} format={(n) => `₹${n.toLocaleString("en-IN")}`} /></div><div className="l">{data.paidBookingCount} paid booking{data.paidBookingCount === 1 ? "" : "s"}</div></>
+                  : <div className="stat-tile-empty">No payments collected yet</div>}
+              </div>
+              <div className="stat-tile">
+                <div className="stat-tile-icon"><IconClock /></div>
+                {data.responseTime?.sampleSize
+                  ? <><div className="n"><AnimatedNumber value={data.responseTime.p50} format={(n) => `${n}ms`} /></div><div className="l">p50 reply · {data.responseTime.sampleSize} since restart</div></>
+                  : <div className="stat-tile-empty">No samples since last restart</div>}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 22, marginTop: 4 }}>
+              <div>
+                <div className="section-label">Most-booked slots</div>
+                {data.popularSlots.length
+                  ? data.popularSlots.map((s) => <BarRow key={s.time} label={s.time} count={s.count} max={Math.max(...data.popularSlots.map((x) => x.count), 1)} tone="spark" />)
+                  : <div className="empty" style={{ padding: "12px 0" }}>No time-slot data (hotel stays don't use slots).</div>}
+              </div>
+              <div>
+                <div className="section-label">Busiest weekdays</div>
+                {data.weekdayCounts.map((c, i) => <BarRow key={i} label={WEEKDAY_NAMES[i]} count={c} max={Math.max(...data.weekdayCounts, 1)} tone="profile" />)}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {data.providers?.length > 1 && (
-        <div style={{ marginTop: 18 }}>
-          <div className="section-label">Provider performance</div>
+        <div className="card">
+          <div className="card-header"><span className="card-title">Provider performance</span></div>
           <div className="table-scroll">
             <table>
               <thead><tr><th>Provider</th><th>Total</th><th>Arrived</th><th>Cancelled</th></tr></thead>
@@ -121,6 +146,6 @@ export default function AnalyticsPanel({ refreshKey, queryParams }) {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

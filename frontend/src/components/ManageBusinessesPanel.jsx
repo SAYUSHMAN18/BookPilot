@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { get, del } from "../lib/api";
 import WorkflowEditorModal from "./WorkflowEditorModal";
 import AddProviderModal from "./AddProviderModal";
+import AddRoomModal from "./AddRoomModal";
 import MarketplacePanel from "./MarketplacePanel";
 
 // Item 4 — was deliberately read-only ("add/edit a business's steps and
@@ -22,6 +23,12 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
   // nested rooms are a different shape WorkflowEditorModal itself doesn't
   // have a structured editor for either — Edit -> raw JSON still covers it.
   const [addProviderTarget, setAddProviderTarget] = useState(null);
+  // hotels[]-shaped businesses have their own nested rooms[] per hotel
+  // location — a different shape from providers[] that AddProviderModal
+  // doesn't handle (see its own comment). Found live: this meant a hotel
+  // business had NO quick-add at all, only "Edit" -> raw JSON, while every
+  // other business type got a one-click "+ Add Provider".
+  const [addRoomTarget, setAddRoomTarget] = useState(null);
   // Found live: shown open by default, this competed for attention with
   // the actual "Add Business" button right above it and its own
   // "＋ Publish a Business"-style button read as a second, confusing way
@@ -65,29 +72,45 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
           <span className="card-title">🏪 Manage Businesses <span className="count-badge">{list.length}</span></span>
           <button className="btn-primary" onClick={() => setEditorState({})}>＋ Add Business</button>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 12, marginTop: -8 }}>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 14, marginTop: -8 }}>
           Add any kind of business here — restaurant, gym, clinic, whatever you run. You're never limited to what's already listed below.
         </div>
         {error && <div className="error-banner">{error}</div>}
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Business ID</th><th>Label</th><th>Description</th><th>Type/Providers</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Business</th><th>Description</th><th>Providers</th><th>Actions</th></tr></thead>
             <tbody>
-              {list.map((w) => (
-                <tr key={w.id}>
-                  <td>{w.id}</td>
-                  <td>{w.label}</td>
-                  <td style={{ whiteSpace: "normal", maxWidth: 320 }}>{w.description}</td>
-                  <td>{(w.providers?.length || 0) + (w.hotels?.reduce((n, h) => n + (h.rooms?.length || 0), 0) || 0)}</td>
-                  <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {w.providers && (
-                      <button className="btn-secondary" onClick={() => setAddProviderTarget(w)}>＋ Add Provider</button>
-                    )}
-                    <button className="btn-secondary" onClick={() => setEditorState(w)}>Edit</button>
-                    <button className="btn-danger" onClick={() => handleDelete(w.id)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
+              {list.map((w) => {
+                const isHotel = !!w.hotels?.length;
+                const count = (w.providers?.length || 0) + (w.hotels?.reduce((n, h) => n + (h.rooms?.length || 0), 0) || 0);
+                return (
+                  <tr key={w.id}>
+                    <td>
+                      <div className="business-row-id">
+                        <span className="business-row-icon">{isHotel ? "🏨" : "🏢"}</span>
+                        <div>
+                          <div className="business-row-label">{w.label}</div>
+                          <div className="business-row-slug">{w.id}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ whiteSpace: "normal", maxWidth: 320, color: "var(--muted)" }}>{w.description}</td>
+                    <td><span className="count-badge">{count}</span></td>
+                    <td>
+                      <div className="business-row-actions">
+                        {w.providers && (
+                          <button className="btn-secondary" onClick={() => setAddProviderTarget(w)}>＋ Provider</button>
+                        )}
+                        {isHotel && (
+                          <button className="btn-secondary" onClick={() => setAddRoomTarget(w)}>＋ Room</button>
+                        )}
+                        <button className="btn-secondary" onClick={() => setEditorState(w)}>Edit</button>
+                        <button className="btn-danger" onClick={() => handleDelete(w.id)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -120,6 +143,14 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
           workflow={addProviderTarget}
           onClose={() => setAddProviderTarget(null)}
           onSaved={() => { setAddProviderTarget(null); load(); bump?.(); }}
+        />
+      )}
+
+      {addRoomTarget && (
+        <AddRoomModal
+          workflow={addRoomTarget}
+          onClose={() => setAddRoomTarget(null)}
+          onSaved={() => { setAddRoomTarget(null); load(); bump?.(); }}
         />
       )}
     </>
