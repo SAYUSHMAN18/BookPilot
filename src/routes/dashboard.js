@@ -92,6 +92,15 @@ async function listAllProviders(tenantId) {
 router.get("/dashboard", (req, res) => {
   res.redirect(302, "/app");
 });
+// Found live: the bare domain root had no route at all, so a visitor who
+// just typed/bookmarked the plain URL (a completely normal thing to do —
+// this is the dashboard's own domain, not a deep link) fell through to the
+// generic catch-all and saw a raw {"error":"Not found"} JSON blob instead
+// of the dashboard. Same redirect-to-the-real-thing pattern as /dashboard
+// above, just for the other natural entry point.
+router.get("/", (req, res) => {
+  res.redirect(302, "/app");
+});
 router.use("/app", express.static(path.join(__dirname, "..", "..", "public", "app")));
 // New plan, Stream 4 — the React app now has a real client-side router
 // (react-router-dom), so a hard refresh/direct link on any sub-route
