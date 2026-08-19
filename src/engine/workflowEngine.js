@@ -2367,9 +2367,33 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
   }
 
   if (plan.action === ACTIONS.HUMAN) {
+    // Found live (testing pass): this used to just decline and re-show the
+    // current step, every single time, with nothing logged anywhere for a
+    // provider to see — a customer clearly and repeatedly asking for a
+    // person mid-booking got no better outcome than one who never asked at
+    // all. The DETECTING-stage COMPLAINT branch already solved exactly this
+    // problem (2-attempt threshold, then a real support_requests row) —
+    // reusing the same session.supportAttempts counter and the same
+    // supportRequests.create() call here, rather than a second parallel
+    // escalation system, so "asked for a human twice" is true regardless of
+    // which stage of the conversation they asked from.
+    session.supportAttempts = (session.supportAttempts || 0) + 1;
+    if (session.supportAttempts < 2) {
+      await sendWhatsAppText(tenantId, waId,
+        "I'm an automated booking assistant, so I can't transfer you to a person — but I can finish this booking for you. " +
+        'If you\'d rather not continue, reply "cancel".'
+      );
+      await sendStepPrompt(tenantId, waId, workflow, currentStep(workflow, session), session);
+      return true;
+    }
+
+    await supportRequests.create(tenantId, waId, workflow.id, trimmed);
+    log("INFO", `Support request logged for ${waId} (workflow=${workflow.id}): "${trimmed}"`);
+    dashboardEvents.publish(tenantId, "support_request.created", { workflowId: workflow.id, waId, message: trimmed });
+    const contactLine = workflow.supportContact ? ` You can also reach us directly at ${workflow.supportContact}.` : "";
     await sendWhatsAppText(tenantId, waId,
-      "I'm an automated booking assistant, so I can't transfer you to a person — but I can finish this booking for you. " +
-      'If you\'d rather not continue, reply "cancel".'
+      `I'm an automated assistant and can't connect you to a person directly here, but I've flagged this for the team to follow up.${contactLine} ` +
+      "In the meantime I can still finish this booking for you — or reply \"cancel\" if you'd rather not continue."
     );
     await sendStepPrompt(tenantId, waId, workflow, currentStep(workflow, session), session);
     return true;
