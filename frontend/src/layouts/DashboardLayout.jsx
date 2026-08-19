@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { IconGrid, IconCalendar, IconClock, IconUsers, IconBuilding, IconTrendUp, IconMessage, IconCard, IconSliders, IconLogout, IconPlane } from "../components/Icons";
+import ThemeToggle from "../components/ThemeToggle";
 
 const NAV_ITEMS = [
   { to: "/", label: "Overview", Icon: IconGrid, end: true },
@@ -73,6 +74,7 @@ export default function DashboardLayout({ user, providers, refreshKey, bump, con
             </div>
             <button className="sidebar-logout" title="Log out" onClick={logout}><IconLogout /></button>
           </div>
+          <ThemeToggle />
         </div>
       </aside>
       <main className="app-main app-main-sidebar">

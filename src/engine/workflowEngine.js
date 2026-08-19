@@ -25,6 +25,7 @@ const { detectGeneralIntent, INTENTS, isExplicitComplaint, isBotIdentityQuestion
 const { groqChatCompletion, GROQ_MODEL } = require("../ai/groqClient");
 const { translateText, LANG_CODE_MAP } = require("../ai/translate");
 const supportRequests = require("../store/supportRequestStore");
+const billing = require("./billing");
 const { computeQueuePosition, isOptedOutOfAlerts, setAlertsOptedOut } = require("../store/queueStore");
 const feedbackStore = require("../store/feedbackStore");
 const paymentStore = require("../store/paymentStore");
@@ -399,12 +400,23 @@ function t(session, text) {
 // would have. Showing six extra rows next to the real business list read
 // as a rigid IVR menu, which undercuts the "AI assistant" positioning the
 // bot is actually going for; the prompt text below now says so directly.
-async function sendBusinessMenu(tenantId, waId, workflows, session) {
+// `greet` is true only when this menu is a direct reply to an actual
+// greeting ("hi", "hello", ...) — see handleDetecting's isGreeting branch.
+// Every other call site (RESTART, the "I don't have an answer for that"
+// fallback, etc.) leaves it false: the menu itself is still the right
+// thing to show there, but prefacing it with "Hi there! 👋" every time
+// would read as the bot re-introducing itself mid-conversation. Found
+// live (testing pass): before this, even a literal "Hi" got no
+// acknowledgment at all — the customer's first message was answered with
+// pure business logic ("What would you like to book today?"), never
+// actually greeted back.
+async function sendBusinessMenu(tenantId, waId, workflows, session, greet = false) {
   const isHindi = session?.lang === "hi";
 
-  const promptText = isHindi
+  const greeting = greet ? (isHindi ? "नमस्ते! 👋 " : "Hi there! 👋 ") : "";
+  const promptText = greeting + (isHindi
     ? "आज आप क्या बुक करना चाहेंगे? नीचे से चुनें, या मुझे बस बताएं — जैसे 'मेरी बुकिंग', 'कॉल बैक चाहिए', या कोई सवाल।"
-    : "What would you like to book today? Choose below, or just tell me what you need — e.g. \"my booking\", \"call me back\", or ask me anything.";
+    : "What would you like to book today? Choose below, or just tell me what you need — e.g. \"my booking\", \"call me back\", or ask me anything.");
   const chooseTitle = isHindi ? "चुनें" : "Choose";
   const servicesTitle = isHindi ? "🏥 सेवाएं (Services)" : "🏥 Booking Services";
 
@@ -1229,10 +1241,19 @@ function generateBookingId(workflow, session) {
 // convention as fee/address (per-provider always wins when set). Returns
 // null when payment isn't required, so every call site can just check
 // truthiness rather than a separate boolean.
-function resolvePaymentRequirement(workflow, session) {
+//
+// Plan-gated (billing pass, found live): a Starter-plan tenant configuring
+// requiresPayment used to work identically to Growth/Enterprise — the
+// marketing site's own pricing claims "Payments & deposits" as Growth-only,
+// so this makes that real. Degrades the exact same way an unconfigured
+// Razorpay key already does (README, Section 9): the booking still
+// completes normally, just without collecting a deposit — never blocking
+// a real customer over the OPERATOR's plan choice.
+async function resolvePaymentRequirement(tenantId, workflow, session) {
   const provider = session.selectedProvider;
   const requiresPayment = provider?.requiresPayment ?? workflow.requiresPayment;
   if (!requiresPayment) return null;
+  if (!(await billing.tenantHasFeature(tenantId, "payments"))) return null;
 
   const depositType = provider?.depositType ?? workflow.depositType ?? "fixed";
   const depositAmountConfig = provider?.depositAmount ?? workflow.depositAmount;
@@ -1428,7 +1449,7 @@ async function finalizeBooking(tenantId, waId, session, workflow) {
   session.bookingId = generateBookingId(workflow, session);
   session.bookingCode = Math.random().toString(36).slice(2, 6).toUpperCase();
 
-  const paymentRequirement = resolvePaymentRequirement(workflow, session);
+  const paymentRequirement = await resolvePaymentRequirement(tenantId, workflow, session);
   let createdBooking;
   try {
     createdBooking = await recordBooking(tenantId, waId, workflow, session, paymentRequirement ? "payment_pending" : "booked");
@@ -1950,7 +1971,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
       await sendWhatsAppText(tenantId, waId, msg);
     } else {
       session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows, session);
+      await sendBusinessMenu(tenantId, waId, workflows, session, true);
     }
 
     return;
@@ -1975,7 +1996,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
       await sendWhatsAppText(tenantId, waId, msg);
     } else {
       session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows, session);
+      await sendBusinessMenu(tenantId, waId, workflows, session, true);
     }
 
     return;

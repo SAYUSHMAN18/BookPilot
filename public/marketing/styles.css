@@ -23,6 +23,49 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Requested directly: a real dark/light toggle for the marketing site,
+   with a switch "at the bottom" of every page (footer-bottom on index.html,
+   a fixed control on the simpler auth pages) — see theme.js, the one
+   shared script every marketing page loads that sets data-theme on <html>
+   before first paint (no FOUC) and wires the toggle button once the DOM
+   is ready. `light` is the explicit default, same reasoning as the
+   dashboard's own toggle: don't silently change the existing look based
+   on the visitor's OS setting, only on their own explicit choice. */
+:root[data-theme="dark"] {
+  --ink: #f1f1f6;
+  --ink-soft: #c3c3d6;
+  --muted: #9a9ab3;
+  --bg: #0b0b12;
+  --card: #16161f;
+  --border: #262633;
+  --brand: #8b7ff5;
+  --brand-light: #a78bfa;
+  --brand-dark: #c4b8ff;
+  --accent: #fb923c;
+  --success: #4ade80;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* A handful of soft-purple accents were hardcoded hex rather than tokens
+   (icon badges, hover states, the eyebrow pill, card hover borders) —
+   fine on the light page they were designed for, but a flat light-purple
+   patch on a dark page. Overridden here rather than at each of their own
+   definitions, to keep this dark-mode patch in one place. Deliberately
+   NOT touching .bubble/.wa-input-row (the WhatsApp chat mockup) — those
+   are simulating a real WhatsApp screen and should keep looking like one
+   regardless of the site's own theme. */
+:root[data-theme="dark"] .btn-outline:hover,
+:root[data-theme="dark"] .nav-mobile a:hover { background: rgba(139, 127, 245, 0.14); }
+:root[data-theme="dark"] .eyebrow,
+:root[data-theme="dark"] .industry-pill { background: rgba(139, 127, 245, 0.14); border-color: rgba(139, 127, 245, 0.35); }
+:root[data-theme="dark"] .problem-card:hover,
+:root[data-theme="dark"] .feature-card:hover { border-color: rgba(139, 127, 245, 0.4); }
+:root[data-theme="dark"] .feature-icon,
+:root[data-theme="dark"] .how-num { background: rgba(139, 127, 245, 0.14); }
+:root[data-theme="dark"] .price-featured { background: linear-gradient(160deg, var(--card), rgba(139, 127, 245, 0.1)); border-color: rgba(139, 127, 245, 0.35); }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 
@@ -444,7 +487,12 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .final-cta .btn-primary:hover { box-shadow: 0 18px 38px rgba(0,0,0,0.25); }
 
 /* ================= FOOTER ================= */
-.footer { background: var(--ink); color: #c9cbe0; padding: 70px 0 24px; }
+/* Fixed dark background, not var(--ink) — --ink is also this file's TEXT
+   color token, which correctly flips light in dark mode. Reusing it as a
+   background here would make the footer render near-white-on-white once
+   dark mode is on. The footer stays dark in both themes on purpose (a
+   common pattern, and simpler than building a genuine light footer too). */
+.footer { background: #0b0e1a; color: #c9cbe0; padding: 70px 0 24px; }
 .footer-inner { max-width: 1160px; margin: 0 auto; padding: 0 32px; display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 32px; }
 .footer-brand p { margin-top: 10px; font-size: 13.5px; color: #8a8db0; max-width: 260px; }
 .footer .brand { color: #fff; }
@@ -453,6 +501,23 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .footer-col a:hover { color: #fff; }
 .footer-bottom {
   max-width: 1160px; margin: 50px auto 0; padding: 20px 32px 0; border-top: 1px solid rgba(255,255,255,0.08);
-  font-size: 12.5px; color: #6d7093; text-align: center;
+  font-size: 12.5px; color: #6d7093;
+  display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap;
 }
 @media (max-width: 700px) { .footer-inner { grid-template-columns: 1fr 1fr; } }
+
+/* The theme toggle — footer-bottom on index.html, a standalone control
+   near the bottom of the simpler auth pages (signup, plan-selection).
+   Styled against a fixed dark surface (matches .footer above, and the
+   auth pages' own permanently-dark treatment — see auth.css) rather than
+   the toggling --card/--border tokens, since this control needs to stay
+   legible in both the "about to switch to dark" and "about to switch to
+   light" states, not just whichever one is currently active. */
+.theme-toggle-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #c9cbe0;
+  font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease);
+}
+.theme-toggle-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: #fff; }
+.theme-toggle-icon { font-size: 13px; line-height: 1; }

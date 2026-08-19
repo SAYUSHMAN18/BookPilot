@@ -23,6 +23,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/marketing/styles.css" />
+  <!-- External file (not inline) — this server's CSP is script-src 'self'
+       with no 'unsafe-inline', so an inline <script> would be silently
+       blocked. Loaded in <head>, before <body>, so a stored dark-theme
+       choice applies before first paint. -->
+  <script src="/marketing/theme.js"></script>
 </head>
 <body>
 
@@ -361,11 +366,13 @@
         <div class="price-card" data-reveal>
           <div class="price-name">Starter</div>
           <div class="price-amount">Free</div>
-          <div class="price-desc">For a single provider getting started</div>
+          <div class="price-desc">Try the real thing before you commit</div>
           <ul class="price-features">
             <li>1 WhatsApp number</li>
-            <li>Up to 100 bookings/mo</li>
+            <li>Up to 30 bookings/mo</li>
             <li>Core AI booking flow</li>
+            <li>Up to 2 team logins</li>
+            <li>Analytics &amp; CSV export</li>
             <li>Email support</li>
           </ul>
           <a href="/signup" class="btn btn-outline btn-full">Start free</a>
@@ -379,8 +386,9 @@
             <li>Everything in Starter</li>
             <li>Unlimited bookings</li>
             <li>Voice notes &amp; multilingual AI</li>
-            <li>Payments &amp; deposits</li>
-            <li>Calendar sync</li>
+            <li>Online payments &amp; deposits</li>
+            <li>Google Calendar sync</li>
+            <li>Up to 10 team logins</li>
             <li>Priority support</li>
           </ul>
           <a href="/signup" class="btn btn-primary btn-full">Start free trial</a>
@@ -388,12 +396,13 @@
         <div class="price-card" data-reveal>
           <div class="price-name">Enterprise</div>
           <div class="price-amount">Custom</div>
-          <div class="price-desc">Multi-location, custom workflows</div>
+          <div class="price-desc">For multi-location or high-volume operators</div>
           <ul class="price-features">
             <li>Everything in Growth</li>
-            <li>Multiple locations/providers</li>
-            <li>Custom workflow design</li>
-            <li>Dedicated onboarding</li>
+            <li>Public API access — build your own booking widget</li>
+            <li>Unlimited team logins</li>
+            <li>Dedicated account manager</li>
+            <li>Custom SLA &amp; priority incident response</li>
           </ul>
           <div class="btn-group-stack">
             <a href="mailto:er.sayushman@gmail.com" class="btn btn-outline btn-full"><svg class="icon"><use href="#icon-mail"/></svg> Email us</a>
@@ -401,6 +410,7 @@
           </div>
         </div>
       </div>
+      <p class="pricing-footnote" data-reveal>Every plan gets the full AI booking engine — the differences above are real, enforced limits, not marketing fine print.</p>
     </div>
   </section>
 
@@ -468,7 +478,12 @@
         <a href="mailto:er.sayushman@gmail.com">Contact</a>
       </div>
     </div>
-    <div class="footer-bottom">© <span id="year"></span> BookPilot AI. All rights reserved.</div>
+    <div class="footer-bottom">
+      <span>© <span id="year"></span> BookPilot AI. All rights reserved.</span>
+      <button type="button" class="theme-toggle-btn" aria-label="Switch between light and dark theme">
+        <span class="theme-toggle-icon">☀️</span> <span class="theme-toggle-text">Light mode</span>
+      </button>
+    </div>
   </footer>
 
   <script src="/marketing/config.js"></script>

@@ -1,19 +1,59 @@
 const bookings = require("../store/bookingStore");
+const tenantStore = require("../store/tenantStore");
 
 // New plan, Block 12 — a minimal billing/usage skeleton, matching the
 // marketing site's own existing pricing tiers (README's Pricing section):
-// Starter (free, up to 100 bookings/mo), Growth (unlimited), Enterprise
+// Starter (free, up to 30 bookings/mo), Growth (unlimited), Enterprise
 // (unlimited). Deliberately just the plan/limit/usage shape, not real
 // recurring payment collection — see README for why that's a separate,
 // larger piece of work than this pass.
+//
+// Found live (audit pass): the marketing site's pricing page already
+// CLAIMED voice/multilingual AI, payments, and calendar sync as
+// Growth-only, and a real Public API + unlimited team logins as
+// Enterprise-only — but nothing in the code actually enforced any of it.
+// Every one of those features was fully built and worked identically
+// regardless of which plan a tenant was on, meaning a Starter (free)
+// tenant already got everything the paid tiers claimed to gate. That's
+// not "genuine and factual" pricing, it's aspirational copy — so this
+// adds the actual enforcement (see the four call sites below: voice
+// message handling, payment-requirement resolution, calendar connect,
+// Public API auth, and team-member creation), not just better wording.
 const PLAN_LIMITS = {
-  free: { label: "Starter", maxBookingsPerMonth: 100 },
+  free: { label: "Starter", maxBookingsPerMonth: 30 },
   growth: { label: "Growth", maxBookingsPerMonth: Infinity },
   enterprise: { label: "Enterprise", maxBookingsPerMonth: Infinity },
 };
 
+// One row per feature this plan actually gates in code — not a wishlist,
+// a list every entry here has a real enforcement point for (grep this
+// file's own comment block above for where). maxTeamMembers counts
+// provider-role logins only (the tenant's own admin account is free on
+// every plan — gating the one login that manages the tenant would be a
+// different, much worse kind of paywall).
+const PLAN_FEATURES = {
+  free: { voiceAI: false, payments: false, calendarSync: false, publicApi: false, maxTeamMembers: 2 },
+  growth: { voiceAI: true, payments: true, calendarSync: true, publicApi: false, maxTeamMembers: 10 },
+  enterprise: { voiceAI: true, payments: true, calendarSync: true, publicApi: true, maxTeamMembers: Infinity },
+};
+
 function planConfig(plan) {
   return PLAN_LIMITS[plan] || PLAN_LIMITS.free;
+}
+
+function planFeatures(plan) {
+  return PLAN_FEATURES[plan] || PLAN_FEATURES.free;
+}
+
+// Convenience for call sites that only have a tenantId (most of them —
+// plan isn't threaded through the conversational engine's function
+// signatures today, and adding it everywhere would be a much larger,
+// riskier change than one extra lookup at each of the handful of real
+// gate points). Cheap: tenantStore.getById is already an indexed
+// single-row lookup used throughout this codebase for exactly this.
+async function tenantHasFeature(tenantId, feature) {
+  const tenant = await tenantStore.getById(tenantId);
+  return !!planFeatures(tenant?.plan)[feature];
 }
 
 // Computed live from the real booking rows every call, the same
@@ -48,7 +88,8 @@ async function getUsageSummary(tenantId, plan) {
     // a materially different, much more consequential decision than
     // showing them a warning to upgrade.
     softLimitExceeded: Number.isFinite(limit) && bookingsThisMonth >= limit,
+    features: planFeatures(plan),
   };
 }
 
-module.exports = { PLAN_LIMITS, getUsageSummary };
+module.exports = { PLAN_LIMITS, PLAN_FEATURES, getUsageSummary, planFeatures, tenantHasFeature };

@@ -13,7 +13,7 @@ const { generateWorkflowFromDescription } = require("../ai/workflowGenerator");
 const knowledge = require("../store/knowledgeStore");
 const templates = require("../store/templateStore");
 const { computeAnalytics } = require("../engine/analytics");
-const { getUsageSummary } = require("../engine/billing");
+const { getUsageSummary, tenantHasFeature, planFeatures } = require("../engine/billing");
 const supportRequests = require("../store/supportRequestStore");
 const feedbackStore = require("../store/feedbackStore");
 const { getErrorRate } = require("../infra/alerting");
@@ -419,6 +419,20 @@ router.post("/api/dashboard/users", requireAuth("admin"), asyncHandler(async (re
     const allProviders = await listAllProviders(req.user.tenantId);
     const matches = allProviders.some((p) => p.workflowId === workflowId && p.providerId === providerId);
     if (!matches) return res.status(400).json({ error: "Unknown workflowId/providerId — pick one from the provider list." });
+
+    // Plan-gated (billing pass, found live): team logins were unlimited
+    // on every plan — the marketing site's own pricing implies Enterprise
+    // gets more team capacity than Starter/Growth. The tenant's own admin
+    // account is exempt (that's the one login that manages the tenant,
+    // not a "team member" seat).
+    const tenant = await tenantStore.getById(req.user.tenantId);
+    const maxTeamMembers = planFeatures(tenant?.plan).maxTeamMembers;
+    if (Number.isFinite(maxTeamMembers)) {
+      const existingProviderCount = (await users.list(req.user.tenantId)).filter((u) => u.role === "provider").length;
+      if (existingProviderCount >= maxTeamMembers) {
+        return res.status(403).json({ error: `Your plan allows up to ${maxTeamMembers} team member login(s). Upgrade your plan from the Billing page to add more.` });
+      }
+    }
   }
 
   try {
@@ -1440,15 +1454,22 @@ router.get("/api/dashboard/calendar/status", requireAuth("admin", "provider"), a
 // plain link, not a fetch call) — redirects to Google's own consent
 // screen rather than returning JSON, since there's no XHR caller to hand
 // JSON back to.
-router.get("/api/dashboard/calendar/connect", requireAuth("admin", "provider"), (req, res) => {
+router.get("/api/dashboard/calendar/connect", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
   const { workflowId, providerId } = resolveWorkflowProvider(req);
   if (!workflowId || !providerId) return res.status(400).send("workflowId and providerId are required.");
   if (!googleCalendar.isConfigured()) {
     return res.status(503).send("Google Calendar isn't configured on this server yet (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URI). Ask an admin to set it up.");
   }
+  // Plan-gated (billing pass, found live): matches the "not configured"
+  // response above in spirit — this is a real, working feature the
+  // marketing site already claims as Growth-only, so a Starter tenant
+  // gets an honest explanation here instead of silently working anyway.
+  if (!(await tenantHasFeature(req.user.tenantId, "calendarSync"))) {
+    return res.status(403).send("Calendar sync is a Growth-plan feature. Upgrade your plan from the Billing page to connect Google Calendar.");
+  }
   const state = signOAuthState({ tenantId: req.user.tenantId, workflowId, providerId });
   res.redirect(googleCalendar.getAuthUrl(state));
-});
+}));
 
 // Google redirects the browser here after consent. Not JSON — this is a
 // top-level navigation, so it redirects back into the dashboard UI with a

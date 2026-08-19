@@ -13,7 +13,7 @@ function daysAgo(n) {
   return Date.now() - n * 24 * 60 * 60 * 1000;
 }
 
-test("a fresh tenant on the free plan starts at 0 usage with a 100-booking limit", async () => {
+test("a fresh tenant on the free plan starts at 0 usage with a 30-booking limit", async () => {
   const app = await freshApp();
   const { cookie } = await signupAndActivate(app, request, { businessName: "Billing Fresh Biz", email: "billing-fresh@example.com" });
 
@@ -21,7 +21,7 @@ test("a fresh tenant on the free plan starts at 0 usage with a 100-booking limit
   assert.equal(resp.status, 200);
   assert.equal(resp.body.plan, "free");
   assert.equal(resp.body.bookingsThisMonth, 0);
-  assert.equal(resp.body.limit, 100);
+  assert.equal(resp.body.limit, 30);
   assert.equal(resp.body.softLimitExceeded, false);
 });
 
@@ -55,7 +55,7 @@ test("softLimitExceeded flips true once bookings this month reach the plan's lim
   const { cookie, tenantId } = await signupAndActivate(app, request, { businessName: "Billing Limit Biz", email: "billing-limit@example.com" });
   const bookingStore = require("../../src/store/bookingStore");
 
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 30; i++) {
     // A distinct visitDate per booking — the DB's own unique-slot
     // constraint (workflow_id, provider_id, visit_date, visit_time)
     // would otherwise reject anything past the first "same slot" insert;
@@ -68,7 +68,7 @@ test("softLimitExceeded flips true once bookings this month reach the plan's lim
   }
 
   const resp = await request(app).get("/api/dashboard/billing").set("Cookie", cookie);
-  assert.equal(resp.body.bookingsThisMonth, 100);
+  assert.equal(resp.body.bookingsThisMonth, 30);
   assert.equal(resp.body.softLimitExceeded, true);
 
   // "Soft" is the whole point — the WhatsApp booking pipeline itself must

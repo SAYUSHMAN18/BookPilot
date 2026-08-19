@@ -51,7 +51,7 @@
 
       const priceHtml =
         plan.amount === null
-          ? `<div class="plan-price">Custom</div><p class="plan-cycle">Multi-location, custom workflows.</p>`
+          ? `<div class="plan-price">Custom</div><p class="plan-cycle">Public API, unlimited team logins, dedicated account manager.</p>`
           : plan.amount === 0
           ? `<div class="plan-price">Free</div><p class="plan-cycle">No card needed, upgrade anytime.</p>`
           : `<div class="plan-price">${formatAmount(plan.amount)}<span> / month</span></div><p class="plan-cycle">Billed monthly, cancel anytime.</p>`;

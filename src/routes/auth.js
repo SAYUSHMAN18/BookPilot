@@ -8,6 +8,7 @@ const tenantStore = require("../store/tenantStore");
 const apiKeys = require("../store/apiKeyStore");
 const { recordAudit } = require("../store/auditLog");
 const { isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isOtpRateLimited } = require("../infra/rateLimit");
+const { planFeatures } = require("../engine/billing");
 const { createOtp, verifyOtp } = require("../store/signupOtpStore");
 const { sendEmail } = require("../infra/emailSender");
 const { createResetToken, consumeResetToken } = require("../store/passwordResetStore");
@@ -169,6 +170,15 @@ function requireApiKey(req, res, next) {
     const tenant = await tenantStore.getById(tenantId);
     if (!tenant || tenant.status !== "active") {
       return res.status(403).json({ error: "This business's account is not currently active." });
+    }
+    // Plan-gated (billing pass, found live): the Public API was fully
+    // built and reachable by any tenant with a key, regardless of plan —
+    // the marketing site's own pricing page claims this as Enterprise-only.
+    // A tenant on a lower plan simply can't generate/use a working key
+    // (the dashboard's API Keys panel should reflect this too), rather than
+    // this middleware being the only place the claim is actually true.
+    if (!planFeatures(tenant.plan).publicApi) {
+      return res.status(403).json({ error: "The Public API is an Enterprise-plan feature. Contact us to upgrade." });
     }
     req.apiTenantId = tenantId;
     next();

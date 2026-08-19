@@ -48,6 +48,44 @@
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 
+/* Requested directly: a real dark/light toggle for the dashboard, not
+   just the sidebar's already-dark "ink" rail. The sidebar tokens
+   (--ink*) stay as they are in both themes — they were already
+   deliberately dark for contrast against a light content area; what
+   changes here is the content area itself. `data-theme` is set on
+   <html> by ThemeToggle (frontend/src/components/ThemeToggle.jsx) and
+   persisted to localStorage; `light` is the explicit default so a
+   fresh visitor sees the existing, already-shipped look unless they
+   opt into dark, rather than silently changing behavior based on
+   the OS's own color-scheme setting. */
+:root[data-theme="dark"] {
+  --bg: #0b0b12;
+  --bg-2: #111119;
+  --card: #16161f;
+  --card-2: #1b1b26;
+  --border: #262633;
+  --border-strong: #33333f;
+  --text: #f1f1f6;
+  --muted: #9a9ab3;
+  --subtle: #74748c;
+  --profile: #8b7ff5;
+  --profile-2: #a78bfa;
+  --profile-soft: rgba(139, 127, 245, 0.14);
+  --spark: #22d3ee;
+  --spark-2: #67e8f9;
+  --spark-soft: rgba(34, 211, 238, 0.14);
+  --admin-accent: #f59e0b;
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.16);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.16);
+  --info: #60a5fa;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 20px 44px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -298,6 +336,30 @@ tbody tr:last-child td { border-bottom: none; }
 .sidebar-logout:hover { background: rgba(220,38,38,0.18); color: #fca5a5; }
 .sidebar-logout svg { width: 15px; height: 15px; }
 .live-indicator { color: var(--ink-muted); }
+
+/* Theme toggle — sits last in the sidebar footer, "below at the bottom"
+   per direct request. Styled against the sidebar's own dark --ink*
+   palette (which stays dark in both themes), not --bg/--card, since it
+   lives in the sidebar rail regardless of which theme it's switching to. */
+.theme-toggle {
+  display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 4px; padding: 7px 8px;
+  background: transparent; border: 1px solid var(--ink-border); border-radius: var(--radius-xs);
+  color: var(--ink-muted); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
+.theme-toggle:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.18); color: var(--ink-text); }
+.theme-toggle-track {
+  position: relative; flex-shrink: 0; width: 32px; height: 18px; border-radius: 999px;
+  background: rgba(255,255,255,0.12); transition: background .2s var(--ease);
+}
+.theme-toggle-track.is-dark { background: var(--profile); }
+.theme-toggle-thumb {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; display: flex; align-items: center; justify-content: center; font-size: 9px; line-height: 1;
+  transition: transform .2s var(--ease-spring); transform: translateX(0);
+}
+.theme-toggle-track.is-dark .theme-toggle-thumb { transform: translateX(14px); }
+.theme-toggle-label { flex: 1; text-align: left; }
 
 .app-main-sidebar { flex: 1; max-width: 1200px; }
 

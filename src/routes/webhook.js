@@ -8,6 +8,7 @@ const bookings = require("../store/bookingStore");
 const tenantStore = require("../store/tenantStore");
 const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const paymentStore = require("../store/paymentStore");
+const billing = require("../engine/billing");
 const subscriptionOrders = require("../store/subscriptionOrderStore");
 const { activateTenantOnboarding } = require("../infra/onboarding");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
@@ -33,6 +34,16 @@ async function handleVoiceMessage(tenantId, waId, message) {
   if (!isVoiceEnabled()) {
     log("WARN", `Voice note from ${waId} but SARVAM_API_KEY is not set — asking them to type instead.`);
     await sendWhatsAppText(tenantId, waId, "Sorry, I can't listen to voice notes right now — could you type your message instead?");
+    return;
+  }
+
+  // Plan-gated (billing pass, found live): Sarvam voice/multilingual is a
+  // real, working feature but was reachable by every tenant regardless of
+  // plan — the marketing site's own pricing claims it as Growth-only.
+  // Degrades exactly like a missing SARVAM_API_KEY above: a real, honest
+  // message asking them to type instead, never a silent drop.
+  if (!(await billing.tenantHasFeature(tenantId, "voiceAI"))) {
+    await sendWhatsAppText(tenantId, waId, "Voice notes are a Growth-plan feature — could you type your message instead? (Business owner: upgrade your plan from the dashboard to enable this.)");
     return;
   }
 

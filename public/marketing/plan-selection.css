@@ -7,8 +7,15 @@
 }
 
 .plan-header { text-align: center; max-width: 560px; }
-.plan-header h1 { font-size: 30px; font-weight: 800; margin-bottom: 10px; }
-.plan-header p { color: var(--muted); font-size: 15px; }
+/* This header sits directly on .auth-body's fixed-dark aurora canvas (no
+   card behind it) in both themes — unlike .plan-card below, which has its
+   own theme-reactive var(--card) background, plain text here can't use
+   var(--ink)/var(--muted): those flip to dark values in light mode (the
+   site's default), which rendered this heading almost invisible
+   (near-black text on the near-black canvas) — found live, real bug,
+   pinned to fixed light colors instead since the backdrop never changes. */
+.plan-header h1 { font-size: 30px; font-weight: 800; margin-bottom: 10px; color: #fff; }
+.plan-header p { color: rgba(255,255,255,0.72); font-size: 15px; }
 
 .plan-grid {
   width: 100%;
@@ -29,8 +36,8 @@
 .plan-card .plan-price span { font-size: 13px; font-weight: 600; color: var(--muted); }
 .plan-card .plan-cycle { font-size: 12.5px; color: var(--muted); margin-top: -10px; }
 
-.plan-fineprint { text-align: center; }
-.plan-fineprint a { color: var(--brand); font-weight: 700; }
+.plan-fineprint { text-align: center; color: rgba(255,255,255,0.6); }
+.plan-fineprint a { color: #a78bfa; font-weight: 700; }
 .plan-fineprint a:hover { text-decoration: underline; }
 
 @media (max-width: 760px) {

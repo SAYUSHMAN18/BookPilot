@@ -9,6 +9,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <!-- External file, not inline — this app's CSP is script-src 'self'
+         with no 'unsafe-inline' (server.js), so an inline <script> here
+         would be silently blocked, not just discouraged. Sets data-theme
+         before first paint so a stored "dark" choice doesn't flash light
+         for one frame while React mounts and ThemeToggle's own effect runs. -->
+    <script src="/theme-init.js"></script>
     <div id="root"></div>
     <script src="/app-config.js"></script>
     <script type="module" src="/src/main.jsx"></script>
