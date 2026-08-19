@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { get, del } from "../lib/api";
 import WorkflowEditorModal from "./WorkflowEditorModal";
+import AddProviderModal from "./AddProviderModal";
 import MarketplacePanel from "./MarketplacePanel";
 
 // Item 4 — was deliberately read-only ("add/edit a business's steps and
@@ -14,6 +15,13 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
   const [workflows, setWorkflows] = useState({});
   const [error, setError] = useState("");
   const [editorState, setEditorState] = useState(null); // null closed, {} = add, {...workflow} = edit
+  // Separate from editorState — adding a provider to an already-existing
+  // business is common enough (per direct feedback) that it shouldn't
+  // require opening the full add/edit-business modal just to add one
+  // person. Only offered for providers[]-shaped businesses; hotels[]'s
+  // nested rooms are a different shape WorkflowEditorModal itself doesn't
+  // have a structured editor for either — Edit -> raw JSON still covers it.
+  const [addProviderTarget, setAddProviderTarget] = useState(null);
   // Found live: shown open by default, this competed for attention with
   // the actual "Add Business" button right above it and its own
   // "＋ Publish a Business"-style button read as a second, confusing way
@@ -71,7 +79,10 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
                   <td>{w.label}</td>
                   <td style={{ whiteSpace: "normal", maxWidth: 320 }}>{w.description}</td>
                   <td>{(w.providers?.length || 0) + (w.hotels?.reduce((n, h) => n + (h.rooms?.length || 0), 0) || 0)}</td>
-                  <td style={{ display: "flex", gap: 6 }}>
+                  <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {w.providers && (
+                      <button className="btn-secondary" onClick={() => setAddProviderTarget(w)}>＋ Add Provider</button>
+                    )}
                     <button className="btn-secondary" onClick={() => setEditorState(w)}>Edit</button>
                     <button className="btn-danger" onClick={() => handleDelete(w.id)}>Delete</button>
                   </td>
@@ -98,8 +109,17 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
         <WorkflowEditorModal
           workflow={Object.keys(editorState).length ? editorState : null}
           existingIds={Object.keys(workflows)}
+          existingBusinesses={list.map((w) => w.label)}
           onClose={() => setEditorState(null)}
           onSaved={handleSaved}
+        />
+      )}
+
+      {addProviderTarget && (
+        <AddProviderModal
+          workflow={addProviderTarget}
+          onClose={() => setAddProviderTarget(null)}
+          onSaved={() => { setAddProviderTarget(null); load(); bump?.(); }}
         />
       )}
     </>

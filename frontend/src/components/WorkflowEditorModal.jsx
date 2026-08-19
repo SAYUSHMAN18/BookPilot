@@ -169,7 +169,7 @@ function suggestedExtraFields(businessText) {
   return match ? match.options : GENERIC_EXTRA_FIELD_SUGGESTIONS;
 }
 
-export default function WorkflowEditorModal({ workflow, existingIds = [], onClose, onSaved }) {
+export default function WorkflowEditorModal({ workflow, existingIds = [], existingBusinesses = [], onClose, onSaved }) {
   const isEdit = !!workflow;
   const [id, setId] = useState(workflow?.id || "");
   const [label, setLabel] = useState(workflow?.label || "");
@@ -457,6 +457,20 @@ export default function WorkflowEditorModal({ workflow, existingIds = [], onClos
         </div>
 
         {error && <div className="error-banner">{error}</div>}
+
+        {/* Requested directly: adding a new business (a new category, e.g.
+            "Restaurant") is a different action from adding a provider to
+            one that already exists — someone reaching this screen should
+            see what's already here first, both to avoid an accidental
+            duplicate category and as a reminder that adding a provider to
+            an existing one is usually the faster path (via the ＋ Add
+            Provider button on that business's row instead). */}
+        {!isEdit && existingBusinesses.length > 0 && (
+          <div style={{ fontSize: 12.5, color: "var(--muted)", background: "var(--bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", marginBottom: 4 }}>
+            <strong>Already have:</strong> {existingBusinesses.join(" · ")}.{" "}
+            Adding a person/service to one of these? Close this and use its own <strong>＋ Add Provider</strong> button instead.
+          </div>
+        )}
 
         {!isEdit && (
           <div className="ai-generate-box">
