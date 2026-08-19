@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useOutletContext, Link } from "react-router-dom";
 import { get } from "../lib/api";
 import SetupChecklistPanel from "../components/SetupChecklistPanel";
-import { IconCalendar, IconClock, IconTrendUp, IconMessage, IconCheckCircle, IconXCircle, IconBuilding } from "../components/Icons";
+import { IconCalendar, IconClock, IconTrendUp, IconMessage, IconCheckCircle, IconXCircle, IconBuilding, IconUsers } from "../components/Icons";
 import AnimatedNumber from "../components/AnimatedNumber";
 
 const QUICK_LINKS = [
@@ -47,7 +47,16 @@ export default function OverviewPage() {
     today: bookings.filter((b) => (b.checkInIso || b.visitDate) === today).length,
     arrived: bookings.filter((b) => b.status === "arrived").length,
     cancelled: bookings.filter((b) => b.status === "cancelled").length,
-  }), [bookings, today]);
+    // Found live: this tile was labeled "Businesses" but used
+    // providers.length directly — that's every individual provider/room
+    // across every business (e.g. one hotel alone can have 6 rooms), not
+    // the number of businesses. A tenant with 6 businesses and 19
+    // providers/rooms between them saw "19 Businesses" here, then only 6
+    // rows on Manage Businesses — reads as businesses silently missing.
+    // workflowId is the actual business identity each provider/room entry
+    // carries; counting distinct ones is what "Businesses" should mean.
+    businessCount: new Set(providers.map((p) => p.workflowId)).size,
+  }), [bookings, today, providers]);
 
   return (
     <>
@@ -60,7 +69,8 @@ export default function OverviewPage() {
         <div className="stat-tile"><div className="stat-tile-icon"><IconClock /></div><div className="n"><AnimatedNumber value={stats.today} /></div><div className="l">Today</div></div>
         <div className="stat-tile"><div className="stat-tile-icon good"><IconCheckCircle /></div><div className="n"><AnimatedNumber value={stats.arrived} /></div><div className="l">Arrived</div></div>
         <div className="stat-tile"><div className="stat-tile-icon bad"><IconXCircle /></div><div className="n"><AnimatedNumber value={stats.cancelled} /></div><div className="l">Cancelled</div></div>
-        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconBuilding /></div><div className="n"><AnimatedNumber value={providers.length} /></div><div className="l">Businesses</div></div>}
+        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconBuilding /></div><div className="n"><AnimatedNumber value={stats.businessCount} /></div><div className="l">Businesses</div></div>}
+        {isAdminAccount && <div className="stat-tile"><div className="stat-tile-icon"><IconUsers /></div><div className="n"><AnimatedNumber value={providers.length} /></div><div className="l">Providers & rooms</div></div>}
       </div>
 
       <div className="card">

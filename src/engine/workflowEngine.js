@@ -2421,9 +2421,20 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
   }
 
   if (plan.action === ACTIONS.ANSWER_QUESTION) {
+    // Found live (real conversation testing): tryAnswerFactually correctly
+    // refuses to invent an answer when nothing in the business's own data
+    // grounds one — but returning false here meant the customer's genuine
+    // question then fell through to THIS STEP's own validation-error copy
+    // (e.g. select_provider's "Sorry, I didn't recognize that provider —
+    // please tap one from the list"), which flatly misdescribes what just
+    // happened: they asked a real question, not a wrong provider name. The
+    // DETECTING-stage's own INTENTS.QUESTION handler already gets this
+    // right (an honest "I don't have an answer for that" instead of
+    // silence or a mismatched error) — this mirrors that here so a mid-flow
+    // question gets the same honesty, then re-prompts the step they were
+    // actually on.
     const answer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
-    if (!answer) return false; // nothing grounded to say — don't invent one
-    await sendWhatsAppText(tenantId, waId, answer);
+    await sendWhatsAppText(tenantId, waId, answer || "I don't have specific information on that — let's continue with your booking, and you're welcome to ask again anytime.");
     await sendStepPrompt(tenantId, waId, workflow, currentStep(workflow, session), session);
     return true;
   }
