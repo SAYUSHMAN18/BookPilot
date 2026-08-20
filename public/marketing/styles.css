@@ -284,12 +284,23 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .bubble {
   max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 12.5px; line-height: 1.4;
   animation: pop-in 0.35s var(--ease) both; box-shadow: 0 1px 1px rgba(0,0,0,0.04); white-space: pre-line;
+  /* Found live: this widget mimics a real WhatsApp screen and its
+     bubbles are deliberately fixed-light backgrounds in BOTH themes (see
+     the chat-mock comment elsewhere in this codebase) — but the text
+     color was never pinned, so it inherited body's var(--ink), which
+     correctly flips to a near-white value for dark mode's real content
+     areas and made every single bubble in this widget (customer
+     messages, bot replies, tappable time-slot options) render as
+     near-invisible white-on-white/white-on-light-green. Pinned to the
+     light theme's own --ink here, same as .footer/.auth-wrap's existing
+     fixed-surface treatment elsewhere in this codebase. */
+  color: #0b0e1a;
 }
 @keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .bubble.in { align-self: flex-start; background: #fff; border-bottom-left-radius: 4px; }
 .bubble.out { align-self: flex-end; background: #d9fdd3; border-bottom-right-radius: 4px; }
 .bubble.list { align-self: flex-start; background: #fff; border-bottom-left-radius: 4px; }
-.bubble.list .opt { display: block; padding: 6px 0; border-top: 1px solid #eee; margin-top: 6px; color: var(--brand-dark); font-weight: 600; }
+.bubble.list .opt { display: block; padding: 6px 0; border-top: 1px solid #eee; margin-top: 6px; color: #3730a3; font-weight: 600; }
 .bubble.list .opt:first-of-type { border-top: none; margin-top: 8px; }
 /* Only the live demo widget's own list bubbles are ever actually
    clickable (script.js wires a click handler + data-send onto these
@@ -298,7 +309,7 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
    is harmless there (nothing to click, cursor never lands on it during
    an unattended autoplay) and correct here. */
 .bubble.list .opt[data-send] { cursor: pointer; border-radius: 6px; transition: background 0.15s ease, color 0.15s ease; }
-.bubble.list .opt[data-send]:hover { background: rgba(79, 70, 229, 0.08); color: var(--brand); padding-left: 6px; padding-right: 6px; margin-left: -6px; margin-right: -6px; }
+.bubble.list .opt[data-send]:hover { background: rgba(79, 70, 229, 0.08); color: #4f46e5; padding-left: 6px; padding-right: 6px; margin-left: -6px; margin-right: -6px; }
 .typing-dots { display: inline-flex; gap: 3px; align-self: flex-start; background: #fff; padding: 9px 12px; border-radius: 14px; border-bottom-left-radius: 4px; }
 .typing-dots span { width: 5px; height: 5px; border-radius: 50%; background: #9aa0ab; animation: bounce 1.1s infinite ease-in-out; }
 .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
@@ -448,7 +459,12 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .price-featured:hover { transform: scale(1.04) translateY(-6px); }
 .price-badge {
   position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
-  background: var(--brand); color: #fff; font-size: 11.5px; font-weight: 700; padding: 5px 14px; border-radius: 999px;
+  /* Fixed brand purple rather than var(--brand) — dark mode's --brand is
+     deliberately a lighter, softer purple (right for TEXT on a dark
+     background), but as a small solid pill behind white text that same
+     lightness drops contrast to ~3.25:1. A small persistent brand marker
+     reads fine staying one consistent color across both themes. */
+  background: #4f46e5; color: #fff; font-size: 11.5px; font-weight: 700; padding: 5px 14px; border-radius: 999px;
 }
 .price-name { font-weight: 700; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .price-amount { font-family: 'Manrope', sans-serif; font-size: 38px; font-weight: 900; margin: 10px 0 4px; }
@@ -483,7 +499,14 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .final-cta-glow { position: absolute; inset: 0; background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.18), transparent 55%); }
 .final-cta h2 { font-size: clamp(28px, 4vw, 42px); font-weight: 800; position: relative; }
 .final-cta p { margin: 16px 0 34px; opacity: 0.9; font-size: 16px; position: relative; }
-.final-cta .btn-primary { background: #fff; color: var(--brand-dark); box-shadow: 0 12px 30px rgba(0,0,0,0.2); position: relative; }
+/* Found live: deliberately a fixed-white pill in both themes (pops
+   against .final-cta's own colored background either way) — but color
+   used the theme-reactive --brand-dark, which flips to a light purple
+   meant for dark surfaces in dark mode, landing on this still-white
+   button at a 1.8:1 contrast ratio (effectively unreadable). Pinned to
+   the light theme's own --brand-dark, same fixed-surface fix as
+   .bubble/.opt above. */
+.final-cta .btn-primary { background: #fff; color: #3730a3; box-shadow: 0 12px 30px rgba(0,0,0,0.2); position: relative; }
 .final-cta .btn-primary:hover { box-shadow: 0 18px 38px rgba(0,0,0,0.25); }
 
 /* ================= FOOTER ================= */
@@ -501,7 +524,9 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .footer-col a:hover { color: #fff; }
 .footer-bottom {
   max-width: 1160px; margin: 50px auto 0; padding: 20px 32px 0; border-top: 1px solid rgba(255,255,255,0.08);
-  font-size: 12.5px; color: #6d7093;
+  /* Found live: #6d7093 measured 4.02:1 against the footer's fixed dark
+     background, just under the 4.5:1 AA minimum for normal-size text. */
+  font-size: 12.5px; color: #8386ab;
   display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap;
 }
 @media (max-width: 700px) { .footer-inner { grid-template-columns: 1fr 1fr; } }

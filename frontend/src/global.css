@@ -67,7 +67,10 @@
   --border-strong: #33333f;
   --text: #f1f1f6;
   --muted: #9a9ab3;
-  --subtle: #74748c;
+  /* Found live: #74748c measured 3.95:1 against --card in dark mode (e.g.
+     .business-row-slug), just under the 4.5:1 AA minimum for normal text
+     — every use of this token gets the fix, not just that one spot. */
+  --subtle: #86869e;
   --profile: #8b7ff5;
   --profile-2: #a78bfa;
   --profile-soft: rgba(139, 127, 245, 0.14);
@@ -502,7 +505,14 @@ tbody tr:last-child td { border-bottom: none; }
 .chat-mock-avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, var(--profile), var(--profile-2)); flex-shrink: 0; }
 .chat-mock-name { font-size: 12.5px; font-weight: 700; color: var(--text); }
 .chat-mock-status { font-size: 10.5px; color: var(--success); }
-.chat-bubble { max-width: 84%; padding: 7px 10px; border-radius: 12px; font-size: 12px; line-height: 1.4; color: var(--text); animation: chat-mock-in .5s var(--ease) both; }
+/* Found live: same bug as the marketing site's own .bubble (public/
+   marketing/styles.css) — this WhatsApp mockup's bubbles are fixed-light
+   backgrounds in both themes (see .chat-bubble.in/.out below), but the
+   text color inherited var(--text), which correctly flips to a
+   near-white value in dark mode and made every bubble in this mockup
+   near-invisible. Pinned to the light theme's own --text value, same
+   fixed-surface treatment as .login-card/.auth-wrap elsewhere. */
+.chat-bubble { max-width: 84%; padding: 7px 10px; border-radius: 12px; font-size: 12px; line-height: 1.4; color: #14141f; animation: chat-mock-in .5s var(--ease) both; }
 .chat-bubble.in { align-self: flex-start; background: #f0f0f5; border-bottom-left-radius: 3px; }
 .chat-bubble.out { align-self: flex-end; background: #d9fdd3; border-bottom-right-radius: 3px; }
 .chat-bubble:nth-child(2) { animation-delay: .35s; }
@@ -516,6 +526,23 @@ tbody tr:last-child td { border-bottom: none; }
   border: 1px solid rgba(255,255,255,0.5); border-radius: var(--radius-lg);
   box-shadow: 0 30px 70px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06);
   padding: 34px 32px;
+  /* Found live: this card is a fixed light glass surface over the dark
+     aurora canvas in BOTH themes (same "one continuous ink canvas +
+     frosted glass card" design as marketing's own .auth-wrap) — but
+     unlike .auth-wrap, it was never pinned. dark mode's site-wide token
+     overrides leaked in, and elements relying on plain inheritance
+     (h1, label, input) rather than their own var()-using rule inherited
+     dark mode's near-white --text from <body>, landing at a 1.13:1
+     contrast ratio on this still-white card. Pinning the tokens AND
+     declaring color here (not just on the tokens' own declarations)
+     matters — see public/marketing/auth.css's .auth-wrap comment on why
+     inheritance needs an explicit color declaration in this same rule to
+     actually pick up the pin. */
+  --text: #14141f; --muted: #6b7280; --subtle: #9ca3af;
+  --bg: #f3f3f9; --card: #ffffff; --border: #e6e6ef; --border-strong: #d8d9e6;
+  --profile: #4f46e5; --profile-2: #7c3aed; --profile-soft: rgba(79, 70, 229, 0.09);
+  --success: #16a34a;
+  color: var(--text);
 }
 .login-card h1 { font-family: var(--font-display); font-size: 21px; font-weight: 700; margin-bottom: 4px; letter-spacing: -.01em; }
 .login-card p { color: var(--muted); font-size: 13px; margin-bottom: 22px; }

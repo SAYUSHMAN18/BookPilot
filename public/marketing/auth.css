@@ -86,6 +86,15 @@
      text unreadable. Re-declaring the light-mode values on this element
      stops that leak regardless of the toggle's state. */
   --ink: #0b0e1a;
+  /* Found live: the pin above only helps elements that themselves declare
+     color: var(--ink) — .auth-card h2 (and anything else relying on plain
+     CSS inheritance rather than its own var(--ink) rule) instead inherited
+     its computed color from body's OWN --ink (unpinned, dark-mode value),
+     since inheritance passes along an ancestor's already-resolved value,
+     not a fresh var() re-evaluation. Declaring color here — in the SAME
+     rule as the pin — gives every descendant that doesn't set its own
+     color something correctly-pinned to inherit from. */
+  color: var(--ink);
   --ink-soft: #3a3f55;
   --muted: #6b7280;
   --bg: #fbfbfe;
