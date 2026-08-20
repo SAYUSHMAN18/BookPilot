@@ -11,18 +11,15 @@ const { PLANS } = require("../infra/plans");
 
 // New plan, Stream 2 — the one step between self-signup and the
 // onboarding queue: a logged-in admin whose tenant is "awaiting_payment"
-// picks a plan here. Three different outcomes depending on the plan's
-// price (see infra/plans.js's own comment on why these numbers are what
-// they are):
-//   - Starter (₹0): nothing to charge — skip Razorpay entirely and
-//     activate straight into the onboarding queue via the same shared
-//     helper the paid webhook path uses (infra/onboarding.js), so a free
-//     signup isn't held hostage behind a payment step it doesn't need.
-//   - Growth (paid): a real Razorpay payment link. POST /api/payments/
-//     webhook (src/routes/webhook.js) is what actually advances the
-//     tenant once Razorpay confirms the charge — never this route
-//     directly, same "webhook is the only source of truth" discipline
-//     booking payments already follow.
+// picks a plan here. Outcomes depend on the plan's price (see infra/
+// plans.js's own comment on why these numbers are what they are):
+//   - Starter/Growth (a real amount): a real Razorpay payment link. POST
+//     /api/payments/webhook (src/routes/webhook.js) is what actually
+//     advances the tenant once Razorpay confirms the charge — never this
+//     route directly, same "webhook is the only source of truth"
+//     discipline booking payments already follow. (Starter used to be
+//     ₹0/free and skip Razorpay entirely via the amount===0 branch below
+//     — kept for any future amount:0 plan, but no current plan hits it.)
 //   - Enterprise (no self-serve amount): rejected here. The real path is
 //     the plan-selection page's own "Email us" / "WhatsApp us" links
 //     (same contact details as the marketing site's own Enterprise

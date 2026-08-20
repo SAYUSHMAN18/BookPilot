@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const { log } = require("../infra/logger");
-const { handleIncomingMessage } = require("../engine/workflowEngine");
+const { handleIncomingMessage, getSessionLang } = require("../engine/workflowEngine");
 const { isValidSignature } = require("../infra/verifySignature");
 const { isDuplicate } = require("../infra/dedupe");
 const bookings = require("../store/bookingStore");
@@ -87,6 +87,52 @@ async function handleVoiceMessage(tenantId, waId, message) {
         log("ERROR", `Voice synthesis failed for ${waId}: ${err.message}`);
       }
     }
+  }
+}
+
+// Requested directly: a customer who TYPES "can you send that as a voice
+// note?" got nothing but text back — TTS only ever ran off the language
+// Sarvam detected from an incoming VOICE note (handleVoiceMessage above),
+// so a typed conversation had no language signal to speak with at all.
+// session.lang (set by detectAndSetLanguage — the same field translateText()
+// already uses for text replies) is the substitute signal here; falls back
+// to English if the customer never picked one. Deliberately whole-word/
+// phrase matched, not a bare "voice" substring match — a business named
+// "Voice & Co." or a customer asking "do you have any voice mail" would
+// otherwise misfire.
+const VOICE_REQUEST_RE = /\b(voice\s*(note|message|reply)|audio\s*(note|reply|message)|speak\s*(it|this|that)\s*(out)?\s*loud|say\s*(it|that)\s*out\s*loud|reply\s*(in|with)\s*(a\s*)?voice)\b/i;
+
+// session.lang's short codes (hi, en, ...) -> Sarvam's own longer codes
+// (hi-IN, en-IN, ...) that voice.js's TTS_SUPPORTED/synthesizeSpeech and
+// translate.js's translateForVoice actually key on. "ur" (Urdu) has no
+// Sarvam TTS voice at all — deliberately left unmapped so it falls through
+// to the "no audio, text already sent" no-op below, same as any other
+// TTS-unsupported language.
+const SESSION_LANG_TO_SARVAM = {
+  hi: "hi-IN", en: "en-IN", bn: "bn-IN", ta: "ta-IN", te: "te-IN",
+  mr: "mr-IN", pa: "pa-IN", gu: "gu-IN", kn: "kn-IN", ml: "ml-IN",
+};
+
+// Best-effort, silent add-on to a reply that was ALREADY sent as text —
+// unlike handleVoiceMessage's own failure messages (a customer who can't
+// send voice notes at all needs to know why), a customer who typed a
+// request and got a full text answer already has their answer; a second
+// "sorry, can't do voice" message on top would read as noise, not help.
+// So every unavailable case here (no Sarvam key, wrong plan, unmapped/
+// unsupported language, synthesis failure) just quietly does nothing.
+async function maybeSendVoiceReply(tenantId, waId, replyText) {
+  if (!replyText || !isVoiceEnabled()) return;
+  if (!(await billing.tenantHasFeature(tenantId, "voiceAI"))) return;
+
+  const sarvamLang = SESSION_LANG_TO_SARVAM[getSessionLang(tenantId, waId) || "en"];
+  if (!sarvamLang) return;
+
+  try {
+    const spokenText = await translateForVoice(replyText, sarvamLang);
+    const audio = await synthesizeSpeech(spokenText, sarvamLang);
+    if (audio) await sendWhatsAppAudio(tenantId, waId, audio, "audio/mpeg");
+  } catch (err) {
+    log("ERROR", `Voice reply synthesis failed for ${waId}: ${err.message}`);
   }
 }
 
@@ -223,7 +269,25 @@ function createWebhookRouter() {
         message.button?.text ||
         "";
 
-      if (text) await handleIncomingMessage(tenantId, waId, text, await tenantWorkflowStore.listForTenant(tenantId));
+      if (text) {
+        // Only ever checked against actual typed free text (message.text.body),
+        // never a tapped button/list id (those are machine codes like "p1"
+        // or "confirm", not something a customer phrases a voice request
+        // in) — see maybeSendVoiceReply's own comment for how this degrades
+        // when voice isn't actually available for this tenant/language.
+        const wantsVoiceReply = !!message.text?.body && VOICE_REQUEST_RE.test(message.text.body);
+        if (wantsVoiceReply) {
+          beginReplyCapture(waId);
+          try {
+            await handleIncomingMessage(tenantId, waId, text, await tenantWorkflowStore.listForTenant(tenantId));
+          } finally {
+            const replyText = endReplyCapture(waId);
+            await maybeSendVoiceReply(tenantId, waId, replyText);
+          }
+        } else {
+          await handleIncomingMessage(tenantId, waId, text, await tenantWorkflowStore.listForTenant(tenantId));
+        }
+      }
     } catch (err) {
       // The safety net, not the fix (Section 0's timeouts are the fix — a
       // hung call used to be the actual cause of this path firing at all).
@@ -368,4 +432,4 @@ function createWebhookRouter() {
   return router;
 }
 
-module.exports = { createWebhookRouter };
+module.exports = { createWebhookRouter, VOICE_REQUEST_RE };

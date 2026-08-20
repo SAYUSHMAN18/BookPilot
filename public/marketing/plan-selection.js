@@ -5,12 +5,14 @@
 // this page relies on already being set from signup.
 //
 // Found live (audit pass): every plan used to render as a paid checkout
-// button, including a "Free" tier that should never hit Razorpay at all
-// and an "Enterprise" tier that should never be self-serve — see
-// src/infra/plans.js's own comment. Three distinct card behaviors now,
-// keyed off amount: null (sales-assisted, contact links only), 0 (free,
-// instant-activate via checkout with no payment step), > 0 (real
-// checkout, redirect to the returned paymentUrl).
+// button, including an "Enterprise" tier that should never be self-serve
+// — see src/infra/plans.js's own comment. Card behavior is keyed purely
+// off amount: null (sales-assisted, contact links only) vs a real
+// number (checkout, redirect to the returned paymentUrl) — no plan id
+// is hardcoded here, so Starter going from ₹0 to a real ₹199/mo listing
+// fee needed no changes on this page, just the price in plans.js. The
+// amount===0 branch below is kept for any future free plan; nothing
+// currently uses it.
 (() => {
   const grid = document.getElementById("planGrid");
   const errorBanner = document.getElementById("errorBanner");

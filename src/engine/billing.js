@@ -3,22 +3,29 @@ const tenantStore = require("../store/tenantStore");
 
 // New plan, Block 12 — a minimal billing/usage skeleton, matching the
 // marketing site's own existing pricing tiers (README's Pricing section):
-// Starter (free, up to 30 bookings/mo), Growth (unlimited), Enterprise
-// (unlimited). Deliberately just the plan/limit/usage shape, not real
-// recurring payment collection — see README for why that's a separate,
-// larger piece of work than this pass.
+// Starter (₹199/mo minimum listing fee, up to 30 bookings/mo), Growth
+// (unlimited), Enterprise (unlimited). Deliberately just the plan/limit/
+// usage shape, not real recurring payment collection — see README for why
+// that's a separate, larger piece of work than this pass.
+//
+// Requested directly: Starter used to be ₹0/free (internal key stays
+// "free" — see planConfig/planFeatures' fallback below, and infra/plans.js's
+// own comment on why the checkout-facing id "starter" and this internal
+// key don't need to match). It's now a real minimum amount everyone pays
+// to be listed and accept bookings at all, whether they use the shared
+// platform WhatsApp number or (Growth+) their own.
 //
 // Found live (audit pass): the marketing site's pricing page already
 // CLAIMED voice/multilingual AI, payments, and calendar sync as
 // Growth-only, and a real Public API + unlimited team logins as
 // Enterprise-only — but nothing in the code actually enforced any of it.
 // Every one of those features was fully built and worked identically
-// regardless of which plan a tenant was on, meaning a Starter (free)
-// tenant already got everything the paid tiers claimed to gate. That's
-// not "genuine and factual" pricing, it's aspirational copy — so this
-// adds the actual enforcement (see the four call sites below: voice
-// message handling, payment-requirement resolution, calendar connect,
-// Public API auth, and team-member creation), not just better wording.
+// regardless of which plan a tenant was on. That's not "genuine and
+// factual" pricing, it's aspirational copy — so this adds the actual
+// enforcement (see the five call sites below: voice message handling,
+// payment-requirement resolution, calendar connect, Public API auth,
+// team-member creation, and — the newest — connecting a tenant's own
+// WhatsApp number), not just better wording.
 const PLAN_LIMITS = {
   free: { label: "Starter", maxBookingsPerMonth: 30 },
   growth: { label: "Growth", maxBookingsPerMonth: Infinity },
@@ -30,11 +37,15 @@ const PLAN_LIMITS = {
 // file's own comment block above for where). maxTeamMembers counts
 // provider-role logins only (the tenant's own admin account is free on
 // every plan — gating the one login that manages the tenant would be a
-// different, much worse kind of paywall).
+// different, much worse kind of paywall). ownWhatsAppNumber: a Starter
+// tenant books through the shared platform number; Growth/Enterprise can
+// connect their own WhatsApp Business number instead (src/routes/
+// dashboard.js's /api/dashboard/whatsapp/connect), so only their
+// business's own customers ever reach it.
 const PLAN_FEATURES = {
-  free: { voiceAI: false, payments: false, calendarSync: false, publicApi: false, maxTeamMembers: 2 },
-  growth: { voiceAI: true, payments: true, calendarSync: true, publicApi: false, maxTeamMembers: 10 },
-  enterprise: { voiceAI: true, payments: true, calendarSync: true, publicApi: true, maxTeamMembers: Infinity },
+  free: { voiceAI: false, payments: false, calendarSync: false, publicApi: false, ownWhatsAppNumber: false, maxTeamMembers: 2 },
+  growth: { voiceAI: true, payments: true, calendarSync: true, publicApi: false, ownWhatsAppNumber: true, maxTeamMembers: 10 },
+  enterprise: { voiceAI: true, payments: true, calendarSync: true, publicApi: true, ownWhatsAppNumber: true, maxTeamMembers: Infinity },
 };
 
 function planConfig(plan) {

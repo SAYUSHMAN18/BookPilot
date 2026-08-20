@@ -2,6 +2,7 @@ import { useOutletContext } from "react-router-dom";
 import AuditLogPanel from "../components/AuditLogPanel";
 import SessionsPanel from "../components/SessionsPanel";
 import KnowledgeBasePanel from "../components/KnowledgeBasePanel";
+import WhatsAppNumberPanel from "../components/WhatsAppNumberPanel";
 
 // Public API key management (ApiKeysPanel) is intentionally not shown here
 // — it's a developer/integration feature (a tenant's own website calling
@@ -18,6 +19,7 @@ export default function SettingsPage() {
   return (
     <>
       {!isAdminAccount && ownProvider && <KnowledgeBasePanel refreshKey={refreshKey} provider={ownProvider} isAdmin={false} />}
+      {isAdminAccount && <WhatsAppNumberPanel />}
       <SessionsPanel refreshKey={refreshKey} />
       {isAdminAccount && <AuditLogPanel refreshKey={refreshKey} />}
     </>

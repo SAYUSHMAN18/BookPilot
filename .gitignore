@@ -42,3 +42,8 @@ src/data/uploads/
 # source; `npm run build` there generates this). Not committed, same as
 # any other compiled artifact — rebuild it after a fresh clone.
 public/app/
+
+# Vite's own transient timestamped config-transform temp file — created
+# and normally cleaned up by `vite build` itself, but a run interrupted
+# mid-build can leave one behind.
+frontend/vite.config.js.timestamp-*.mjs

@@ -5,13 +5,10 @@ const onboardingRequests = require("../store/onboardingRequestStore");
 const { recordAudit } = require("../store/auditLog");
 
 // The one place a tenant actually crosses from "chose a plan" to "queued
-// for the onboarding team" — shared by two callers that reach this same
-// outcome through different doors: the Razorpay webhook (a paid plan,
-// after payment.captured) and POST /api/billing/checkout itself (the
-// free Starter plan, which has nothing to charge and so never touches
-// Razorpay at all — see billing.js's own comment on why). Factored out
-// so both stay byte-for-byte consistent instead of two copies of
-// "flip status, open the queue row, send the email" drifting apart.
+// for the onboarding team" — reached through the Razorpay webhook after
+// payment.captured (POST /api/billing/checkout itself never calls this
+// directly for a real amount — see billing.js's own comment on why; an
+// amount:0 plan, if one ever existed again, would be the one exception).
 async function activateTenantOnboarding(tenant, plan, amount, actor) {
   await tenantStore.setPlan(tenant.id, plan);
   await tenantStore.setStatus(tenant.id, "onboarding_pending");

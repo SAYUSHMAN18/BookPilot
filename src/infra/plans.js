@@ -5,18 +5,19 @@
 // maintained lists is exactly how they'd silently drift apart.
 //
 // Prices match the marketing site's own pricing section
-// (public/marketing/index.html #pricing) — found live during an audit
-// pass that an earlier version of this file used different placeholder
-// numbers (and no free tier at all) that directly contradicted the
-// landing page's own hero copy ("Start free — no card needed"). The
-// landing page is the real, deliberately-designed pricing; this file was
-// wrong, not the other way around.
+// (public/marketing/index.html #pricing).
 //
-//   starter    — the actual free tier. amount: 0 means POST /api/billing/
-//                checkout skips Razorpay entirely (see billing.js) and
-//                activates the tenant straight into the onboarding queue
-//                — there's nothing to charge, so there's no payment step.
-//   growth     — ₹1,999/mo, real self-serve Razorpay checkout.
+//   starter    — ₹199/mo, a real minimum listing fee (requested directly:
+//                Starter was previously ₹0/free — amount: 0, which made
+//                POST /api/billing/checkout skip Razorpay entirely and
+//                activate straight into onboarding with nothing charged.
+//                Now a real amount, it flows through the exact same
+//                self-serve Razorpay checkout branch growth already uses
+//                below — no branching logic needed, just this number).
+//   growth     — ₹1,999/mo, real self-serve Razorpay checkout. Also the
+//                plan a tenant needs to be on to connect their own
+//                WhatsApp Business number instead of the shared one
+//                (billing.js's ownWhatsAppNumber feature).
 //   enterprise — amount: null means "not self-serve" — POST /api/billing/
 //                checkout rejects it outright; the marketing site's own
 //                Enterprise card (and this app's plan-selection page)
@@ -24,7 +25,7 @@
 //                matching index.html's existing "✉️ Email us" / "💬
 //                WhatsApp us" pattern for multi-location/custom deals.
 const PLANS = {
-  starter: { label: "Starter", amount: 0 },
+  starter: { label: "Starter", amount: 19900 },
   growth: { label: "Growth", amount: 199900 },
   enterprise: { label: "Enterprise", amount: null },
 };

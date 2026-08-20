@@ -2879,4 +2879,15 @@ function handleIncomingMessage(tenantId, waId, text, workflows) {
   return next;
 }
 
-module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots, initSessions };
+// Narrow, read-only accessor for webhook.js's "customer explicitly asked
+// for a voice reply on a TYPED message" flow — it needs to know which
+// language to synthesize speech in (the same one translateText() already
+// uses for that conversation), without exposing the full mutable session
+// object outside this module the way a raw getSession() export would.
+// Returns null for a brand-new/unknown conversation rather than creating
+// one — this is a read-only peek, not a session-creating call.
+function getSessionLang(tenantId, waId) {
+  return sessions.get(mapKey(tenantId, waId))?.lang || null;
+}
+
+module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots, initSessions, getSessionLang };

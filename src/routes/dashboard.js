@@ -1524,6 +1524,87 @@ router.post("/api/dashboard/calendar/disconnect", requireAuth("admin", "provider
   res.json({ ok: true });
 }));
 
+// Requested directly: a Starter tenant books through the shared platform
+// WhatsApp number; Growth/Enterprise can connect their OWN WhatsApp
+// Business number instead, so only their business's own customers ever
+// reach it. The infrastructure for this already existed (tenantStore.
+// setWhatsAppCredentials, and src/routes/webhook.js already routes an
+// incoming message by phone_number_id — see its own comment) but was
+// platform-admin-only (PATCH /api/platform/tenants/:id/config); this is
+// the tenant-facing self-service version, gated on plan.
+//
+// Unlike Calendar sync above, there's no OAuth flow to redirect through —
+// a business gets their phoneNumberId/businessAccountId/accessToken from
+// their own Meta Business Manager / WhatsApp Cloud API setup (a real
+// external prerequisite this app has no way to provision for them), so
+// this is a plain form submitting those three values, not a "Connect"
+// button.
+router.get("/api/dashboard/whatsapp-number/status", requireAuth("admin"), asyncHandler(async (req, res) => {
+  const tenant = await tenantStore.getById(req.user.tenantId);
+  res.json({
+    eligible: !!planFeatures(tenant?.plan).ownWhatsAppNumber,
+    // phoneNumberId is an identifier, not a secret (Meta shows it in
+    // plain text in their own dashboard) — safe to return. The access
+    // token itself never leaves setWhatsAppCredentials/the DB.
+    connected: !!(tenant?.whatsappPhoneNumberId && tenant?.whatsappAccessToken),
+    phoneNumberId: tenant?.whatsappPhoneNumberId || null,
+  });
+}));
+
+router.post("/api/dashboard/whatsapp-number/connect", requireAuth("admin"), asyncHandler(async (req, res) => {
+  if (!(await tenantHasFeature(req.user.tenantId, "ownWhatsAppNumber"))) {
+    return res.status(403).json({ error: "Connecting your own WhatsApp number is a Growth-plan feature. Upgrade your plan from the Billing page." });
+  }
+  const { phoneNumberId, businessAccountId, accessToken } = req.body || {};
+  if (!phoneNumberId?.trim() || !accessToken?.trim()) {
+    return res.status(400).json({ error: "phoneNumberId and accessToken are required — find both in your Meta Business Manager's WhatsApp Cloud API setup." });
+  }
+
+  // A phone_number_id can only ever belong to one tenant — this is the
+  // ONLY signal webhook.js uses to route an incoming message (see its own
+  // comment) — so two tenants sharing one would mean whichever connected
+  // it SECOND silently steals the first tenant's customer conversations.
+  // The DB's own UNIQUE constraint (src/store/db.js) would reject this
+  // regardless; checking first gives a clear, actionable error instead of
+  // a bare constraint-violation message.
+  const existingOwner = await tenantStore.getByPhoneNumberId(phoneNumberId.trim());
+  if (existingOwner && existingOwner.id !== req.user.tenantId) {
+    return res.status(409).json({ error: "This WhatsApp number is already connected to a different BookPilot account." });
+  }
+
+  try {
+    const updated = await tenantStore.setWhatsAppCredentials(req.user.tenantId, {
+      phoneNumberId: phoneNumberId.trim(),
+      businessAccountId: businessAccountId?.trim() || null,
+      accessToken: accessToken.trim(),
+    });
+    await recordAudit(req.user.tenantId, req.user, "whatsapp_number.connect", { phoneNumberId: updated.whatsappPhoneNumberId });
+    log("INFO", `${req.user.email} connected their own WhatsApp number for tenant ${req.user.tenantId}.`);
+    res.json({ ok: true, phoneNumberId: updated.whatsappPhoneNumberId });
+  } catch (err) {
+    // Same specific-error-over-opaque-500 reasoning as the platform-admin
+    // version of this (APP_ENCRYPTION_KEY not set on this server yet) —
+    // a tenant admin can't fix that themselves, but at least knows to
+    // contact support with a real reason instead of "something broke."
+    return res.status(400).json({ error: err.message });
+  }
+}));
+
+router.post("/api/dashboard/whatsapp-number/disconnect", requireAuth("admin"), asyncHandler(async (req, res) => {
+  const tenant = await tenantStore.getById(req.user.tenantId);
+  if (!tenant?.whatsappPhoneNumberId) return res.status(404).json({ error: "No WhatsApp number is currently connected." });
+  // Clears back to null, not to some other value — webhook.js's own
+  // fallback (no tenant claims a phone_number_id -> tenant 1) only
+  // applies when NO tenant has ever claimed one; every other tenant with
+  // nothing connected here simply has no way to receive a direct message,
+  // which is correct: they're back to using the shared platform number,
+  // routed the same way it already was before they ever connected their own.
+  await tenantStore.setWhatsAppCredentials(req.user.tenantId, { phoneNumberId: null, businessAccountId: null, accessToken: null });
+  await recordAudit(req.user.tenantId, req.user, "whatsapp_number.disconnect", {});
+  log("INFO", `${req.user.email} disconnected their own WhatsApp number for tenant ${req.user.tenantId}.`);
+  res.json({ ok: true });
+}));
+
 // Section 11 — Server-Sent Events. A dashboard tab open on GET
 // /api/dashboard/bookings-shaped data used to only ever learn about a new
 // booking, cancellation, or support escalation by the user clicking
