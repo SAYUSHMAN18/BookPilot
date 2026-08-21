@@ -2,6 +2,7 @@ const { log } = require("../infra/logger");
 const paymentStore = require("../store/paymentStore");
 const bookings = require("../store/bookingStore");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
+const { istDate } = require("./dateSlots");
 
 // Section 9.7 — shared by both cancellation paths (server.js's
 // provider-initiated dashboard action, workflowEngine.js's
@@ -30,7 +31,17 @@ function computeRefundPercent({ initiatedBy, refundPolicy, visitDateIso, visitTi
   const tiers = refundPolicy?.customerCancellation;
   if (!Array.isArray(tiers) || tiers.length === 0) return 100;
 
-  const visitAt = visitDateIso ? new Date(`${visitDateIso}T${to24Hour(visitTime) || "00:00"}:00`) : null;
+  // Found live (QA pass) — `new Date("YYYY-MM-DDTHH:MM:00")` has no
+  // timezone suffix, so per spec it parses as the PROCESS's own local
+  // time (UTC on this app's actual host, Render), not IST — every
+  // refund-notice calculation was off by the UTC/IST offset (5.5h),
+  // which can genuinely push a cancellation across a policy tier
+  // boundary. istDate() (dateSlots.js) constructs the real instant an
+  // IST wall-clock date+time refers to, regardless of host timezone.
+  const time24 = to24Hour(visitTime) || "00:00";
+  const [vy, vm, vd] = (visitDateIso || "").split("-").map(Number);
+  const [vh, vmi] = time24.split(":").map(Number);
+  const visitAt = visitDateIso ? istDate(vy, vm - 1, vd, vh, vmi) : null;
   if (!visitAt || Number.isNaN(visitAt.getTime())) return 100; // can't compute notice — don't penalize on an ambiguity
 
   const hoursNotice = (visitAt.getTime() - Date.now()) / (1000 * 60 * 60);

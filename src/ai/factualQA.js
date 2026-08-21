@@ -2,6 +2,7 @@ const { log } = require("../infra/logger");
 const { capForAI } = require("../infra/textLimits");
 const knowledgeStore = require("../store/knowledgeStore");
 const { groqChatCompletion, GROQ_MODEL } = require("./groqClient");
+const { isoDate } = require("../engine/dateSlots");
 
 // Per-document and total caps so an admin pasting a huge policy doc (or
 // several businesses each with a full FAQ page) can't blow up the prompt
@@ -133,13 +134,12 @@ async function tryAnswerAboutBooking(text, booking, history = []) {
   // Found live: without this, "is it for today or another day?" got
   // answered "It is for today" for a booking three weeks out — confidently
   // wrong, not a refusal. The model had a date to compare against but
-  // nothing telling it what "today" actually IS, so it guessed. Same
-  // local-date convention as dateSlots.js (isoDate()), not
-  // toISOString() — that parses as UTC and would be a day off for any
-  // timezone ahead of UTC, which is exactly the bug this codebase already
-  // hit once with server-side date math.
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // nothing telling it what "today" actually IS, so it guessed. Reuses
+  // dateSlots.js's own isoDate() (IST-aware — QA pass) rather than
+  // duplicating its logic inline, which is exactly how this line
+  // previously re-introduced the same server-timezone-vs-IST bug
+  // dateSlots.js itself was already fixed for.
+  const todayIso = isoDate(new Date());
 
   const bookingFacts = [
     `Today's date: ${todayIso}`,

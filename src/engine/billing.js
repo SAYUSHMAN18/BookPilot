@@ -1,5 +1,6 @@
 const bookings = require("../store/bookingStore");
 const tenantStore = require("../store/tenantStore");
+const { istDate, toISTFields } = require("./dateSlots");
 
 // New plan, Block 12 — a minimal billing/usage skeleton, matching the
 // marketing site's own existing pricing tiers (README's Pricing section):
@@ -71,13 +72,16 @@ async function tenantHasFeature(tenantId, feature) {
 // "computed on read, not a running counter" philosophy analytics.js
 // already documents and uses — a counter that could drift from what it's
 // summarizing is a worse problem than the scan it would save at this
-// data size. Calendar-month boundary in the server's own local time,
-// same as every other "this month"/"today" boundary in this codebase
-// (e.g. dateSlots.js's isToday check).
+// data size. Calendar-month boundary in IST (the business's own
+// timezone), same as every other "this month"/"today" boundary in this
+// codebase (dateSlots.js's isToday check) — found live (QA pass): this
+// used to build the boundary from the SERVER's own local time (UTC on
+// this app's actual host), miscounting bookings made in the first/last
+// ~5.5 IST hours of a month into the wrong month's usage/quota.
 async function getUsageSummary(tenantId, plan) {
   const config = planConfig(plan);
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const nowIST = toISTFields(new Date());
+  const monthStart = istDate(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), 1).getTime();
 
   const allBookings = await bookings.values(tenantId);
   const bookingsThisMonth = allBookings.filter((b) => b.createdAt >= monthStart).length;

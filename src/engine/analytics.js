@@ -1,5 +1,5 @@
 const bookings = require("../store/bookingStore");
-const { isoDate } = require("./dateSlots");
+const { isoDate, startOfDay } = require("./dateSlots");
 const { getResponseTimeStats } = require("../infra/perf");
 const feedback = require("../store/feedbackStore");
 const paymentStore = require("../store/paymentStore");
@@ -28,8 +28,13 @@ async function computeAnalytics({ tenantId, workflowId = null, providerId = null
     return true;
   });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Found live (QA pass) — this used to be `new Date(); .setHours(0,0,0,0)`,
+  // a LOCAL (server-timezone) midnight — on this app's actual host (Render,
+  // UTC), that's 5:30am IST, not IST midnight. startOfDay() (dateSlots.js)
+  // is the IST-aware version; every "today"-relative calculation below
+  // (the per-day trend window, the no-show cutoff at todayIso further
+  // down) inherits the fix through this one line.
+  const today = startOfDay(new Date());
 
   // Bookings created per day over the window — the demand trend line.
   const perDay = [];
@@ -39,8 +44,11 @@ async function computeAnalytics({ tenantId, workflowId = null, providerId = null
     countsByDay.set(key, (countsByDay.get(key) || 0) + 1);
   }
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
+    // A calendar day is always exactly 24 real hours in IST (no daylight
+    // saving) — subtracting milliseconds directly from the real `today`
+    // instant is correct and sidesteps local setDate()/getDate(), which
+    // would read/write the SERVER's own calendar date, not IST's.
+    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
     const key = isoDate(d);
     perDay.push({ date: key, count: countsByDay.get(key) || 0 });
   }
