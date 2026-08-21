@@ -45,7 +45,7 @@ export default function ManageBusinessesPanel({ refreshKey, bump }) {
       setError(err.message);
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   const list = Object.values(workflows);
 

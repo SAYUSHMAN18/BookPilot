@@ -15,7 +15,7 @@ const THEME_KEY = "bookpilot-theme";
 function currentTheme() {
   try {
     return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
-  } catch (e) {
+  } catch (_e) {
     return "light";
   }
 }
@@ -44,7 +44,13 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.addEventListener("click", () => {
       const next = currentTheme() === "dark" ? "light" : "dark";
       applyTheme(next);
-      try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch (_e) {
+        // localStorage unavailable (private browsing, etc.) — the toggle
+        // still updates the visible theme for this page load, just won't
+        // persist across a reload.
+      }
       render();
     });
   });

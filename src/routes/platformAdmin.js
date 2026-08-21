@@ -48,7 +48,7 @@ router.get("/api/platform/tenants/:id", requireAuth("platform_admin"), asyncHand
   // whatsappAccessToken is a real secret — never returned to any client,
   // including the platform admin's own dashboard (same principle as
   // password_hash never appearing in a users API response).
-  const { whatsappAccessToken, ...safeTenant } = tenant;
+  const { whatsappAccessToken: _whatsappAccessToken, ...safeTenant } = tenant;
   res.json(safeTenant);
 }));
 
@@ -79,7 +79,7 @@ router.get("/api/platform/tenants/:id/detail", requireAuth("platform_admin"), as
 
   await recordAudit(id, req.user, "tenant.viewed", null);
 
-  const { whatsappAccessToken, ...safeTenant } = tenant;
+  const { whatsappAccessToken: _whatsappAccessToken, ...safeTenant } = tenant;
   res.json({
     tenant: safeTenant,
     bookingCount: tenantBookings.length,
@@ -139,7 +139,7 @@ router.patch("/api/platform/tenants/:id/status", requireAuth("platform_admin"), 
   const updated = await tenantStore.setStatus(id, status);
   await recordAudit(id, req.user, "tenant.status_change", { from: existing.status, to: status });
   log("INFO", `${req.user.email} changed tenant ${id} (${existing.slug}) status: ${existing.status} -> ${status}`);
-  const { whatsappAccessToken, ...safeTenant } = updated;
+  const { whatsappAccessToken: _whatsappAccessToken, ...safeTenant } = updated;
   res.json(safeTenant);
 }));
 
@@ -161,7 +161,7 @@ router.patch("/api/platform/tenants/:id/plan", requireAuth("platform_admin"), as
   const updated = await tenantStore.setPlan(id, plan);
   await recordAudit(id, req.user, "tenant.plan_change", { from: existing.plan, to: plan });
   log("INFO", `${req.user.email} changed tenant ${id} (${existing.slug}) plan: ${existing.plan} -> ${plan}`);
-  const { whatsappAccessToken, ...safeTenant } = updated;
+  const { whatsappAccessToken: _whatsappAccessToken, ...safeTenant } = updated;
   res.json(safeTenant);
 }));
 
@@ -263,7 +263,7 @@ router.patch("/api/platform/onboarding-queue/:id/complete", requireAuth("platfor
   await recordAudit(existing.tenantId, req.user, "tenant.status_change", { from: tenant.status, to: "active" });
   await recordAudit(existing.tenantId, req.user, "onboarding.completed", { onboardingRequestId: id });
   log("INFO", `${req.user.email} completed onboarding for tenant ${existing.tenantId} (${tenant.slug}) — now active.`);
-  const { whatsappAccessToken, ...safeTenant } = updatedTenant;
+  const { whatsappAccessToken: _whatsappAccessToken, ...safeTenant } = updatedTenant;
   res.json({ request: updatedRequest, tenant: safeTenant });
 }));
 

@@ -12,7 +12,7 @@ export default function BillingPanel({ refreshKey }) {
   async function load() {
     try { setData(await get("/api/dashboard/billing")); } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   if (error) return <div className="card"><div className="error-banner">{error}</div></div>;
   if (!data) return null;

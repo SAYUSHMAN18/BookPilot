@@ -69,7 +69,7 @@ test("summaryForCustomer: visit count excludes cancelled bookings, lifetime valu
   await payments.markPaid(p1.id, "pay_test_1");
 
   const b2 = await bookings.create(TENANT, waId, makeBooking({ visitTime: "11:00 am" }));
-  const p2 = await payments.create(TENANT, b2.id, { amount: 800 });
+  await payments.create(TENANT, b2.id, { amount: 800 });
   // Left unpaid on purpose — must NOT count toward lifetime value.
 
   const b3 = await bookings.create(TENANT, waId, makeBooking({ visitTime: "12:00 pm" }));

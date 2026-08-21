@@ -66,7 +66,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try { await api("/api/auth/logout", { method: "POST" }); } catch {}
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Best-effort — clear local session state below regardless of
+      // whether the server-side logout call itself succeeded.
+    }
     setUser(null);
     setPending(false);
     setNeedsPlanSelection(false);

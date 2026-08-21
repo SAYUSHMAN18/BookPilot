@@ -35,7 +35,7 @@ export default function CustomerDetailPage() {
       setError(err.message);
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [waId, refreshKey]);
+  useEffect(() => { load();   }, [waId, refreshKey]);
 
   async function saveNote() {
     setNoteSaving(true);

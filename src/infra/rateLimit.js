@@ -1,3 +1,15 @@
+const { recordHit } = require("../store/rateLimitStore");
+
+// Every limiter below used to be a plain in-process Map — correct on a
+// single instance, silently wrong (each instance enforcing its own
+// independent ceiling) the moment more than one runs. src/store/
+// rateLimitStore.js now backs all of them with one shared Postgres table,
+// so the real combined rate is what actually gets enforced regardless of
+// how many instances are running. Every function here is now async (one
+// round-trip to record+count the hit) — every call site already lives
+// inside an async request/message handler, so this is just one more
+// `await`, not a structural change to any caller.
+
 // A single abusive sender shouldn't be able to burn through the Groq quota
 // (or spam DB writes) by firing messages as fast as possible. Sliding
 // window per WhatsApp id — generous enough that no real conversation would
@@ -5,14 +17,9 @@
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 20;
 
-const hits = new Map(); // waId -> timestamps[]
-
-function isRateLimited(waId) {
-  const now = Date.now();
-  const recent = (hits.get(waId) || []).filter((t) => now - t < WINDOW_MS);
-  recent.push(now);
-  hits.set(waId, recent);
-  return recent.length > MAX_PER_WINDOW;
+async function isRateLimited(waId) {
+  const count = await recordHit("chat", waId, WINDOW_MS);
+  return count > MAX_PER_WINDOW;
 }
 
 // Found live: a rate-limited sender got total silence with no way to know
@@ -24,6 +31,12 @@ function isRateLimited(waId) {
 // This tracks "have we already told this sender" separately and caps it
 // to once per window — the first over-limit message in a flood gets a
 // notice, the rest of that same flood stay genuinely silent, same as before.
+// Kept as an in-process Map deliberately (not moved to Postgres like the
+// limiters above): worst case under more than one instance is a customer
+// getting the "you're sending too fast" notice once per instance instead
+// of once total — a cosmetic duplicate text, not a security or correctness
+// property the way an unenforced rate ceiling or a double-processed
+// webhook would be, so it doesn't carry the same cost to fix.
 const notified = new Map(); // waId -> last-notified timestamp
 function shouldNotifyRateLimit(waId) {
   const now = Date.now();
@@ -38,14 +51,10 @@ function shouldNotifyRateLimit(waId) {
 // rather than WhatsApp id and trips at a much lower count.
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 5;
-const loginHits = new Map(); // key (ip:email) -> timestamps[]
 
-function isLoginRateLimited(key) {
-  const now = Date.now();
-  const recent = (loginHits.get(key) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
-  recent.push(now);
-  loginHits.set(key, recent);
-  return recent.length > LOGIN_MAX_ATTEMPTS;
+async function isLoginRateLimited(key) {
+  const count = await recordHit("login", key, LOGIN_WINDOW_MS);
+  return count > LOGIN_MAX_ATTEMPTS;
 }
 
 // Section 14 — the Public API's own limit, keyed by the API key itself
@@ -58,14 +67,10 @@ function isLoginRateLimited(key) {
 // booking's lifecycle are).
 const API_WINDOW_MS = 60 * 1000;
 const API_MAX_PER_WINDOW = 60;
-const apiHits = new Map(); // raw API key -> timestamps[] (in-memory only, never persisted or logged)
 
-function isApiRateLimited(rawKey) {
-  const now = Date.now();
-  const recent = (apiHits.get(rawKey) || []).filter((t) => now - t < API_WINDOW_MS);
-  recent.push(now);
-  apiHits.set(rawKey, recent);
-  return recent.length > API_MAX_PER_WINDOW;
+async function isApiRateLimited(rawKey) {
+  const count = await recordHit("api", rawKey, API_WINDOW_MS);
+  return count > API_MAX_PER_WINDOW;
 }
 
 // Self-serve signup's own limit — keyed by IP only (there's no account yet
@@ -74,14 +79,10 @@ function isApiRateLimited(rawKey) {
 // mass-create tenants.
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
 const SIGNUP_MAX_ATTEMPTS = 8;
-const signupHits = new Map(); // ip -> timestamps[]
 
-function isSignupRateLimited(ip) {
-  const now = Date.now();
-  const recent = (signupHits.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
-  recent.push(now);
-  signupHits.set(ip, recent);
-  return recent.length > SIGNUP_MAX_ATTEMPTS;
+async function isSignupRateLimited(ip) {
+  const count = await recordHit("signup", ip, SIGNUP_WINDOW_MS);
+  return count > SIGNUP_MAX_ATTEMPTS;
 }
 
 // Item 8 — the public marketing site's live chat widget (POST
@@ -94,14 +95,10 @@ function isSignupRateLimited(ip) {
 // trying the demo conversation, tight enough to blunt a script.
 const DEMO_CHAT_WINDOW_MS = 5 * 60 * 1000;
 const DEMO_CHAT_MAX_PER_WINDOW = 30;
-const demoChatHits = new Map(); // ip -> timestamps[]
 
-function isDemoChatRateLimited(ip) {
-  const now = Date.now();
-  const recent = (demoChatHits.get(ip) || []).filter((t) => now - t < DEMO_CHAT_WINDOW_MS);
-  recent.push(now);
-  demoChatHits.set(ip, recent);
-  return recent.length > DEMO_CHAT_MAX_PER_WINDOW;
+async function isDemoChatRateLimited(ip) {
+  const count = await recordHit("demo_chat", ip, DEMO_CHAT_WINDOW_MS);
+  return count > DEMO_CHAT_MAX_PER_WINDOW;
 }
 
 // New plan, Section 2 — OTP requests, keyed by the target email (not IP —
@@ -112,15 +109,11 @@ function isDemoChatRateLimited(ip) {
 // tight enough that scripting this endpoint can't mass-generate codes.
 const OTP_WINDOW_MS = 10 * 60 * 1000;
 const OTP_MAX_PER_WINDOW = 5;
-const otpHits = new Map(); // normalized email -> timestamps[]
 
-function isOtpRateLimited(email) {
-  const now = Date.now();
+async function isOtpRateLimited(email) {
   const key = email.trim().toLowerCase();
-  const recent = (otpHits.get(key) || []).filter((t) => now - t < OTP_WINDOW_MS);
-  recent.push(now);
-  otpHits.set(key, recent);
-  return recent.length > OTP_MAX_PER_WINDOW;
+  const count = await recordHit("otp", key, OTP_WINDOW_MS);
+  return count > OTP_MAX_PER_WINDOW;
 }
 
 module.exports = { isRateLimited, shouldNotifyRateLimit, isLoginRateLimited, isApiRateLimited, isSignupRateLimited, isDemoChatRateLimited, isOtpRateLimited };

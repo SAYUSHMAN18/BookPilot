@@ -11,7 +11,7 @@ export default function ApiKeysPanel({ refreshKey }) {
   async function load() {
     try { setRows(await get("/api/dashboard/api-keys")); } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   async function create() {
     if (!name.trim()) return setError("Give this key a name (e.g. \"Website integration\") so you can tell it apart later.");

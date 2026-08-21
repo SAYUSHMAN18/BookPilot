@@ -48,7 +48,7 @@ function createDemoChatRouter(demoTenantId) {
   // so nothing here ever touches the shape a real WhatsApp id has.
   // ---------------------------------------------------------------------------
   router.post("/api/demo/chat", asyncHandler(async (req, res) => {
-    if (isDemoChatRateLimited(req.ip)) {
+    if (await isDemoChatRateLimited(req.ip)) {
       return res.status(429).json({ error: "Too many demo messages from this connection — please wait a few minutes and try again." });
     }
     const { sessionId, text } = req.body || {};

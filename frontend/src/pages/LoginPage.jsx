@@ -80,8 +80,8 @@ export default function LoginPage() {
             <h1>Reset your password</h1>
             <p>We'll send a reset link if this email has an account.</p>
             <div className="field">
-              <label>Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <label htmlFor="forgot-email">Email</label>
+              <input id="forgot-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             {forgotMsg && <div className="error-banner" style={{ background: "#eef2ff", color: "#3730a3", borderColor: "#c7d2fe" }}>{forgotMsg}</div>}
             <div style={{ display: "flex", gap: 8 }}>
@@ -102,12 +102,12 @@ export default function LoginPage() {
           <h1>BookPilot AI</h1>
           <p>Sign in to your dashboard</p>
           <div className="field">
-            <label>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+            <label htmlFor="login-email">Email</label>
+            <input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </div>
           <div className="field">
-            <label>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <label htmlFor="login-password">Password</label>
+            <input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </div>
           {error && <div className="error-banner">{error}</div>}
           <button className="btn-primary" type="submit" disabled={busy} style={{ width: "100%", padding: "9px 0", marginBottom: 10 }}>

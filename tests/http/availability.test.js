@@ -48,6 +48,7 @@ test("DELETE availability removes the block, and a second delete 404s", async ()
     .post("/api/dashboard/availability")
     .set("Cookie", cookie)
     .send({ workflowId: "hair", providerId: "p1", date: "2026-09-05" });
+  assert.equal(created.status, 201, "the block must actually be created before this test tries to list/delete it");
   const list = await request(app).get("/api/dashboard/availability?workflowId=hair&providerId=p1").set("Cookie", cookie);
   const id = list.body[0].id;
 

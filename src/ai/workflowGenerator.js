@@ -78,7 +78,7 @@ async function generateWorkflowFromDescription(description) {
     workflow = JSON.parse(raw);
   } catch (err) {
     log("ERROR", `AI workflow generator returned invalid JSON: ${err.message}`);
-    throw new Error("The AI's draft wasn't valid JSON — try rephrasing the description, or try again.");
+    throw new Error("The AI's draft wasn't valid JSON — try rephrasing the description, or try again.", { cause: err });
   }
 
   return workflow;

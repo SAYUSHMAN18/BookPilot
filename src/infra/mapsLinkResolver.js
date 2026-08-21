@@ -47,7 +47,7 @@ async function resolveMapsLink(url) {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; BookPilotAI/1.0; +booking-business-setup)" },
     });
   } catch (err) {
-    throw new Error(`Couldn't reach that link: ${err.message}`);
+    throw new Error(`Couldn't reach that link: ${err.message}`, { cause: err });
   } finally {
     clearTimeout(timeout);
   }

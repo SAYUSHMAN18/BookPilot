@@ -5,7 +5,7 @@ import { get, post } from "../lib/api";
 // `done` is computed live from real tenant state server-side (see
 // GET /api/dashboard/setup-checklist) — this component just renders it
 // and lets an admin dismiss the card once they're done exploring it.
-export default function SetupChecklistPanel({ refreshKey, bump }) {
+export default function SetupChecklistPanel({ refreshKey }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [dismissing, setDismissing] = useState(false);
@@ -13,7 +13,7 @@ export default function SetupChecklistPanel({ refreshKey, bump }) {
   async function load() {
     try { setData(await get("/api/dashboard/setup-checklist")); } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   async function dismiss() {
     setDismissing(true);

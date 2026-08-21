@@ -56,6 +56,36 @@ function shipToLogDrain(entry) {
   });
 }
 
+// Self-audit finding: shouldAlert() crossing threshold only ever produced
+// one more log line — indistinguishable from every other line to anyone
+// not actively tailing the file or polling the dashboard, so a real
+// incident could sit unnoticed for however long it took someone to look.
+// Same "unconfigured = fully functional without it, generic over any one
+// vendor" pattern as shipToLogDrain() above: an unset ALERT_WEBHOOK_URL is
+// the default and changes nothing about this app's behavior; setting it to
+// a Slack "Incoming Webhook" URL, a Discord webhook, or any endpoint that
+// accepts a JSON POST turns an error cluster into something that actually
+// reaches a person instead of only ever living in a file. Deliberately a
+// plain JSON POST (not one vendor's SDK/payload shape) — Slack and Discord
+// both also accept a bare `{"text": "..."}` body via their webhook URLs, so
+// the same call works unmodified against either without a vendor-specific
+// branch.
+function sendAlertWebhook(alertLine) {
+  const url = process.env.ALERT_WEBHOOK_URL;
+  if (!url) return;
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: alertLine }),
+  }).catch((err) => {
+    // Deliberately console.error only, not log("ERROR", ...) — routing a
+    // failed ALERT delivery back through log() would re-enter this exact
+    // code path (another ERROR -> another shouldAlert() check), risking a
+    // feedback loop the moment the alert endpoint itself is what's down.
+    console.error(`Failed to deliver alert webhook: ${err.message}`);
+  });
+}
+
 // PII redaction — dozens of call sites across this codebase (webhook
 // handlers, workflowEngine.js's per-message log lines, etc.) already build
 // their final message STRING before calling log(), so redacting at each
@@ -102,6 +132,7 @@ function log(level, rawMessage, meta) {
       const alertLine = `[${nowIST()}] [ALERT] ${count} errors in the last ${Math.round(windowMs / 60000)} minute(s) (threshold ${threshold}) — investigate.`;
       console.error(alertLine);
       fs.appendFileSync(LOG_FILE, alertLine + "\n");
+      sendAlertWebhook(alertLine);
     }
   }
 }

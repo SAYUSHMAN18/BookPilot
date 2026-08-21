@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const express = require("express");
 const { log } = require("../infra/logger");
 const { handleIncomingMessage, getSessionLang } = require("../engine/workflowEngine");
@@ -205,7 +204,7 @@ function createWebhookRouter() {
       const message = value?.messages?.[0];
       if (!message) return; // delivery/read status updates land here too — ignore them
 
-      if (isDuplicate(message.id)) {
+      if (await isDuplicate(message.id)) {
         log("INFO", `Ignoring duplicate webhook delivery for message ${message.id}.`);
         return;
       }

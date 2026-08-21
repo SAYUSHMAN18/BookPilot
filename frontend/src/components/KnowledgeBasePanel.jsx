@@ -37,7 +37,7 @@ export default function KnowledgeBasePanel({ refreshKey, provider, isAdmin, work
       setRows(await get(`/api/dashboard/knowledge${qs}`));
     } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey, provider?.workflowId, isAdmin]);
+  useEffect(() => { load();   }, [refreshKey, provider?.workflowId, isAdmin]);
 
   async function save() {
     if (!title.trim() || !content.trim()) return setError("Title and content are both required.");

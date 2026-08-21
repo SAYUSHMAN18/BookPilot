@@ -56,7 +56,7 @@ export default function AnimatedNumber({ value, format, duration = 700 }) {
       cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", finish);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [value, duration, numeric]);
 
   return fmt(numeric ? Math.round(display) : display);

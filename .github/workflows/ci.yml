@@ -3,14 +3,24 @@ name: CI
 # Section 15 (+ new plan Block 6) — the honest minimum a project this
 # size needs: does the backend test suite still pass, are there any
 # known-vulnerable backend dependencies, do the frontend's own Vitest +
-# RTL smoke tests still pass, does the frontend still build. No lint/
-# format step enforced here (none is configured in the repo — adding one
-# as a CI gate without first agreeing on the actual rules would just be
-# a wall nobody asked for), no deploy step (this project has no hosting
-# target defined yet), no `npm audit` gate on the frontend job — see
-# README's "Frontend rewrite" section for the one already-accepted,
-# dev-server-only Vite/esbuild finding this would otherwise flag on
-# every run. Runs on every push and PR against main.
+# RTL smoke tests still pass, does the frontend still build. No deploy
+# step (this project has no hosting target defined yet), no `npm audit`
+# gate on the frontend job — see README's "Frontend rewrite" section for
+# the one already-accepted, dev-server-only Vite/esbuild finding this
+# would otherwise flag on every run. Runs on every push and PR against main.
+#
+# Self-audit finding — ESLint (eslint.config.js / frontend/eslint.config.js)
+# is now gated here: `eslint:recommended`, low-noise, catches real
+# mistakes (unused vars, undefined globals, unreachable code), not style
+# opinions — a genuinely useful bar to hold, so it blocks the build.
+# Prettier (`npm run format:check`) is deliberately NOT gated: this repo's
+# existing code predates it, and running Prettier's actual formatter
+# against it (tried live, during this same hardening pass) turned out to
+# rewrite nearly every line of a typical file — the codebase's long,
+# deliberately-wrapped explanatory comments and hand-placed line breaks
+# don't match Prettier's own opinions, and a wall-to-wall repo reformat is
+# a much bigger, separate decision than "add a lint gate." `format:check`
+# stays available to run by hand for anyone who wants it later.
 
 on:
   push:
@@ -29,6 +39,8 @@ jobs:
           cache: "npm"
       - run: npm install
       - run: npm test
+      - name: Lint
+        run: npm run lint
       - name: Type-check JSDoc-annotated files
         run: npm run typecheck
       - name: Audit dependencies
@@ -47,5 +59,6 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
       - run: npm install
+      - run: npm run lint
       - run: npm test
       - run: npm run build

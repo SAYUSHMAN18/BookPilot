@@ -15,7 +15,7 @@ export default function SessionsPanel({ refreshKey }) {
   async function load() {
     try { setSessions(await get("/api/auth/sessions")); } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   async function revoke(id) {
     if (!window.confirm("Log out that session? It'll need to sign in again to use the dashboard.")) return;

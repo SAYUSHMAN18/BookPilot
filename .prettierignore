@@ -1,0 +1,7 @@
+node_modules
+frontend
+logs
+data
+coverage
+package-lock.json
+*.md

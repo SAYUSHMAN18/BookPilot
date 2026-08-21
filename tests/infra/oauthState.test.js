@@ -27,7 +27,7 @@ test("signOAuthState produces a token verifyOAuthState can round-trip", () => {
 
 test("verifyOAuthState rejects a tampered token", () => {
   const token = signOAuthState({ tenantId: 1, workflowId: "medical", providerId: "p1" });
-  const [body, sig] = token.split(".");
+  const [, sig] = token.split(".");
   const tamperedBody = Buffer.from(JSON.stringify({ tenantId: 2, workflowId: "medical", providerId: "p1", exp: Date.now() + 60000 })).toString("base64url");
   assert.equal(verifyOAuthState(`${tamperedBody}.${sig}`), null, "a body that doesn't match the original signature must be rejected");
 });

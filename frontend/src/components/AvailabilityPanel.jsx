@@ -20,7 +20,7 @@ export default function AvailabilityPanel({ provider }) {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [provider?.workflowId, provider?.providerId]);
+  useEffect(() => { load();   }, [provider?.workflowId, provider?.providerId]);
 
   if (!provider || !provider.supportsAvailability) return null;
 

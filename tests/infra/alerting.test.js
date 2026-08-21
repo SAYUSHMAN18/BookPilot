@@ -47,3 +47,61 @@ test("logger.js records an ERROR-level log() call into the shared alerting count
   log("INFO", "an info line should not count toward the error rate");
   assert.equal(alerting.getErrorRate().count, 1);
 });
+
+// Self-audit finding: shouldAlert() crossing threshold used to only ever
+// produce one more log line, indistinguishable from any other line to
+// anyone not actively watching. logger.js's sendAlertWebhook() now POSTs a
+// plain {"text": "..."} JSON body (works unmodified as a Slack/Discord
+// incoming webhook) to ALERT_WEBHOOK_URL when set — proven here against a
+// stubbed fetch, same pattern tests/infra/outboundQueue.test.js already
+// uses for stubbing outbound HTTP without a real network call.
+test("crossing the alert threshold POSTs to ALERT_WEBHOOK_URL when one is configured", async () => {
+  alerting._resetForTests();
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.ALERT_WEBHOOK_URL;
+  const calls = [];
+  global.fetch = async (url, opts) => {
+    calls.push({ url, opts });
+    return { ok: true, text: async () => "ok" };
+  };
+  process.env.ALERT_WEBHOOK_URL = "https://hooks.example.test/alert";
+  try {
+    delete require.cache[require.resolve("../../src/infra/logger")];
+    const { log } = require("../../src/infra/logger");
+    for (let i = 0; i < alerting.ERROR_THRESHOLD; i++) log("ERROR", `simulated failure ${i}`);
+
+    // The webhook POST is fire-and-forget (same posture as shipToLogDrain) —
+    // give its already-resolved stubbed fetch a tick to actually run.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(calls.length, 1, "expected exactly one webhook POST for the one threshold crossing");
+    assert.equal(calls[0].url, "https://hooks.example.test/alert");
+    const body = JSON.parse(calls[0].opts.body);
+    assert.match(body.text, /errors in the last/);
+  } finally {
+    global.fetch = originalFetch;
+    process.env.ALERT_WEBHOOK_URL = originalUrl;
+  }
+});
+
+test("no webhook call is made when ALERT_WEBHOOK_URL is not set", async () => {
+  alerting._resetForTests();
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.ALERT_WEBHOOK_URL;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return { ok: true, text: async () => "ok" };
+  };
+  delete process.env.ALERT_WEBHOOK_URL;
+  try {
+    delete require.cache[require.resolve("../../src/infra/logger")];
+    const { log } = require("../../src/infra/logger");
+    for (let i = 0; i < alerting.ERROR_THRESHOLD; i++) log("ERROR", `simulated failure ${i}`);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 0, "unconfigured ALERT_WEBHOOK_URL must mean zero outbound calls, same as LOG_DRAIN_URL's own convention");
+  } finally {
+    global.fetch = originalFetch;
+    process.env.ALERT_WEBHOOK_URL = originalUrl;
+  }
+});

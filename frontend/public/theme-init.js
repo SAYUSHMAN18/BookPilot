@@ -6,6 +6,6 @@ try {
     "data-theme",
     localStorage.getItem("bookpilot-theme") === "dark" ? "dark" : "light"
   );
-} catch (e) {
+} catch (_e) {
   // localStorage unavailable (private browsing, etc.) — default light stays.
 }

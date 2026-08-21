@@ -19,7 +19,7 @@ export default function ManageTeamPanel({ refreshKey, providers, currentUserEmai
   async function load() {
     try { setRows(await get("/api/dashboard/users")); } catch (err) { setError(err.message); }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   async function save() {
     setError("");

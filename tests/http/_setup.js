@@ -75,6 +75,14 @@ async function freshApp({ webhookAppSecret, envOverrides = {} } = {}) {
   // has — none of these HTTP tests are about Razorpay/Calendar/Sarvam,
   // so keep them all in their documented "not configured" fallback mode.
   blank("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET", "SARVAM_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
+  // Same reasoning — a developer's real .env having real object-storage
+  // credentials configured must not make an ordinary HTTP test (or any
+  // test that happens to exercise image upload) start making real PUT
+  // calls to real S3/R2/Spaces. Defaults every test to the local-disk
+  // fallback path (src/infra/uploads.js's own documented behavior when
+  // objectStorage.isConfigured() is false) unless a test explicitly opts
+  // back in via envOverrides.
+  blank("S3_BUCKET", "S3_ENDPOINT", "S3_REGION", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_PUBLIC_URL_BASE");
   // /api/simulate-whatsapp is auto-enabled whenever WHATSAPP_APP_SECRET is
   // unset (server.js's own simulateEndpointEnabled logic) — true by
   // default here, so no extra flag needed unless a test explicitly sets
@@ -100,6 +108,19 @@ async function freshApp({ webhookAppSecret, envOverrides = {} } = {}) {
   const projectRoot = path.join(__dirname, "..", "..");
   const serverPath = path.join(projectRoot, "server.js");
   const srcDir = path.join(projectRoot, "src") + path.sep;
+  // dashboardEvents.js holds a real, dedicated Postgres LISTEN connection
+  // at module scope (Section 11 — can't share the recycled pool the same
+  // way the rest of this bust loop's cache-busting alone fixes). Deleting
+  // its require.cache entry below orphans that live connection to
+  // whichever database THIS freshApp() call is about to move away from,
+  // same class of bug closePreviousPoolIfAny() in isolatedDb.js exists to
+  // avoid for the main pool — closed explicitly here, before the cache
+  // entry that's the only remaining reference to it disappears.
+  const dashboardEventsPath = path.join(srcDir, "infra", "dashboardEvents.js");
+  const cachedDashboardEvents = require.cache[dashboardEventsPath];
+  if (cachedDashboardEvents?.exports?._resetForTests) {
+    await cachedDashboardEvents.exports._resetForTests();
+  }
   for (const resolvedPath of Object.keys(require.cache)) {
     if (resolvedPath === serverPath || resolvedPath.startsWith(srcDir)) {
       delete require.cache[resolvedPath];

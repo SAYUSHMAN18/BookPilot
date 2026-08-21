@@ -1,6 +1,5 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { recordResponseTime, getResponseTimeStats } = require("../../src/infra/perf");
 
 test("getResponseTimeStats: null percentiles with no samples", () => {
   delete require.cache[require.resolve("../../src/infra/perf")];

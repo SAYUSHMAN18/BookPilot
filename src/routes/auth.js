@@ -164,7 +164,7 @@ function requireApiKey(req, res, next) {
     const header = req.get("Authorization") || "";
     const rawKey = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
     if (!rawKey) return res.status(401).json({ error: "Missing Authorization: Bearer <api key> header." });
-    if (isApiRateLimited(rawKey)) return res.status(429).json({ error: "Rate limit exceeded — too many requests with this API key." });
+    if (await isApiRateLimited(rawKey)) return res.status(429).json({ error: "Rate limit exceeded — too many requests with this API key." });
     const tenantId = await apiKeys.verify(rawKey);
     if (!tenantId) return res.status(401).json({ error: "Invalid or revoked API key." });
     const tenant = await tenantStore.getById(tenantId);
@@ -199,7 +199,7 @@ router.post("/api/signup/request-otp", asyncHandler(async (req, res) => {
   if (typeof email !== "string" || !email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
     return res.status(400).json({ error: "A valid email is required." });
   }
-  if (isOtpRateLimited(email.trim())) {
+  if (await isOtpRateLimited(email.trim())) {
     log("WARN", `Signup OTP rate-limited for ${email.trim()}`);
     return res.status(429).json({ error: "Too many codes requested for this email. Please wait a while and try again." });
   }
@@ -230,7 +230,7 @@ router.post("/api/signup", asyncHandler(async (req, res) => {
   if (!process.env.SESSION_SECRET) {
     return res.status(500).json({ error: "Server misconfigured: SESSION_SECRET is not set." });
   }
-  if (isSignupRateLimited(req.ip)) {
+  if (await isSignupRateLimited(req.ip)) {
     log("WARN", `Signup rate-limited for ${req.ip}`);
     return res.status(429).json({ error: "Too many signup attempts. Try again in a while." });
   }
@@ -332,7 +332,7 @@ router.post("/api/auth/login", asyncHandler(async (req, res) => {
     return res.status(400).json({ error: "email and password are required" });
   }
   const rateLimitKey = `${req.ip}:${email.trim().toLowerCase()}`;
-  if (isLoginRateLimited(rateLimitKey)) {
+  if (await isLoginRateLimited(rateLimitKey)) {
     log("WARN", `Login rate-limited for ${rateLimitKey}`);
     return res.status(429).json({ error: "Too many login attempts. Try again in a few minutes." });
   }
@@ -373,7 +373,7 @@ router.post("/api/auth/forgot-password", asyncHandler(async (req, res) => {
     return res.status(400).json({ error: "email is required" });
   }
   const rateLimitKey = `reset:${req.ip}:${email.trim().toLowerCase()}`;
-  if (isLoginRateLimited(rateLimitKey)) {
+  if (await isLoginRateLimited(rateLimitKey)) {
     log("WARN", `Password reset rate-limited for ${rateLimitKey}`);
     return res.status(429).json({ error: "Too many reset requests. Try again in a few minutes." });
   }

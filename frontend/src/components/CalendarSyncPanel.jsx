@@ -16,7 +16,7 @@ export default function CalendarSyncPanel({ provider }) {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [provider?.workflowId, provider?.providerId]);
+  useEffect(() => { load();   }, [provider?.workflowId, provider?.providerId]);
 
   // The OAuth callback (server.js) redirects the top-level browser back
   // to /app?calendar=connected|error — read once on mount.

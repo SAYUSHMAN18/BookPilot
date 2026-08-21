@@ -20,7 +20,7 @@ export default function MarketplacePanel({ workflows, refreshKey, onInstalled })
       setError(err.message);
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey]);
+  useEffect(() => { load();   }, [refreshKey]);
 
   async function handleDelete(id) {
     if (!confirm("Delete this template? Businesses already installed from it are unaffected.")) return;

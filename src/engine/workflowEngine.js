@@ -27,7 +27,7 @@ const { groqChatCompletion, GROQ_MODEL } = require("../ai/groqClient");
 const { translateText, LANG_CODE_MAP } = require("../ai/translate");
 const supportRequests = require("../store/supportRequestStore");
 const billing = require("./billing");
-const { computeQueuePosition, isOptedOutOfAlerts, setAlertsOptedOut } = require("../store/queueStore");
+const { computeQueuePosition, setAlertsOptedOut } = require("../store/queueStore");
 const feedbackStore = require("../store/feedbackStore");
 const paymentStore = require("../store/paymentStore");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
@@ -142,7 +142,7 @@ function fillTemplate(template, session, workflow) {
 // confirmationTemplate, but a hand-edited raw-JSON workflow can still omit
 // one — this generates a reasonable confirmation from whatever the session
 // actually collected, so a booking NEVER finishes in total silence.
-function defaultConfirmationMessage(session, workflow) {
+function defaultConfirmationMessage(session, _workflow) {
   const lines = ["✅ Booking confirmed!", "", `ID: ${session.bookingId}`];
   if (session.selectedProvider) lines.push(`With: ${session.selectedProvider.name}`);
   else if (session.selectedHotel) lines.push(`Hotel: ${session.selectedHotel.name}`);
@@ -186,7 +186,7 @@ function extraFieldsSummary(session) {
 // every other workflow carries it directly on `selectedProvider`. Sent as
 // a best-effort extra ahead of the text confirmation; a missing photo (most
 // providers still don't have one configured) is not an error.
-async function sendConfirmationPhoto(tenantId, waId, session, workflow) {
+async function sendConfirmationPhoto(tenantId, waId, session, _workflow) {
   const photoUrl = session.selectedHotel?.photo || session.selectedProvider?.photo;
   if (!photoUrl) return;
   await sendWhatsAppImage(tenantId, waId, photoUrl);
@@ -509,7 +509,7 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
 // ---------------------------------------------------------------------------
 // 1. AI View My Booking — Intelligent personalized booking summary & tips
 // ---------------------------------------------------------------------------
-async function handleAiViewBooking(tenantId, waId, session, workflows) {
+async function handleAiViewBooking(tenantId, waId, session, _workflows) {
   const activeBooking = await bookings.activeForCustomer(tenantId, waId);
 
   if (!activeBooking) {
@@ -558,6 +558,7 @@ async function handleAiViewBooking(tenantId, waId, session, workflows) {
     const summary = (data.choices?.[0]?.message?.content || "").trim();
     await sendWhatsAppText(tenantId, waId, summary || `📅 *Your Booking Details*\n\n${details}`);
   } catch (err) {
+    log("WARN", `AI booking summary generation failed (${err.message}) — falling back to the plain details block.`);
     await sendWhatsAppText(tenantId, waId, `📅 *Your Booking Details*\n\n${details}`);
   }
 }
@@ -696,10 +697,6 @@ async function sendLanguageSwitchConfirmation(tenantId, waId, session) {
   await sendWhatsAppText(tenantId, waId, msg);
 }
 
-async function handleLanguageToggle(tenantId, waId, session) {
-  await sendLanguagePicker(tenantId, waId, session);
-}
-
 // ---------------------------------------------------------------------------
 // 4. AI Join Waitlist & Smart Time Recommender
 // ---------------------------------------------------------------------------
@@ -741,7 +738,7 @@ async function handleAiWaitlist(tenantId, waId, trimmed, session, workflows) {
 // what they sent isn't one, rather than pretending to have captured it.
 const IMAGE_URL_RE = /https?:\/\/\S*\.(?:png|jpe?g|webp)(?:\?\S*)?$/i;
 
-async function handleAiPhotoUpload(tenantId, waId, trimmed, session, workflows) {
+async function handleAiPhotoUpload(tenantId, waId, trimmed, session, _workflows) {
   if (session.subStage === "AWAITING_PHOTO") {
     if (IMAGE_URL_RE.test(trimmed.trim())) {
       session.photoUrl = trimmed.trim();
@@ -2835,7 +2832,7 @@ async function processMessage(tenantId, waId, text, workflows) {
     return;
   }
 
-  if (isRateLimited(waId)) {
+  if (await isRateLimited(waId)) {
     // Found live: total silence here was the one deliberately-silent path
     // left in an otherwise "always reply" codebase — a customer double-
     // tapping out of impatience, or genuinely venting quickly, got nothing

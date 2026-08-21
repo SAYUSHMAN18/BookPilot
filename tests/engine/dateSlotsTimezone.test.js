@@ -11,7 +11,7 @@
 // against a faked clock (node:test's mock.timers, which can fake `Date`
 // in this Node version) — proof this doesn't regress, not just "the
 // arithmetic looks right."
-const { test, mock } = require("node:test");
+const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { istDate, toISTFields, isoDate, formatTime, parseIsoDate, dateOptions, timeSlotsFor } = require("../../src/engine/dateSlots");
 

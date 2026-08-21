@@ -34,7 +34,7 @@ export default function BookingsPage() {
       setError(err.message);
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [refreshKey, isAdminAccount, ownProvider?.workflowId, ownProvider?.providerId]);
+  useEffect(() => { load();   }, [refreshKey, isAdminAccount, ownProvider?.workflowId, ownProvider?.providerId]);
 
   const filtered = useMemo(() => bookings.filter((b) => {
     if (biz && b.workflowId !== biz) return false;

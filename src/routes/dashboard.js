@@ -30,7 +30,7 @@ const tenantWorkflowStore = require("../store/tenantWorkflowStore");
 const paymentStore = require("../store/paymentStore");
 const razorpay = require("../infra/paymentProviders/razorpayProvider");
 const { refundIfPaid } = require("../engine/paymentRefunds");
-const { uploadImage, uploadDocument } = require("../infra/uploads");
+const { uploadImage, uploadDocument, saveUploadedImage } = require("../infra/uploads");
 const { extractTextFromDocument } = require("../infra/documentExtract");
 const { resolveMapsLink } = require("../infra/mapsLinkResolver");
 const { clearHumanHandoff } = require("../engine/workflowEngine");
@@ -271,9 +271,11 @@ router.get("/api/dashboard/workflows", requireAuth("admin"), asyncHandler(async 
 // Device-upload path for a business/provider photo — the alternative to
 // just pasting an externally-hosted image URL, which is all the "Photo
 // URL" field on a workflow/provider ever supported before. Returns a URL
-// in exactly the same shape ("/uploads/<tenantId>/<file>") that field
-// already accepts, so the frontend just writes the response straight into
-// it — no separate "uploaded image" concept on the backend.
+// in exactly the same shape that field already accepts, so the frontend
+// just writes the response straight into it — no separate "uploaded image"
+// concept on the backend. saveUploadedImage() (src/infra/uploads.js) is
+// what decides local disk vs. real object storage; this route doesn't need
+// to know which.
 router.post("/api/dashboard/upload-image", requireAuth("admin"), (req, res) => {
   uploadImage.single("image")(req, res, async (err) => {
     if (err) {
@@ -284,8 +286,8 @@ router.post("/api/dashboard/upload-image", requireAuth("admin"), (req, res) => {
       return res.status(400).json({ error: message });
     }
     if (!req.file) return res.status(400).json({ error: "No image file provided." });
-    const url = `/uploads/${req.user.tenantId}/${req.file.filename}`;
-    await recordAudit(req.user.tenantId, req.user, "image.upload", { filename: req.file.filename, size: req.file.size });
+    const { url, filename } = await saveUploadedImage(req.user.tenantId, req.file);
+    await recordAudit(req.user.tenantId, req.user, "image.upload", { filename, size: req.file.size });
     res.json({ url });
   });
 });
@@ -1222,74 +1224,6 @@ router.delete(
     });
   })
 );
-
-// Recomputes live queue position for everyone else still active
-// in this provider's queue for this date.
-async function notifyQueueShifts(
-  tenantId,
-  workflowId,
-  providerId,
-  date,
-  excludeId
-) {
-  const others =
-    await sameQueueBookings(
-      tenantId,
-      workflowId,
-      providerId,
-      date,
-      excludeId
-    );
-
-  for (const other of others) {
-    const position =
-      await computeQueuePosition(other);
-
-    if (position !== 0) {
-      continue;
-    }
-
-    if (
-      await wasAlerted(
-        tenantId,
-        other.id
-      )
-    ) {
-      continue;
-    }
-
-    if (
-      await isOptedOutOfAlerts(
-        other.waId
-      )
-    ) {
-      continue;
-    }
-
-    // Mark first so repeated requests cannot create an alert storm.
-    await markAlerted(
-      tenantId,
-      other.id
-    );
-
-    const sent = await sendWithRetry(
-      tenantId,
-      other.waId,
-      `🔔 You're next! ${other.providerName} ` +
-      `will see you shortly for your ${other.visitTime} appointment.` +
-      `\n\n(Reply STOP ALERTS to turn these off.)`
-    );
-
-    if (!sent) {
-      log(
-        "WARN",
-        `"You're next" alert to ${other.waId} ` +
-        `for booking ${other.bookingId} queued for durable retry ` +
-        `after immediate attempts failed.`
-      );
-    }
-  }
-}
 
 // Recomputes live queue position for everyone else still active in this
 // provider's queue for this date and sends a one-time "you're next" alert
