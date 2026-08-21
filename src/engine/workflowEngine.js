@@ -1007,7 +1007,23 @@ async function applyStepInput(tenantId, workflow, step, session, text) {
     const slotIndex = parseListIndex(text);
     const byIndex = slotIndex ? slots[slotIndex - 1] : undefined;
     const match = byText || byIndex;
-    if (!match) return "Sorry, that slot isn't available — someone may have just taken it.";
+    if (!match) {
+      // Found live (QA pass) — this single message used to cover two very
+      // different situations: a customer typing something that was never a
+      // slot at all ("asdkjfh gibberish"), and the genuine race where they
+      // typed back the EXACT slot label they were just shown, but someone
+      // else booked it in the meantime. Telling the first customer "someone
+      // just took it" is actively misleading — no such slot was ever in
+      // play. `labelToMinutes` (dateSlots.js) already knows what a real
+      // slot label looks like ("9:00 am"); a numeric list-tap attempt
+      // (slotIndex, even out of range) is the same kind of genuine attempt.
+      // Anything else gets the same "didn't recognize that" wording
+      // select_provider/select_date already use for their own unmatched input.
+      const wasAGenuineAttempt = labelToMinutes(text) !== null || slotIndex !== null;
+      return wasAGenuineAttempt
+        ? "Sorry, that slot isn't available — someone may have just taken it."
+        : "Sorry, I didn't recognize that — please tap a time slot from the list.";
+    }
     session.data[step.field] = match;
     return null;
   }
@@ -2531,6 +2547,26 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
   // ever picks a navigation intent; the engine below still performs the
   // action, so validation and slot locking are unaffected.
   if (await executeOrchestratedPlan(tenantId, waId, session, workflow, await planPromise, trimmed, workflows)) return;
+
+  // Found live (QA pass): the orchestrator has the final say on whether a
+  // message is ACTIONS.ANSWER_QUESTION, but an AI classification can miss a
+  // genuine, plainly-phrased question ("none of these are a general
+  // physician, do you have one?") and fall back to RETRY_STEP — which then
+  // fell all the way to this step's own raw validation error below
+  // ("Sorry, I didn't recognize that provider..."), misreporting a real
+  // question as garbled input, the exact failure mode ANSWER_QUESTION
+  // above exists to fix. keywordIntent (intentDetector.js) already has a
+  // deterministic QUESTION_RE ("do you have", "is there", "what is", etc.)
+  // used as the DETECTING-stage fallback when Groq is unavailable — same
+  // check here, as a safety net under the orchestrator rather than a
+  // replacement for it, costs nothing extra (no Groq call) and only fires
+  // when the orchestrator already came back inconclusive.
+  if (keywordIntent(trimmed) === INTENTS.QUESTION) {
+    const answer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
+    await sendWhatsAppText(tenantId, waId, answer || "I don't have specific information on that — let's continue with your booking, and you're welcome to ask again anytime.");
+    await sendStepPrompt(tenantId, waId, workflow, step, session);
+    return;
+  }
 
   // Item 9 — loop detection. The orchestrator had its shot at figuring out
   // what they meant and couldn't either; this is the genuine "stuck"

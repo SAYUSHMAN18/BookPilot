@@ -217,11 +217,21 @@
     demoBody.innerHTML = "";
   }
 
-  async function sendLiveDemoMessage(text) {
+  // Found live (QA pass) — a tapped WhatsApp LIST row sends its machine id
+  // ("p1") to the backend, same as a real WhatsApp tap does; this used to
+  // also DISPLAY that raw id as the "customer's" own chat bubble, which
+  // reads as broken/confusing on a public demo (a button tap displayed a
+  // friendly label like "continue" already, since this app's own button
+  // ids happen to already be readable words — the inconsistency was list
+  // rows specifically). Real WhatsApp shows the tapped row's TITLE in the
+  // sender's own history, never the id — `displayText` (defaults to
+  // `sendText`, unchanged for a manually-typed message) is what the
+  // customer bubble shows; `sendText` is still exactly what's sent.
+  async function sendLiveDemoMessage(sendText, displayText = sendText) {
     enterLiveMode();
     const userBubble = document.createElement("div");
     userBubble.className = "bubble in";
-    userBubble.textContent = text;
+    userBubble.textContent = displayText;
     demoBody.appendChild(userBubble);
     demoBody.scrollTop = demoBody.scrollHeight;
 
@@ -238,7 +248,7 @@
       const resp = await fetch("/api/demo/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: demoSessionId(), text }),
+        body: JSON.stringify({ sessionId: demoSessionId(), text: sendText }),
       });
       const data = await resp.json().catch(() => ({}));
       dots.remove();
@@ -263,12 +273,12 @@
           if (part.options && part.options.length) {
             outBubble.className = "bubble list"; // same class the scripted replay above uses for its own list bubbles
             outBubble.innerHTML = `${escapeHtml(part.text)}${part.options
-              .map((o) => `<span class="opt" data-send="${escapeHtml(o.id)}">${escapeHtml(o.title)}</span>`)
+              .map((o) => `<span class="opt" data-send="${escapeHtml(o.id)}" data-title="${escapeHtml(o.title)}">${escapeHtml(o.title)}</span>`)
               .join("")}`;
             outBubble.querySelectorAll(".opt").forEach((el) => {
               el.addEventListener("click", () => {
                 if (liveDemoInput.disabled) return; // a reply is already in flight
-                sendLiveDemoMessage(el.dataset.send);
+                sendLiveDemoMessage(el.dataset.send, el.dataset.title);
               });
             });
           } else {

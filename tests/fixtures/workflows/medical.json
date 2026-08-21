@@ -41,6 +41,14 @@
   "bookingIdPrefix": "APT",
   "providers": [
     {
+      "id": "p6",
+      "name": "Noida Family Health Clinic",
+      "attribute": "General Physician",
+      "fee": 450,
+      "address": "Shop No. 4, Ground Floor, Sector 62 Community Centre, Noida, Uttar Pradesh 201309",
+      "mapQuery": "Noida+Family+Health+Clinic+Sector+62+Noida"
+    },
+    {
       "id": "p1",
       "name": "Sentinel Dental Clinic",
       "attribute": "Dental Clinic",

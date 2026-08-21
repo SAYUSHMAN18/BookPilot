@@ -51,3 +51,21 @@ test("1.10: no keyword match -> no suggestion (never guesses confidently on a mi
 test("1.10: never throws when a workflow has no providers array (e.g. a hotel workflow)", () => {
   assert.equal(suggestSpecialtyProvider("I have a fever", { hotels: [] }), null);
 });
+
+// QA pass — found live: the REAL medical.json fixture (also what seeds the
+// public marketing site's live demo, ensureDemoTenant) had five specialist
+// clinics (dental/gynae/dermatology x2/mental health) and zero general
+// physicians, so suggestSpecialtyProvider's own correct logic above had
+// nothing to match "headache and fever" against — a prospective customer
+// trying exactly the symptom the marketing page's own copy claims to
+// handle ("Understood a symptom, suggested the right doctor") saw the bot
+// offer a dentist and a gynaecologist instead. Fixed by adding a General
+// Physician provider to the fixture; this test pins the fixture itself,
+// not the (already-covered-above) matching logic.
+test("1.10: the real medical.json fixture has a General Physician for common symptoms like headache/fever", () => {
+  const { loadWorkflows } = require("../../src/engine/loadWorkflows");
+  const medical = loadWorkflows().medical;
+  const suggestion = suggestSpecialtyProvider("I have a bad headache and fever since yesterday", medical);
+  assert.ok(suggestion, "expected a specialty suggestion for a common general-medicine symptom");
+  assert.match(suggestion.attribute, /general|physician|family/i);
+});
