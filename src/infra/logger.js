@@ -56,11 +56,28 @@ function shipToLogDrain(entry) {
   });
 }
 
+// PII redaction — dozens of call sites across this codebase (webhook
+// handlers, workflowEngine.js's per-message log lines, etc.) already build
+// their final message STRING before calling log(), so redacting at each
+// call site individually isn't realistic. Redacting once, here, covers all
+// four sinks below (console, app.log, app.jsonl, log drain) in one place.
+// Scoped to digit runs shaped like a phone number (a WhatsApp id, or one
+// typed inside a customer's own message) — NOT blanket redaction of
+// message text, which would make logs useless for actually debugging a
+// conversation. `91******3210` keeps enough to recognize/correlate a
+// specific customer across log lines without exposing the full number.
+const PHONE_DIGITS_RE = /\b(\d{2})\d{5,11}(\d{4})\b/g;
+function redact(text) {
+  if (typeof text !== "string") return text;
+  return text.replace(PHONE_DIGITS_RE, (_match, head, tail) => `${head}${"*".repeat(6)}${tail}`);
+}
+
 // `meta` is optional structured context (e.g. { waId, bookingId }) — kept
 // out of the human-readable line (which every existing call site already
 // composes as one free-text string) but preserved in the JSONL file for
 // anything that queries logs programmatically later.
-function log(level, message, meta) {
+function log(level, rawMessage, meta) {
+  const message = redact(rawMessage);
   // Section 15 — tags the line with the current request's id (if this
   // log call happened inside one — see src/infra/tracing.js), a short
   // 8-char slice for readability in the human-readable line, the full

@@ -58,6 +58,12 @@ const feedback = {
     const rows = await query("SELECT * FROM feedback WHERE tenant_id = $1 ORDER BY created_at DESC", [tenantId]);
     return rows.map(rowToFeedback);
   },
+  // Enterprise Hardening Phase 3, item 1 — the Customer 360 page's own
+  // query, same shape as listForBooking/listForWorkflow above.
+  async listForCustomer(tenantId, waId) {
+    const rows = await query("SELECT * FROM feedback WHERE tenant_id = $1 AND wa_id = $2 ORDER BY created_at DESC", [tenantId, waId]);
+    return rows.map(rowToFeedback);
+  },
   async averageRatingForWorkflow(tenantId, workflowId) {
     // AVG()/COUNT() return Postgres `numeric`/`bigint` — the `pg` driver
     // parses both as STRINGS by default (unlike node:sqlite, which

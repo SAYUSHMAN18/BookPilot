@@ -83,6 +83,34 @@ async function transcribeAudio(buffer, mimeType) {
   };
 }
 
+// Found live: a factual-Q&A reply like
+// "- *FitZone Gym & Fitness Studio* – general gym (free booking)." was
+// read back by Sarvam with the literal asterisks narrated ("asterisk
+// asterisk...") — the reply text is built once for the WhatsApp text
+// bubble (where *bold*/_italic_/~strike~ and a leading "- " bullet are
+// meaningful formatting) and that EXACT string is what gets handed to
+// TTS too (webhook.js's handleVoiceMessage/maybeSendVoiceReply), with
+// nothing in between ever stripping it. None of WhatsApp's markdown
+// means anything spoken aloud — left in, a TTS engine either narrates
+// the punctuation literally or reads it as an odd pause. Only ever
+// applied to the copy going to Sarvam; the WhatsApp bubble itself keeps
+// its original formatting untouched.
+function stripMarkdownForSpeech(text) {
+  return text
+    // WhatsApp recognizes *bold*/_italic_/~strike~ as a single marker
+    // character wrapping non-empty text with no newline inside — keep
+    // the inner text, drop the marker either side of it.
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/_([^_\n]+)_/g, "$1")
+    .replace(/~([^~\n]+)~/g, "$1")
+    // A leading "- " bullet marker, one per line — the list items
+    // themselves still read fine back to back, just without the dash.
+    .replace(/^[ \t]*-\s+/gm, "")
+    // Collapse whatever whitespace the removals above left behind.
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 // Text -> speech. Returns a Buffer of MP3 audio, or null when the language
 // isn't supported for synthesis (caller falls back to a text-only reply).
 //
@@ -100,6 +128,8 @@ async function synthesizeSpeech(text, languageCode) {
     return null;
   }
 
+  const spokenText = stripMarkdownForSpeech(text);
+
   // Sarvam caps input length; a long confirmation message is truncated
   // for the spoken version only — the full text reply is always sent too,
   // so nothing is actually lost to the customer.
@@ -112,7 +142,7 @@ async function synthesizeSpeech(text, languageCode) {
     // everything else too, including output_audio_codec — silently
     // ignoring our "mp3" request and returning WAV, which WhatsApp then
     // rejected at the upload step with no error surfaced until then).
-    body: JSON.stringify({ text: text.slice(0, 1500), language_code: lang, output_audio_codec: "mp3" }),
+    body: JSON.stringify({ text: spokenText.slice(0, 1500), language_code: lang, output_audio_codec: "mp3" }),
   });
   if (!resp.ok) {
     log("ERROR", `Sarvam TTS failed: ${resp.status} ${(await resp.text()).slice(0, 200)}`);
@@ -129,5 +159,6 @@ module.exports = {
   downloadWhatsAppMedia,
   transcribeAudio,
   synthesizeSpeech,
+  stripMarkdownForSpeech,
   TTS_SUPPORTED,
 };

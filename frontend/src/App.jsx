@@ -8,6 +8,7 @@ import PlatformAdminView from "./pages/PlatformAdminView";
 import DashboardLayout from "./layouts/DashboardLayout";
 import OverviewPage from "./pages/OverviewPage";
 import BookingsPage from "./pages/BookingsPage";
+import CustomerDetailPage from "./pages/CustomerDetailPage";
 import AvailabilityPage from "./pages/AvailabilityPage";
 import TeamPage from "./pages/TeamPage";
 import BusinessesPage from "./pages/BusinessesPage";
@@ -99,6 +100,7 @@ export default function App() {
         >
           <Route index element={<OverviewPage />} />
           <Route path="bookings" element={<BookingsPage />} />
+          <Route path="customers/:waId" element={<CustomerDetailPage />} />
           <Route path="availability" element={<AvailabilityPage />} />
           {isAdminAccount && <Route path="team" element={<TeamPage />} />}
           {isAdminAccount && <Route path="businesses" element={<BusinessesPage />} />}

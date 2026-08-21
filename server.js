@@ -77,7 +77,7 @@ process.on("uncaughtException", (err) => {
 const { runMigrations } = require("./src/store/db");
 const users = require("./src/store/userStore");
 const { scheduleReminders } = require("./src/infra/reminders");
-// Outbound queue worker is not implemented in this project.
+const { startOutboundQueueWorker } = require("./src/infra/whatsapp");
 const { UPLOAD_DIR } = require("./src/infra/uploads");
 const { runWithRequestId, newRequestId } = require("./src/infra/tracing");
 const { ensureDemoTenant } = require("./src/infra/demoTenant");
@@ -188,6 +188,28 @@ function validateEnv() {
   }
   if (process.env.NODE_ENV === "production" && !process.env.WHATSAPP_APP_SECRET) {
     log("WARN", "Running with NODE_ENV=production but WHATSAPP_APP_SECRET is not set — webhook signature verification is disabled. Anyone who finds your webhook URL can inject fake messages.");
+  }
+
+  // A missing SESSION_SECRET/APP_ENCRYPTION_KEY only WARNs above — fine for
+  // local dev (a developer sees the warning and fixes it before it
+  // matters), not fine for a real production boot: a missing
+  // SESSION_SECRET means every dashboard login silently fails, and a
+  // missing APP_ENCRYPTION_KEY means tenant WhatsApp/payment credentials
+  // can't be decrypted at all. Both already ARE set on the live Render
+  // deploy (render.yaml lists them as required, sync: false) — this only
+  // guards against a FUTURE misconfigured deploy, it changes nothing about
+  // today's running instance. Throws rather than calling process.exit()
+  // directly: this runs inside bootstrap(), and the real `node server.js`
+  // entry point below already has a .catch() that logs and exits — the
+  // same path that already handles a Postgres-unreachable failure. A test
+  // that `require()`s this file (never `NODE_ENV=production`, and
+  // tests/http/_setup.js's freshApp() always sets both vars) never
+  // exercises this branch.
+  if (process.env.NODE_ENV === "production") {
+    const missing = ["SESSION_SECRET", "APP_ENCRYPTION_KEY"].filter((k) => !process.env[k]);
+    if (missing.length) {
+      throw new Error(`Refusing to boot in production: missing required env var(s): ${missing.join(", ")}. See .env.example.`);
+    }
   }
 }
 
@@ -351,7 +373,7 @@ if (require.main === module) {
     .then(() => {
       app.listen(PORT, () => {
         log("INFO", `BookPilot AI dashboard/bot server listening on port ${PORT}`);
-        //startOutboundQueueWorker(); // polls the durable send queue every 60s
+        startOutboundQueueWorker(); // polls the durable send queue every 60s — drains anything sendWithRetry couldn't get out immediately
         scheduleReminders(); // every 10 minutes — Block 13's 24h/2h pre-appointment reminders
         checkWhatsAppTokenValidity().catch((err) => log("WARN", `WhatsApp token check threw unexpectedly: ${err.message}`));
       });

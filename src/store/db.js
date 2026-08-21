@@ -171,6 +171,17 @@ async function runMigrationsBody() {
     );
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_wa_id ON bookings(wa_id);`);
+  // Composite, tenant-scoped indexes — every real query in this codebase
+  // (customerStore.js, dashboard.js's booking lists/analytics) filters by
+  // tenant_id first, then wa_id/visit_date/status; the single-column
+  // idx_bookings_wa_id above doesn't help those. Plain blocking CREATE
+  // INDEX, not CONCURRENTLY: this table is still small enough for a
+  // sub-second build, and CONCURRENTLY doesn't compose with this file's
+  // crash-safe IF NOT EXISTS idiom (a failed concurrent build leaves an
+  // INVALID index that IF NOT EXISTS then silently skips forever).
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_tenant_wa ON bookings(tenant_id, wa_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_tenant_visit_date ON bookings(tenant_id, visit_date);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bookings_tenant_status ON bookings(tenant_id, status);`);
 
   // The double-booking guarantee: Postgres refuses a second non-cancelled
   // row for the same (workflow_id, provider_id, visit_date, visit_time),
@@ -254,6 +265,27 @@ async function runMigrationsBody() {
       wa_id TEXT PRIMARY KEY,
       alerts_opted_out BOOLEAN NOT NULL DEFAULT false,
       updated_at BIGINT NOT NULL
+    );
+  `);
+
+  // Enterprise Hardening Phase 3, item 2 — an internal, provider-facing
+  // note about a customer (e.g. "prefers window seat", "VIP, always
+  // tips well"), never sent to the customer. Deliberately its OWN table,
+  // tenant-scoped by (tenant_id, wa_id) — unlike customer_preferences
+  // above (intentionally NOT tenant-scoped, since an opt-out is tied to
+  // the real phone number, not to any one business), a note one business
+  // writes about a customer must never leak to a different business that
+  // happens to share the same wa_id. Also distinct from bookings.
+  // provider_note, which is an existing, unrelated field interpolated
+  // into an outbound WhatsApp message on cancel/no-show/complete — this
+  // is purely internal and never sent anywhere.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_notes (
+      tenant_id INTEGER NOT NULL,
+      wa_id TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      updated_at BIGINT NOT NULL,
+      PRIMARY KEY (tenant_id, wa_id)
     );
   `);
 

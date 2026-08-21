@@ -33,6 +33,8 @@ const { refundIfPaid } = require("../engine/paymentRefunds");
 const { uploadImage, uploadDocument } = require("../infra/uploads");
 const { extractTextFromDocument } = require("../infra/documentExtract");
 const { resolveMapsLink } = require("../infra/mapsLinkResolver");
+const { clearHumanHandoff } = require("../engine/workflowEngine");
+const customerStore = require("../store/customerStore");
 const apiKeys = require("../store/apiKeyStore");
 const { syncBookingRescheduled, syncBookingCancelled } = require("../engine/calendarSync");
 const { calendarConnections } = require("../store/calendarStore");
@@ -489,6 +491,60 @@ router.get("/api/dashboard/bookings", requireAuth("admin", "provider"), asyncHan
   rows.sort((a, b) => b.createdAt - a.createdAt);
   res.json(rows);
 }));
+
+// Enterprise Hardening Phase 3, item 1 — Customer 360: everything about
+// one customer (identified by their wa_id) in one call. A provider only
+// ever sees the slice of this that's actually theirs — bookings scoped
+// to their own (workflowId, providerId), same filter PATCH /bookings/:id
+// already uses, and feedback narrowed to just those bookings' ids (the
+// feedback table itself only carries workflow_id, not provider_id, so
+// this is the one reliable way to scope it the same way). A tenant can
+// run more than one business (BusinessesPage) — without this, a provider
+// at Business A could see a shared customer's history with Business B
+// under the same tenant, which is exactly the cross-business leak
+// req.user.workflowId/providerId pinning exists to prevent everywhere
+// else in this file.
+router.get("/api/dashboard/customers/:waId", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const { waId } = req.params;
+  let customerBookings = await bookings.allForCustomer(req.user.tenantId, waId);
+  if (req.user.role === "provider") {
+    customerBookings = customerBookings.filter((b) => b.workflowId === req.user.workflowId && b.providerId === req.user.providerId);
+  }
+  if (customerBookings.length === 0) {
+    return res.status(404).json({ error: "No bookings found for this customer." });
+  }
+
+  const bookingIds = new Set(customerBookings.map((b) => b.id));
+  const allFeedback = await feedbackStore.listForCustomer(req.user.tenantId, waId);
+  const customerFeedback = req.user.role === "provider" ? allFeedback.filter((f) => bookingIds.has(f.bookingId)) : allFeedback;
+
+  const [summary, note] = await Promise.all([
+    customerStore.summaryForCustomer(req.user.tenantId, waId),
+    customerStore.getNote(req.user.tenantId, waId),
+  ]);
+
+  res.json({ waId, summary, bookings: customerBookings, feedback: customerFeedback, note });
+}));
+
+router.patch("/api/dashboard/customers/:waId/note", requireAuth("admin", "provider"), asyncHandler(async (req, res) => {
+  const { waId } = req.params;
+  if (typeof req.body?.note !== "string") return res.status(400).json({ error: "note (string) is required." });
+  if (req.body.note.length > 2000) return res.status(400).json({ error: "note must be 2000 characters or fewer." });
+
+  if (req.user.role === "provider") {
+    // Same protective scoping as the GET above — a provider may only
+    // annotate a customer who actually has a booking with their own
+    // business, not an arbitrary wa_id.
+    const own = (await bookings.allForCustomer(req.user.tenantId, waId))
+      .some((b) => b.workflowId === req.user.workflowId && b.providerId === req.user.providerId);
+    if (!own) return res.status(404).json({ error: "No bookings found for this customer." });
+  }
+
+  const note = req.body.note.trim();
+  await customerStore.setNote(req.user.tenantId, waId, note);
+  res.json({ waId, note });
+}));
+
 // Provider-initiated booking management.
 // Providers can only manage bookings belonging to their own
 // workflowId + providerId. Admins can manage all bookings in the tenant.
@@ -1356,6 +1412,12 @@ router.patch("/api/dashboard/support-requests/:id", requireAuth("admin", "provid
   }
   const updated = await supportRequests.setResolved(req.user.tenantId, id, req.body.resolved);
   await recordAudit(req.user.tenantId, req.user, updated.resolved ? "support_request.resolve" : "support_request.reopen", { id, waId: updated.waId });
+  // Resolving the escalation that (may have) paused the bot for this
+  // customer resumes it — see workflowEngine.js's humanHandoffActive. A
+  // no-op if that conversation's session already moved on (restarted,
+  // expired) or was never actually paused (e.g. a support request that
+  // came from the waitlist/callback flows, which don't set the flag).
+  if (updated.resolved) await clearHumanHandoff(req.user.tenantId, updated.waId);
   res.json(updated);
 }));
 

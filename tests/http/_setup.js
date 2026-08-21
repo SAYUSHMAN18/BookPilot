@@ -39,7 +39,13 @@ function blank(...keys) {
   for (const k of keys) process.env[k] = "";
 }
 
-async function freshApp({ webhookAppSecret } = {}) {
+// `envOverrides` lets a test opt OUT of this function's own normally-safe
+// defaults, for the one case that specifically needs to (Enterprise
+// Hardening Phase 1, item 4 — testing that a production boot with a
+// missing SESSION_SECRET/APP_ENCRYPTION_KEY actually refuses to start).
+// Every existing call site keeps working unchanged since this is additive
+// and every key defaults to the prior hardcoded behavior when omitted.
+async function freshApp({ webhookAppSecret, envOverrides = {} } = {}) {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bookpilot-http-test-"));
   // Postgres (not the old SQLite temp file) is what actually needs to be
   // fresh/isolated per freshApp() call now — sets process.env.DATABASE_URL
@@ -49,8 +55,9 @@ async function freshApp({ webhookAppSecret } = {}) {
   // whatever database the previous freshApp() call in this file left
   // configured.
   await createIsolatedTestDatabase();
-  process.env.SESSION_SECRET = "test-session-secret";
-  process.env.APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
+  process.env.SESSION_SECRET = "sessionSecret" in envOverrides ? envOverrides.sessionSecret : "test-session-secret";
+  process.env.APP_ENCRYPTION_KEY = "appEncryptionKey" in envOverrides ? envOverrides.appEncryptionKey : crypto.randomBytes(32).toString("hex");
+  process.env.NODE_ENV = "nodeEnv" in envOverrides ? envOverrides.nodeEnv : "";
   process.env.WHATSAPP_VERIFY_TOKEN = "test-verify-token";
   process.env.WHATSAPP_APP_SECRET = webhookAppSecret || "";
   // Never let a real outbound call happen from a test run — no WhatsApp

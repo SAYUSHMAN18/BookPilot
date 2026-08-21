@@ -151,10 +151,26 @@ async function detectGeneralIntent(text, hasActiveBooking) {
     // (question/complaint/restart/booking_intent), where being wrong just
     // means one extra clarifying turn — so only these two get this
     // override, not every intent.
+    // Found live (adversarial testing): "this is the third time my booking
+    // got messed up, im really frustrated" — the LLM correctly read this as
+    // complaint, but STATUS_RE's `\bmy (booking|appointment)\b` clause
+    // matches it too (any sentence that mentions "my booking" at all, not
+    // just an actual status question), so the override above forced
+    // check_status and the customer got a flat "No active booking found."
+    // instead of any acknowledgment of what they were upset about. Unlike
+    // the cancel/status false-negative this override exists to prevent, a
+    // false negative on complaint here isn't silent — the STATUS branch
+    // still replies, just with the wrong tone entirely. Narrowed to not
+    // fire when the LLM said complaint AND the customer actually used real
+    // frustration language (isExplicitComplaint) — that combination is
+    // strong enough evidence to trust over the keyword match.
     const keywordGuess = keywordIntent(text);
+    const explicitComplaintOverride =
+      keywordGuess === INTENTS.CHECK_STATUS && intent === INTENTS.COMPLAINT && isExplicitComplaint(text);
     if (
       (keywordGuess === INTENTS.CANCEL_BOOKING || keywordGuess === INTENTS.CHECK_STATUS) &&
-      intent !== keywordGuess
+      intent !== keywordGuess &&
+      !explicitComplaintOverride
     ) {
       log("INFO", `Keyword override: LLM said "${intent}" but CANCEL_RE/STATUS_RE unambiguously matched "${keywordGuess}" — using the keyword signal.`);
       return keywordGuess;

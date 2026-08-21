@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { StatusBadge, PaymentStatusBadge } from "./Badges";
 import { formatIST, whenGeneric } from "../lib/format";
 import { patch, del } from "../lib/api";
@@ -114,7 +115,7 @@ export default function BookingsTable({ bookings, onChanged, showBusinessColumn,
               <tr key={b.id}>
                 {showBusinessColumn && <td>{workflowLabel?.(b.workflowId) || b.workflowId}</td>}
                 <td>{b.bookingId}</td>
-                <td>{b.customerName || "—"}</td>
+                <td>{b.waId ? <Link to={`/customers/${encodeURIComponent(b.waId)}`}>{b.customerName || b.waId}</Link> : (b.customerName || "—")}</td>
                 <td>{b.providerName || "—"}</td>
                 <td>{whenGeneric(b)}</td>
                 <td style={{ whiteSpace: "normal", maxWidth: 220 }}>{bookingDetails(b)}</td>

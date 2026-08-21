@@ -13,6 +13,7 @@ const {
 const { classifyBusiness, couldBeADifferentBusiness } = require("../ai/classify");
 const { loadSessions, saveSession, deleteSession, mapKey } = require("../store/sessionStore");
 const bookings = require("../store/bookingStore"); // SQLite-backed — see src/db.js
+const customerStore = require("../store/customerStore");
 const { SlotTakenError, DateRangeConflictError } = bookings;
 const { dateOptions, timeSlotsFor, parseFlexibleDate, isoDate, parseIsoDate, formatLongDate, labelToMinutes } = require("./dateSlots");
 const { extractContext } = require("../ai/extractContext");
@@ -469,6 +470,19 @@ async function handleAiChat(tenantId, waId, trimmed, session, workflows) {
           content:
             "You are a friendly AI assistant for a booking platform. " +
             "Answer the customer's question helpfully and concisely (2-3 sentences max). " +
+            // Found live (adversarial testing): a garbled/nonsensical message
+            // ("Why he would like to book a haircut appointment for tomorrow
+            // please?" — a mangled voice transcript, not a real question
+            // about anyone) got a confident, fully invented answer back
+            // ("He'd like a fresh, polished look for an upcoming meeting...")
+            // — specific claims about the customer's own reasons, made up
+            // out of nothing. tryAnswerFactually (this bot's OTHER, grounded
+            // Q&A path) already refuses to guess when it has no real data;
+            // this freeform fallback had no equivalent instruction at all.
+            // Same honesty standard applied here, not a second parallel one.
+            "Never invent specific facts, reasons, prices, availability, or other details you don't actually know " +
+            "— if the message is unclear, nonsensical, or you have no real information to answer it, say so honestly " +
+            "and ask them to clarify or rephrase, instead of guessing or making something up. " +
             "If they want to BOOK something, tell them to reply RESTART and choose a service. " +
             (knowledgeBase
               ? `Here is information about the available services:\n\n${knowledgeBase}`
@@ -1717,8 +1731,87 @@ async function resolvePendingCancel(tenantId, waId, session, trimmed, workflows)
 
   const cancelResult = await cancelBookingRow(tenantId, booking, workflows);
   const refundNote = refundStatusNote(cancelResult.refundResult);
-  await sendWhatsAppText(tenantId, waId, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.`);
+  const altSlotNote = await suggestAlternativeSlot(tenantId, workflows[booking.workflowId], booking);
+  await sendWhatsAppText(tenantId, waId, `❌ Done — your booking has been cancelled.${refundNote} Message me anytime if you'd like to make a new one.${altSlotNote}`);
   return true;
+}
+
+// Enterprise Hardening Phase 2, item 1 — a returning customer (has any
+// past booking at all, per customerStore.isReturningCustomer — cheap
+// enough for this hot path) gets offered a one-tap shortcut back into
+// their last workflow, instead of re-picking from the full business list
+// every single time. Deliberately does NOT try to pre-select their exact
+// PROVIDER too and skip straight to date/time — that would mean
+// reimplementing this file's step-sequencing (extraFieldIndex, the
+// review_confirm extra-field interleave in maybeAskNextExtraField, hotel
+// vs. time-slot workflows all needing different handling) a second time,
+// with no test coverage of its own, for what's fundamentally a
+// convenience feature. Landing them back on their usual workflow's own
+// provider list (beginWorkflow, same as picking "hair" from the menu
+// normally) is a real time-save with none of that risk.
+async function offerGreetingOrRebook(tenantId, waId, session, workflows) {
+  if (await customerStore.isReturningCustomer(tenantId, waId)) {
+    const lastBooking = await bookings.mostRecentForCustomer(tenantId, waId);
+    const workflow = lastBooking && workflows[lastBooking.workflowId];
+    // workflow can be missing if the business deleted/renamed it since the
+    // customer's last visit — falls through to the normal menu below.
+    if (workflow) {
+      session.pendingRebook = { workflowId: lastBooking.workflowId };
+      const label = workflow.matchLabel || workflow.label || "your last service";
+      const providerBit = lastBooking.providerName || lastBooking.hotelName;
+      await sendWhatsAppButtons(tenantId, waId,
+        `Welcome back! 👋 Want to book ${label} again${providerBit ? ` (you went with ${providerBit} last time)` : ""}?`,
+        [
+          { id: "rebook_yes", title: "Yes, book again" },
+          { id: "rebook_no", title: "See all options" },
+        ]
+      );
+      return;
+    }
+  }
+  session.awaitingBusinessPick = true;
+  await sendBusinessMenu(tenantId, waId, workflows, session, true);
+}
+
+// Resolves session.pendingRebook against the customer's reply — same
+// one-shot/tap-id-first/ambiguous-reply-restores-state contract as
+// resolvePendingCancel just above, for the same reason (a reply that only
+// means something in this specific context must not be misrouted by a
+// classifier with no way to know that context applies).
+async function resolvePendingRebook(tenantId, waId, session, trimmed, workflows) {
+  const pending = session.pendingRebook;
+  if (!pending) return false;
+
+  const t = trimmed.trim().toLowerCase();
+  session.pendingRebook = null; // one-shot either way
+
+  const isYesTap = t === "rebook_yes";
+  const isNoTap = t === "rebook_no";
+
+  if (isYesTap || /^(yes|y|sure|ok(ay)?|book again|yes please)[.!\s]*$/i.test(t)) {
+    if (!workflows[pending.workflowId]) {
+      // Vanishingly unlikely (deleted between the offer and this reply),
+      // but fall back to the full menu rather than crash on a missing
+      // workflow.
+      session.awaitingBusinessPick = true;
+      await sendBusinessMenu(tenantId, waId, workflows, session, true);
+      return true;
+    }
+    await beginWorkflow(tenantId, waId, session, pending.workflowId, workflows, "");
+    return true;
+  }
+
+  if (isNoTap || /^(no|n|nevermind|never\s*mind|see all|other|something else)[.!\s]*$/i.test(t)) {
+    session.awaitingBusinessPick = true;
+    await sendBusinessMenu(tenantId, waId, workflows, session, true);
+    return true;
+  }
+
+  // Genuinely ambiguous — restore the pending choice and re-ask, same as
+  // resolvePendingCancel's single-booking case, rather than silently
+  // dropping a real reply to a question we just asked.
+  session.pendingRebook = pending;
+  return false;
 }
 
 // Found live: every cancellation message in this file only ever checked
@@ -1738,6 +1831,29 @@ async function resolvePendingCancel(tenantId, waId, session, trimmed, workflows)
 function refundStatusNote(refundResult) {
   if (refundResult?.refunded) return ` A refund of ₹${refundResult.amount / 100} has been issued.`;
   if (refundResult?.error) return " We couldn't process your refund automatically — our team has been notified and will follow up on it.";
+  return "";
+}
+
+// Enterprise Hardening Phase 2, item 2 — smart cancellation recovery.
+// Same pattern as refundStatusNote just above (a pure-ish note-builder
+// called separately at every cancellation message site) and the exact
+// same slot computation the conversational select_time_slot step and the
+// Public API's availability endpoint already use (getAvailableSlots) —
+// no new slot-finding logic, just reusing it here too. Bounded to a
+// 4-day window (today + 3) so a fully-booked provider never costs more
+// than 4 quick queries. Only meaningful for a workflow that actually HAS
+// a select_time_slot step — a hotel's date-range booking has no
+// single "slot" to suggest, so this is a no-op for those.
+async function suggestAlternativeSlot(tenantId, workflow, booking) {
+  if (!workflow || !booking.providerId) return "";
+  if (!workflow.steps.some((s) => s.type === "select_time_slot")) return "";
+
+  for (const { iso, label } of dateOptions(4)) {
+    const slots = await getAvailableSlots(tenantId, workflow, booking.providerId, iso);
+    if (slots.length > 0) {
+      return ` P.S. ${booking.providerName || "they"} ${iso === isoDate(new Date()) ? "still has" : "also has"} an opening on ${label} at ${slots[0]} if you'd like to grab that instead — just message us.`;
+    }
+  }
   return "";
 }
 
@@ -1769,6 +1885,13 @@ async function maybeEscalateConfusion(tenantId, waId, session, workflows, trimme
   await supportRequests.create(tenantId, waId, workflowId, trimmed);
   log("INFO", `Support request logged for ${waId} after ${CONFUSION_ESCALATION_THRESHOLD} consecutive unclear replies (workflow=${workflowId || "unknown"}): "${trimmed}"`);
   dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: trimmed });
+  // A customer stuck enough to hit this threshold isn't well served by
+  // more of the same AI-driven back-and-forth that got them here — pause
+  // the conversational layer (RESTART/CANCEL/STATUS/HERE still work, see
+  // the humanHandoffActive check in processMessage) until a provider
+  // resolves the support request from the dashboard (clearHumanHandoff,
+  // called from dashboard.js's PATCH .../support-requests/:id).
+  session.humanHandoffActive = true;
 
   const workflow = workflowId ? workflows[workflowId] : null;
   const contactLine = workflow?.supportContact ? ` You can also reach us directly at ${workflow.supportContact}.` : "";
@@ -1935,7 +2058,26 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
   }
 
   // --- Ongoing AI chat / Photo upload sub-modes ---
+  // Found live (adversarial testing, real GROQ_API_KEY — the existing
+  // loopDetection.test.js suite runs with GROQ_API_KEY deliberately
+  // blanked for determinism, which is exactly why this never got caught):
+  // the FIRST unclassifiable/unanswerable message in a session correctly
+  // reaches Item 9's maybeEscalateConfusion() below (via handleDetecting's
+  // own unclassifiable-message branch) and, when GROQ_API_KEY is set,
+  // falls through to here with subStage set to AI_CHAT. But every message
+  // after that hit THIS branch directly, unconditionally, before
+  // maybeEscalateConfusion ever ran again — so a customer who stayed
+  // confused past their first miss was parked in freeform AI_CHAT for the
+  // rest of the session with confusionCount frozen, no escalation
+  // possible, no matter how many more unclear messages they sent. The
+  // documented purpose of Item 9 ("a customer who's stuck... deserves the
+  // same real escalation, not an infinite loop") silently stopped applying
+  // after turn one. Checking it here too — same counter, same threshold,
+  // same escalation — means a customer who keeps chatting without ever
+  // getting anywhere still reaches a human, same as one who keeps hitting
+  // the deterministic unclassifiable-message path instead.
   if (session.subStage === "AI_CHAT") {
+    if (await maybeEscalateConfusion(tenantId, waId, session, workflows, trimmed)) return;
     await handleAiChat(tenantId, waId, trimmed, session, workflows);
     return;
   }
@@ -1970,8 +2112,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
       const msg = await t(session, "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else.");
       await sendWhatsAppText(tenantId, waId, msg);
     } else {
-      session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows, session, true);
+      await offerGreetingOrRebook(tenantId, waId, session, workflows);
     }
 
     return;
@@ -1995,8 +2136,7 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
       const msg = await t(session, "Hi! 👋 You already have a booking with us. Reply STATUS to check it, or tell me if you'd like to book something else.");
       await sendWhatsAppText(tenantId, waId, msg);
     } else {
-      session.awaitingBusinessPick = true;
-      await sendBusinessMenu(tenantId, waId, workflows, session, true);
+      await offerGreetingOrRebook(tenantId, waId, session, workflows);
     }
 
     return;
@@ -2063,7 +2203,20 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     // real attempt at an answer, not a business list.
     const factualAnswer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
     if (factualAnswer) {
-      await sendWhatsAppText(tenantId, waId, factualAnswer);
+      // Found live (adversarial testing): a bare category word like
+      // "hotel" or "medical" is genuinely ambiguous — could mean "tell me
+      // about your hotels" or "I want to book a hotel" — and Groq's
+      // classifier doesn't always land on the same read for a one-word,
+      // context-free message. When it reads as a question, this answers
+      // it correctly and honestly (real listings, real prices, grounded
+      // in the business's own data) — but then just stopped, leaving the
+      // customer with information and no visible next step, no
+      // `[reply with: x]` codes, nothing telling them HOW to actually
+      // book what they just read about. Every question answered here
+      // gets a short, consistent nudge back toward the one thing that
+      // always works regardless of what was asked.
+      const cta = await t(session, "\n\nReady to book? Just tell me what you'd like, or reply RESTART to see everything we offer.");
+      await sendWhatsAppText(tenantId, waId, factualAnswer + cta);
     } else if (process.env.GROQ_API_KEY) {
       session.subStage = "AI_CHAT";
       await handleAiChat(tenantId, waId, trimmed, session, workflows);
@@ -2106,6 +2259,11 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     await supportRequests.create(tenantId, waId, workflowId, trimmed);
     log("INFO", `Support request logged for ${waId} (workflow=${workflowId || "unknown"}): "${trimmed}"`);
     dashboardEvents.publish(tenantId, "support_request.created", { workflowId, waId, message: trimmed });
+    // Same reasoning as maybeEscalateConfusion — no active booking depends
+    // on the bot right now, so pause the AI-conversational layer rather
+    // than keep re-offering the same automated help that already fell
+    // short twice.
+    session.humanHandoffActive = true;
 
     const workflow = workflowId ? workflows[workflowId] : null;
     const contactLine = workflow?.supportContact
@@ -2134,7 +2292,14 @@ async function handleDetecting(tenantId, waId, session, trimmed, workflows) {
     const factualAnswer = await tryAnswerFactually(tenantId, trimmed, workflows, session.history);
     if (factualAnswer) {
       session.confusionCount = 0; // a real answer means they weren't actually stuck
-      await sendWhatsAppText(tenantId, waId, factualAnswer);
+      // Found live (adversarial testing) — same gap as the QUESTION-intent
+      // branch above, reached via a different path: classifyBusiness
+      // itself can call a bare category word like "hotel" "unclear" (a
+      // genuinely ambiguous one-word message), landing here instead of
+      // the QUESTION branch. Same fix, same reasoning — an answer with no
+      // visible next step is a dead end.
+      const cta = await t(session, "\n\nReady to book? Just tell me what you'd like, or reply RESTART to see everything we offer.");
+      await sendWhatsAppText(tenantId, waId, factualAnswer + cta);
       return;
     }
 
@@ -2272,7 +2437,8 @@ async function handleRunning(tenantId, waId, session, trimmed, workflows) {
       const cancelResult = await cancelActiveBooking(tenantId, waId, workflows); // persist the cancellation to the DB
       sessions.delete(mapKey(tenantId, waId));
       const refundNote = refundStatusNote(cancelResult?.refundResult);
-      await sendWhatsAppText(tenantId, waId, `❌ Booking cancelled.${refundNote} Send a message anytime to start a new one.`);
+      const altSlotNote = cancelResult?.booking ? await suggestAlternativeSlot(tenantId, workflows[cancelResult.booking.workflowId], cancelResult.booking) : "";
+      await sendWhatsAppText(tenantId, waId, `❌ Booking cancelled.${refundNote} Send a message anytime to start a new one.${altSlotNote}`);
       return;
     }
     if (isPriceObjection(trimmed)) {
@@ -2377,7 +2543,8 @@ async function executeOrchestratedPlan(tenantId, waId, session, workflow, plan, 
     const cancelResult = await cancelActiveBooking(tenantId, waId, workflows); // persist the cancellation to the DB before clearing the session
     sessions.delete(mapKey(tenantId, waId));
     const refundNote = refundStatusNote(cancelResult?.refundResult);
-    await sendWhatsAppText(tenantId, waId, `❌ No problem — I've cancelled that booking.${refundNote} Message me anytime to start a new one.`);
+    const altSlotNote = cancelResult?.booking ? await suggestAlternativeSlot(tenantId, workflows[cancelResult.booking.workflowId], cancelResult.booking) : "";
+    await sendWhatsAppText(tenantId, waId, `❌ No problem — I've cancelled that booking.${refundNote} Message me anytime to start a new one.${altSlotNote}`);
     return true;
   }
 
@@ -2596,7 +2763,28 @@ async function handleHereCommand(tenantId, waId) {
 // silently operate across tenants.
 async function processMessage(tenantId, waId, text, workflows) {
   const trimmed = (text || "").trim();
-  if (!trimmed) return;
+  if (!trimmed) {
+    // Found live (adversarial testing): a message that's whitespace-only
+    // after trimming ("   ") is truthy — so it passes webhook.js's own
+    // `if (text)` guard and reaches here — but trims to "", so this used
+    // to just `return` with zero reply and zero log line: a customer who
+    // fat-fingered a lone space (or whose client sent one for some other
+    // reason) got total silence, no different from the number being dead.
+    // Every other path in this codebase treats silent failure as a bug
+    // (see the rate-limit branch's own comment right below) — this one
+    // had been missed. A real empty string ("") can't actually reach
+    // here from a real WhatsApp message (webhook.js's truthiness check
+    // already filters it before this function is ever called), so this
+    // only ever fires for the whitespace-only case in practice.
+    if (text) {
+      try {
+        await sendWhatsAppText(tenantId, waId, "I didn't catch that — could you type your message again?");
+      } catch (err) {
+        log("WARN", `Whitespace-only-message notice failed to send to ${waId}: ${err.message}`);
+      }
+    }
+    return;
+  }
 
   if (isRateLimited(waId)) {
     // Found live: total silence here was the one deliberately-silent path
@@ -2729,6 +2917,13 @@ async function processMessage(tenantId, waId, text, workflows) {
       return;
     }
 
+    // Same reasoning as resolvePendingCancel just above — if
+    // offerGreetingOrRebook just asked "want to rebook?", THIS message is
+    // that answer.
+    if (await resolvePendingRebook(tenantId, waId, session, trimmed, workflows)) {
+      return;
+    }
+
     // Section 4.3 — if the provider just completed this customer's most
     // recent booking and asked for feedback, THIS message is that
     // feedback, not a new booking attempt or a question. Checked here,
@@ -2787,13 +2982,21 @@ async function processMessage(tenantId, waId, text, workflows) {
         feedbackText = String(rating);
       }
 
-      await feedbackStore.create(
+      const createdFeedback = await feedbackStore.create(
         tenantId,
         feedbackBooking.id,
         feedbackBooking.workflowId,
         waId,
         feedbackText
       );
+      // A tapped list button (feedback_rating_N) already set `rating`
+      // above; free text ("5 stars, great service!" / bare "5") didn't,
+      // even though feedbackStore.create() parses a rating out of it too
+      // (see its own parseRating) — falling back to that here means the
+      // "Thank you for your N/5 rating!" reply (and the review-link nudge
+      // below) actually fires for the common case of a customer just
+      // typing their rating, not only the list-tap path.
+      rating = rating || createdFeedback.rating;
 
       // Make the feedback request one-shot.
       await bookings.clearFeedbackRequest(
@@ -2819,10 +3022,21 @@ async function processMessage(tenantId, waId, text, workflows) {
       );
 
       if (rating) {
+        // reviewLink is an optional workflow-level field, same shape/
+        // pattern as the existing supportContact (a plain string, set on
+        // the workflow object, no dedicated dashboard field of its own
+        // yet — edited the same way supportContact already is). Only
+        // nudged for a genuinely positive rating (4-5) — asking a 1-3
+        // rating to also leave a public review would be actively bad
+        // advice for the business.
+        const workflow = workflows[feedbackBooking.workflowId];
+        const reviewNudge = rating >= 4 && workflow?.reviewLink
+          ? ` If you have a moment, we'd really appreciate a public review too: ${workflow.reviewLink}`
+          : "";
         await sendWhatsAppText(
           tenantId,
           waId,
-          `Thank you for your ${rating}/5 rating! 🙏`
+          `Thank you for your ${rating}/5 rating! 🙏${reviewNudge}`
         );
       } else {
         await sendWhatsAppText(
@@ -2836,6 +3050,21 @@ async function processMessage(tenantId, waId, text, workflows) {
     }
 
     log("INFO", `Message from ${waId} [tenant=${tenantId}, stage=${session.stage}]: "${trimmed}"`);
+
+    // A provider is (expected to be) reaching out directly — see
+    // maybeEscalateConfusion/the DETECTING COMPLAINT branch, which set
+    // this once escalation genuinely happens. Deliberately sits AFTER the
+    // restart/cancel/status/here/stop-alerts commands and pending-cancel/
+    // feedback capture above (all still fully self-serve during a
+    // handoff), and only gates the AI-conversational dispatch below —
+    // silent rather than a repeated canned reply, since the one-time
+    // escalation message already told them what's happening. Cleared by
+    // clearHumanHandoff(), called from dashboard.js when the support
+    // request is marked resolved.
+    if (session.humanHandoffActive) {
+      log("INFO", `Message from ${waId} suppressed — human handoff active, awaiting provider follow-up.`);
+      return;
+    }
 
     if (session.stage === "DETECTING") {
       await handleDetecting(tenantId, waId, session, trimmed, workflows);
@@ -2890,4 +3119,28 @@ function getSessionLang(tenantId, waId) {
   return sessions.get(mapKey(tenantId, waId))?.lang || null;
 }
 
-module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots, initSessions, getSessionLang };
+// Same narrow read-only-accessor pattern as getSessionLang, just above —
+// lets the dashboard show a "bot paused, awaiting your reply" indicator
+// on an unresolved support request without exposing the whole session
+// object.
+function isHumanHandoffActive(tenantId, waId) {
+  return Boolean(sessions.get(mapKey(tenantId, waId))?.humanHandoffActive);
+}
+
+// Resumes the bot for a conversation escalated via humanHandoffActive
+// (see processMessage). Deliberately a no-op — never throws — when no
+// session exists for this wa_id (it may have restarted/expired on its
+// own since escalation) or when the flag was never set, since a provider
+// resolving an old/already-cleared support request is a normal case, not
+// an error. Persists immediately (not just in-memory) via the same
+// persist() every message handler already uses — a resolve action from
+// the dashboard must survive a process restart just as reliably as any
+// other session change.
+async function clearHumanHandoff(tenantId, waId) {
+  const session = sessions.get(mapKey(tenantId, waId));
+  if (!session) return;
+  session.humanHandoffActive = false;
+  await persist(tenantId, waId);
+}
+
+module.exports = { handleIncomingMessage, suggestSpecialtyProvider, resolvePaymentRequirement, getAvailableSlots, initSessions, getSessionLang, clearHumanHandoff, isHumanHandoffActive };

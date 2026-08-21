@@ -17,6 +17,21 @@ function keywordClassify(text, workflows) {
     // hit a reclassifiable step (couldBeADifferentBusiness below hits the
     // exact same gap). No keywords just means this workflow never matches
     // via the fallback path, same as an empty list would.
+    //
+    // Found live (adversarial testing): a bare, short customer message
+    // that's exactly a business's own id/name — the single word "hair",
+    // typed after Groq happened to return an empty/unparseable
+    // classification — never matched here, because every keyword is a
+    // multi-word PHRASE ("hair color", "hairstyle", ...) and q.includes(k)
+    // requires the CUSTOMER's message to be the longer string. A one-word
+    // message can never contain a longer keyword phrase. The result was a
+    // dead end: classification returned no match, so instead of the real
+    // booking flow the customer got a plain informational answer with no
+    // way to actually proceed. couldBeADifferentBusiness below already
+    // learned this exact lesson (see its own comment) — checking id/label
+    // too, not just keywords, closes the same gap here.
+    if (q.includes(workflow.id.toLowerCase())) return { workflowId: workflow.id, source: "keyword-fallback" };
+    if (workflow.label && q.includes(workflow.label.toLowerCase())) return { workflowId: workflow.id, source: "keyword-fallback" };
     if ((workflow.keywords || []).some((k) => q.includes(k))) {
       return { workflowId: workflow.id, source: "keyword-fallback" };
     }

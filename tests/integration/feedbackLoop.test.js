@@ -7,19 +7,20 @@ const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
 const { createIsolatedTestDatabase } = require("../helpers/isolatedDb");
 
-let bookings, feedback, handleIncomingMessage, workflows;
+let bookings, feedback, handleIncomingMessage, workflows, beginReplyCapture, endReplyCapture;
 const TENANT = 1; // the default tenant, created by db.js's own migration
 
 before(async () => {
   process.env.SESSION_SECRET = "test-secret";
   process.env.GROQ_API_KEY = "test-key-not-real"; // present but any Groq call should never fire in this path
   await createIsolatedTestDatabase();
-  for (const mod of ["../../src/store/db", "../../src/store/bookingStore", "../../src/store/feedbackStore", "../../src/engine/workflowEngine", "../../src/engine/loadWorkflows"]) {
+  for (const mod of ["../../src/store/db", "../../src/store/bookingStore", "../../src/store/feedbackStore", "../../src/engine/workflowEngine", "../../src/engine/loadWorkflows", "../../src/infra/whatsapp"]) {
     delete require.cache[require.resolve(mod)];
   }
   bookings = require("../../src/store/bookingStore");
   feedback = require("../../src/store/feedbackStore");
   ({ handleIncomingMessage } = require("../../src/engine/workflowEngine"));
+  ({ beginReplyCapture, endReplyCapture } = require("../../src/infra/whatsapp"));
   const { loadWorkflows } = require("../../src/engine/loadWorkflows");
   workflows = loadWorkflows();
 });
@@ -98,4 +99,65 @@ test("parseRating handles common phrasings and rejects out-of-range/non-numeric 
   assert.equal((await feedback.create(TENANT, booking.id, "medical", waId, "4/5, would recommend")).rating, 4);
   assert.equal((await feedback.create(TENANT, booking.id, "medical", waId, "no rating just words")).rating, null);
   assert.equal((await feedback.create(TENANT, booking.id, "medical", waId, "9 out of 5 amazing")).rating, null, "9 is out of the valid 1-5 range");
+});
+
+// Enterprise Hardening Phase 2, item 3 — a genuinely positive rating (4-5)
+// nudges the customer toward a public review, when the workflow has one
+// configured; a middling/low rating never does, and no reviewLink means
+// no nudge either way.
+test("reviewLink: a 5-star rating with reviewLink configured gets the review nudge appended", async () => {
+  const waId = "919888800005";
+  const booking = await bookings.create(TENANT, waId, {
+    bookingId: "FB-TEST-5", workflowId: "medical", providerId: "p5", providerName: "Dr. Five",
+    visitDate: "2020-01-01", visitTime: "9:00 am", customerName: "X", status: "done", createdAt: Date.now(),
+  });
+  await bookings.updateWithMeta(TENANT, booking.id, { status: "done", feedbackRequestedAt: Date.now() });
+
+  const priorReviewLink = workflows.medical.reviewLink;
+  workflows.medical.reviewLink = "https://g.page/r/test-review-link";
+  try {
+    beginReplyCapture(waId);
+    await handleIncomingMessage(TENANT, waId, "5", workflows);
+    const reply = endReplyCapture(waId);
+    assert.match(reply, /Thank you for your 5\/5 rating/);
+    assert.match(reply, /https:\/\/g\.page\/r\/test-review-link/);
+  } finally {
+    workflows.medical.reviewLink = priorReviewLink;
+  }
+});
+
+test("reviewLink: a 3-star rating never gets the review nudge, even with reviewLink configured", async () => {
+  const waId = "919888800006";
+  const booking = await bookings.create(TENANT, waId, {
+    bookingId: "FB-TEST-6", workflowId: "medical", providerId: "p6", providerName: "Dr. Six",
+    visitDate: "2020-01-01", visitTime: "9:00 am", customerName: "X", status: "done", createdAt: Date.now(),
+  });
+  await bookings.updateWithMeta(TENANT, booking.id, { status: "done", feedbackRequestedAt: Date.now() });
+
+  const priorReviewLink = workflows.medical.reviewLink;
+  workflows.medical.reviewLink = "https://g.page/r/test-review-link";
+  try {
+    beginReplyCapture(waId);
+    await handleIncomingMessage(TENANT, waId, "3", workflows);
+    const reply = endReplyCapture(waId);
+    assert.match(reply, /Thank you for your 3\/5 rating/);
+    assert.doesNotMatch(reply, /g\.page/, "a middling rating should never be asked for a public review");
+  } finally {
+    workflows.medical.reviewLink = priorReviewLink;
+  }
+});
+
+test("reviewLink: no nudge at all when the workflow has no reviewLink configured", async () => {
+  const waId = "919888800007";
+  const booking = await bookings.create(TENANT, waId, {
+    bookingId: "FB-TEST-7", workflowId: "medical", providerId: "p7", providerName: "Dr. Seven",
+    visitDate: "2020-01-01", visitTime: "9:00 am", customerName: "X", status: "done", createdAt: Date.now(),
+  });
+  await bookings.updateWithMeta(TENANT, booking.id, { status: "done", feedbackRequestedAt: Date.now() });
+
+  assert.equal(workflows.medical.reviewLink, undefined, "sanity check — no reviewLink configured by default");
+  beginReplyCapture(waId);
+  await handleIncomingMessage(TENANT, waId, "5", workflows);
+  const reply = endReplyCapture(waId);
+  assert.match(reply, /Thank you for your 5\/5 rating! 🙏$/, "reply should end right after the rating line, no trailing nudge text");
 });

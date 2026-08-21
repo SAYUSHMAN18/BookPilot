@@ -201,6 +201,21 @@ const bookings = {
     return rowToBooking(rows[0]);
   },
 
+  // Enterprise Hardening Phase 3, item 1 — the Customer 360 dashboard
+  // page's own query: every booking this customer ever had with this
+  // tenant, terminal statuses included (unlike every "for the bot" query
+  // above, which deliberately excludes done/cancelled/no_show because
+  // the bot only ever cares what's still actionable — a provider looking
+  // at a customer's history wants the whole thing).
+  /** @param {number} tenantId @param {string} waId @returns {Promise<Booking[]>} */
+  async allForCustomer(tenantId, waId) {
+    const rows = await query(
+      "SELECT * FROM bookings WHERE tenant_id = $1 AND wa_id = $2 ORDER BY created_at DESC",
+      [tenantId, waId]
+    );
+    return rows.map(rowToBooking);
+  },
+
   // What STATUS/HERE/CANCEL should actually operate on. A terminal
   // booking (done, cancelled, or no_show) is history, not something to
   // check into, cancel, or resurface as "your current booking" — using

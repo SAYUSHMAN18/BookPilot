@@ -105,6 +105,12 @@
     <symbol id="icon-plus" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M10 3.5v13M3.5 10h13"/>
     </symbol>
+    <symbol id="icon-user" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="6.5" r="3.5"/><path d="M3 17c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5"/>
+    </symbol>
+    <symbol id="icon-briefcase" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="6.5" width="15" height="10.5" rx="2"/><path d="M7 6.5V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M2.5 11h15"/>
+    </symbol>
   </svg>
 
   <div class="grain"></div>
@@ -120,6 +126,7 @@
         <a href="#how">How it works</a>
         <a href="#features">Features</a>
         <a href="#demo">Live demo</a>
+        <a href="#tour">Dashboard tour</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -133,6 +140,7 @@
       <a href="#how">How it works</a>
       <a href="#features">Features</a>
       <a href="#demo">Live demo</a>
+      <a href="#tour">Dashboard tour</a>
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
       <a href="/app">Log in</a>
@@ -302,6 +310,35 @@
     </div>
   </section>
 
+  <!-- ============ DASHBOARD TOUR ============ -->
+  <!-- Real footage, not a mockup — every other visual on this page (the
+       hero phone, the live-demo phone) is a simulated WhatsApp screen for
+       the CUSTOMER side of the product; nothing showed the business
+       owner's own side until now. Captured directly from a running
+       BookPilot AI dashboard (public/marketing/media/dashboard-tour.gif). -->
+  <section class="tour" id="tour">
+    <div class="section-inner">
+      <h2 data-reveal>The other half of the product: your dashboard</h2>
+      <p class="section-sub" data-reveal>While the AI handles WhatsApp, this is where you run the business — real footage, not a mockup.</p>
+      <div class="tour-frame" data-reveal>
+        <div class="browser-chrome">
+          <span class="chrome-dot chrome-dot-1"></span>
+          <span class="chrome-dot chrome-dot-2"></span>
+          <span class="chrome-dot chrome-dot-3"></span>
+          <span class="chrome-url"><svg class="icon"><use href="#icon-check-circle"/></svg> bookpilot.ai/app</span>
+        </div>
+        <img class="tour-media" src="/marketing/media/dashboard-tour.gif" width="1568" height="709" loading="lazy"
+             alt="A walkthrough of the BookPilot AI dashboard: the bookings list, a customer's full profile with visit history and a private note, live analytics, and the businesses you manage" />
+      </div>
+      <div class="tour-points" data-reveal>
+        <div class="tour-point"><svg class="icon"><use href="#icon-calendar"/></svg> Every booking, filterable and searchable — one click to export as CSV</div>
+        <div class="tour-point"><svg class="icon"><use href="#icon-user"/></svg> A full profile per customer: visit history, lifetime value, a private note only your team sees</div>
+        <div class="tour-point"><svg class="icon"><use href="#icon-bar-chart"/></svg> Real analytics — no-show rate, busiest slots, provider performance, at a glance</div>
+        <div class="tour-point"><svg class="icon"><use href="#icon-clipboard"/></svg> Run every business you own from the same screen, side by side</div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ FEATURES ============ -->
   <section class="features" id="features">
     <div class="section-inner">
@@ -364,9 +401,11 @@
       <p class="section-sub" data-reveal>Get listed for the price of a coffee. Upgrade when the bookings start rolling in.</p>
       <div class="pricing-grid">
         <div class="price-card" data-reveal>
+          <div class="price-icon"><svg class="icon"><use href="#icon-zap"/></svg></div>
           <div class="price-name">Starter</div>
           <div class="price-amount">₹199<span>/mo</span></div>
-          <div class="price-desc">Get listed and start taking real bookings</div>
+          <div class="price-perday">≈ ₹7/day — less than a chai</div>
+          <div class="price-desc">Perfect for getting your first bookings online</div>
           <ul class="price-features">
             <li>Shared WhatsApp booking number</li>
             <li>Up to 30 bookings/mo</li>
@@ -378,10 +417,12 @@
           <a href="/signup" class="btn btn-outline btn-full">Get started</a>
         </div>
         <div class="price-card price-featured" data-reveal>
-          <div class="price-badge">Most popular</div>
+          <div class="price-badge"><svg class="icon"><use href="#icon-sparkle"/></svg> Most popular</div>
+          <div class="price-icon price-icon-featured"><svg class="icon"><use href="#icon-sparkle"/></svg></div>
           <div class="price-name">Growth</div>
           <div class="price-amount">₹1,999<span>/mo</span></div>
-          <div class="price-desc">For a business with a real front desk</div>
+          <div class="price-perday">≈ ₹67/day — one missed booking usually costs more</div>
+          <div class="price-desc">For when WhatsApp <em>is</em> your front desk</div>
           <ul class="price-features">
             <li>Everything in Starter</li>
             <li>Unlimited bookings</li>
@@ -395,9 +436,11 @@
           <a href="/signup" class="btn btn-primary btn-full">Start Growth plan</a>
         </div>
         <div class="price-card" data-reveal>
+          <div class="price-icon"><svg class="icon"><use href="#icon-briefcase"/></svg></div>
           <div class="price-name">Enterprise</div>
           <div class="price-amount">Custom</div>
-          <div class="price-desc">For multi-location or high-volume operators</div>
+          <div class="price-perday">Priced around how you actually operate</div>
+          <div class="price-desc">Built for multi-location &amp; high-volume operators</div>
           <ul class="price-features">
             <li>Everything in Growth</li>
             <li>Public API access — build your own booking widget</li>
@@ -411,7 +454,11 @@
           </div>
         </div>
       </div>
-      <p class="pricing-footnote" data-reveal>Every plan gets the full AI booking engine — the differences above are real, enforced limits, not marketing fine print.</p>
+      <div class="pricing-trust" data-reveal>
+        <span><svg class="icon"><use href="#icon-check-circle"/></svg> No lock-in contracts — cancel anytime</span>
+        <span><svg class="icon"><use href="#icon-check-circle"/></svg> Every plan gets the full AI booking engine</span>
+        <span><svg class="icon"><use href="#icon-check-circle"/></svg> Real, enforced limits — not marketing fine print</span>
+      </div>
     </div>
   </section>
 
@@ -467,6 +514,7 @@
         <a href="#how">How it works</a>
         <a href="#pricing">Pricing</a>
         <a href="#demo">Live demo</a>
+        <a href="#tour">Dashboard tour</a>
       </div>
       <div class="footer-col">
         <h4>Account</h4>
