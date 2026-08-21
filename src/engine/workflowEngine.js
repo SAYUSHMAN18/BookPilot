@@ -1690,14 +1690,24 @@ async function resolvePendingCancel(tenantId, waId, session, trimmed, workflows)
   const allTap = t === "cancel_pick_all";
   const pickMatch = t.match(/^cancel_pick_(\d+)$/);
 
-  if (isNoTap || /^(no|n|nevermind|never\s*mind|keep it|don'?t cancel)[.!\s]*$/i.test(t)) {
+  // Found live (QA pass) — these used to be fully anchored (`^...$`),
+  // matching only a bare "yes"/"no" and nothing else. Fine for a tapped
+  // button or a typed one-word reply, but a VOICE note transcribes a
+  // confirmation as a full sentence ("yes cancel it", "no don't cancel
+  // it"), which never matched — the customer's first, entirely clear
+  // spoken answer got treated as unrelated and re-asked. `\b` instead of
+  // requiring the string to end right after the word lets the LEADING
+  // word decide (still anchored at the start, so "no wait, actually yes"
+  // correctly reads as "no", not "yes") without demanding the customer
+  // say nothing else.
+  if (isNoTap || /^(no|n|nah|nope|nevermind|never\s*mind|keep it|don'?t cancel)\b/i.test(t)) {
     await sendWhatsAppText(tenantId, waId, pendingIds.length > 1 ? "No problem — your bookings are still active." : "No problem — your booking is still active.");
     return true;
   }
 
   let targetId = null;
   if (pendingIds.length === 1) {
-    if (isYesTap || /^(yes|y|confirm|confirm cancel)[.!\s]*$/i.test(t)) targetId = pendingIds[0];
+    if (isYesTap || /^(yes|y|yeah|yep|sure|ok(ay)?|confirm|confirm cancel)\b/i.test(t)) targetId = pendingIds[0];
     else {
       // Restore the pending state — an unrelated reply to a single-booking
       // confirmation is ambiguous enough to be worth one re-ask rather than
@@ -1788,7 +1798,10 @@ async function resolvePendingRebook(tenantId, waId, session, trimmed, workflows)
   const isYesTap = t === "rebook_yes";
   const isNoTap = t === "rebook_no";
 
-  if (isYesTap || /^(yes|y|sure|ok(ay)?|book again|yes please)[.!\s]*$/i.test(t)) {
+  // Same broadening as resolvePendingCancel above, same reason — a voice
+  // note transcribes "yes book again" or "no I'll pick something else"
+  // as a full sentence, never a bare word.
+  if (isYesTap || /^(yes|y|yeah|yep|sure|ok(ay)?|book again|yes please)\b/i.test(t)) {
     if (!workflows[pending.workflowId]) {
       // Vanishingly unlikely (deleted between the offer and this reply),
       // but fall back to the full menu rather than crash on a missing
@@ -1801,7 +1814,7 @@ async function resolvePendingRebook(tenantId, waId, session, trimmed, workflows)
     return true;
   }
 
-  if (isNoTap || /^(no|n|nevermind|never\s*mind|see all|other|something else)[.!\s]*$/i.test(t)) {
+  if (isNoTap || /^(no|n|nah|nope|nevermind|never\s*mind|see all|other|something else)\b/i.test(t)) {
     session.awaitingBusinessPick = true;
     await sendBusinessMenu(tenantId, waId, workflows, session, true);
     return true;

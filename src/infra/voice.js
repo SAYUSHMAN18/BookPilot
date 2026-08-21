@@ -106,6 +106,12 @@ function stripMarkdownForSpeech(text) {
     // A leading "- " bullet marker, one per line — the list items
     // themselves still read fine back to back, just without the dash.
     .replace(/^[ \t]*-\s+/gm, "")
+    // Found live (QA pass) — the Razorpay deposit-payment message embeds
+    // a real checkout URL, fine tapped in the WhatsApp bubble, gibberish
+    // narrated character-by-character over TTS. Named rather than
+    // dropped outright — a spoken reply that just skips the sentence's
+    // object reads as truncated, not just "less verbose."
+    .replace(/https?:\/\/\S+/g, "the payment link")
     // Collapse whatever whitespace the removals above left behind.
     .replace(/[ \t]{2,}/g, " ")
     .trim();

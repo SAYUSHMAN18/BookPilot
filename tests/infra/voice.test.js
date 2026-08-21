@@ -47,3 +47,19 @@ test("a plain sentence with no markdown at all passes through unchanged (aside f
 test("multiple bold spans on the same line are all stripped, not just the first", () => {
   assert.equal(stripMarkdownForSpeech("*Dr. Sharma* is available at *4pm* and *5pm*"), "Dr. Sharma is available at 4pm and 5pm");
 });
+
+// QA pass — the Razorpay deposit-payment message embeds a real checkout
+// URL (workflowEngine.js's `Pay here (secure, via Razorpay):\n${order.paymentUrl}`
+// line), fine tapped in the WhatsApp bubble, gibberish narrated
+// character-by-character over TTS.
+test("replaces a raw URL with a spoken-friendly phrase, matching the real Razorpay confirmation message", () => {
+  const input = "A deposit of ₹500 is required to confirm this booking. Pay here (secure, via Razorpay):\nhttps://rzp.io/i/AbC123xyz\n\nYour slot is held for you.";
+  const spoken = stripMarkdownForSpeech(input);
+  assert.doesNotMatch(spoken, /https?:\/\//, "no raw URL should remain");
+  assert.match(spoken, /the payment link/);
+  assert.match(spoken, /₹500/, "the actual amount must still be spoken");
+});
+
+test("a message with no URL at all is unaffected by the URL-stripping rule", () => {
+  assert.equal(stripMarkdownForSpeech("Your appointment is confirmed for 3pm tomorrow."), "Your appointment is confirmed for 3pm tomorrow.");
+});

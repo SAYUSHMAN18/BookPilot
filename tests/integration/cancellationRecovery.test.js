@@ -46,6 +46,41 @@ test("cancelling a booking with an otherwise-open provider suggests a nearby alt
   assert.match(reply, /HAIR COURT SALON/);
 });
 
+// QA pass — resolvePendingCancel's yes/no matchers used to be fully
+// anchored (only a bare "yes"/"no" matched), so a voice note transcribed
+// as a full sentence ("yes cancel it please") fell through as an
+// unrelated message instead of confirming on the customer's first,
+// entirely clear reply.
+test("a natural spoken-style confirmation ('yes cancel it please') confirms on the first reply, not just a bare 'yes'", async () => {
+  const waId = "919888833003";
+  await bookings.create(TENANT, waId, {
+    bookingId: "CANCEL-REC-3", workflowId: "hair", providerId: "p1", providerName: "HAIR COURT SALON",
+    visitDate: tomorrowIso(), visitTime: "11:00 am", customerName: "Cancel Tester", status: "booked", createdAt: Date.now(),
+  });
+
+  await handleIncomingMessage(TENANT, waId, "cancel", workflows);
+
+  beginReplyCapture(waId);
+  await handleIncomingMessage(TENANT, waId, "yes cancel it please", workflows);
+  const reply = endReplyCapture(waId);
+  assert.match(reply, /cancelled/i, "the full sentence's leading 'yes' should confirm immediately");
+});
+
+test("a natural spoken-style decline ('no don't cancel it, keep it') keeps the booking active", async () => {
+  const waId = "919888833004";
+  await bookings.create(TENANT, waId, {
+    bookingId: "CANCEL-REC-4", workflowId: "hair", providerId: "p1", providerName: "HAIR COURT SALON",
+    visitDate: tomorrowIso(), visitTime: "11:00 am", customerName: "Cancel Tester", status: "booked", createdAt: Date.now(),
+  });
+
+  await handleIncomingMessage(TENANT, waId, "cancel", workflows);
+
+  beginReplyCapture(waId);
+  await handleIncomingMessage(TENANT, waId, "no don't cancel it, keep it", workflows);
+  const reply = endReplyCapture(waId);
+  assert.match(reply, /still active/i);
+});
+
 test("cancelling the only booking for a hotel workflow (no select_time_slot step) never suggests a slot", async () => {
   const waId = "919888833002";
   await bookings.create(TENANT, waId, {

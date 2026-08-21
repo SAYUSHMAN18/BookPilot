@@ -85,8 +85,16 @@ function timeSlotsFor(workflow, dateOptionIso, excludeSlots = new Set(), blocked
   const isToday = dateOptionIso === isoDate(new Date());
   const now = new Date();
 
+  // Found live (QA pass) — the loop bound used to be just `cursor < end`,
+  // which only checks that a slot STARTS before closing, never that it
+  // FINISHES by closing. Fine when slotMinutes evenly divides the
+  // businessHours window (every test fixture so far happens to), but a
+  // window like 09:00-10:00 at 45-min slots offered "9:45 am" — a slot
+  // that runs until 10:30, thirty minutes past close. slotEndMs is the
+  // actual boundary check: only offer a slot that fully fits before end.
+  const slotMs = slotMinutes * 60 * 1000;
   const slots = [];
-  while (cursor < end && slots.length < 10) {
+  while (cursor.getTime() + slotMs <= end.getTime() && slots.length < 10) {
     const label = formatTime(cursor);
     const cursorMinutes = cursor.getHours() * 60 + cursor.getMinutes();
     const inBlockedRange = blockedRanges.some((r) => cursorMinutes >= r.startMin && cursorMinutes < r.endMin);
