@@ -347,7 +347,16 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
 .fc-icon .icon { width: 18px; height: 18px; }
 .fc-title { font-weight: 700; }
 .fc-sub { color: var(--muted); font-size: 11px; }
-@media (max-width: 700px) { .floating-card { display: none; } }
+/* Found live (tablet audit): floating-card is absolutely positioned
+   (fc-1's left: -50px) for the desktop TWO-column hero layout, where
+   there's real space to its left. .hero-inner already collapses to ONE
+   column at max-width: 900px (see below) — below that, the phone mockup
+   sits centered with far less room, so the card overflows off-screen
+   instead of floating beside it. This threshold has to match that same
+   900px breakpoint, not a separate, narrower one (700px used to leave a
+   200px-wide dead zone — exactly tablet width — where the card was still
+   shown but already broken). */
+@media (max-width: 900px) { .floating-card { display: none; } }
 
 .stat-strip {
   max-width: 1160px; margin: 96px auto 0; padding: 0 32px 100px;
@@ -362,6 +371,12 @@ section h2 { font-size: clamp(30px, 4vw, 44px); font-weight: 800; text-align: ce
   .hero-inner { grid-template-columns: 1fr; }
   .hero-visual { margin-top: 40px; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  /* Found live (mobile audit): 168px top padding is sized for the desktop
+     hero's own breathing room, not the 69px fixed header — on a phone
+     viewport that's ~20% of the entire visible screen as pure dead space
+     before any real content appears. header height (69px) + a much
+     smaller margin scales this correctly for a short viewport. */
+  .hero { padding-top: 96px; }
 }
 
 /* ================= PROBLEM ================= */

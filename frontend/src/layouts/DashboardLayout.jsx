@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { IconGrid, IconCalendar, IconClock, IconUsers, IconBuilding, IconTrendUp, IconMessage, IconCard, IconSliders, IconLogout, IconPlane } from "../components/Icons";
+import { useState, useEffect } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { IconGrid, IconCalendar, IconClock, IconUsers, IconBuilding, IconTrendUp, IconMessage, IconCard, IconSliders, IconLogout, IconPlane, IconMenu, IconX } from "../components/Icons";
 import ThemeToggle from "../components/ThemeToggle";
 
 const NAV_ITEMS = [
@@ -39,10 +39,37 @@ export default function DashboardLayout({ user, providers, refreshKey, bump, con
       setTimeout(() => setRefreshState("idle"), 1100);
     }, 550);
   }
+  // Found live (mobile audit): below the sidebar's own collapse-to-column
+  // breakpoint, the full sidebar (brand + all 9 nav links + footer) always
+  // rendered inline, stacked ABOVE the actual page — on a phone that's
+  // 400+ px of navigation a visitor has to scroll past before reaching any
+  // real content, on every single page. mobileNavOpen turns the sidebar
+  // into a real off-canvas drawer at that same breakpoint instead: closed
+  // (out of the layout, not just visually hidden) by default, opened by
+  // the hamburger button in mobileNavOpen's own top bar.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const location = useLocation();
+  // Closes the drawer automatically on navigation — without this, tapping
+  // a nav link would navigate correctly but leave the drawer covering the
+  // new page until the visitor found and tapped the close button separately.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
   const initial = (user.name || user.email || "?").trim().slice(0, 1).toUpperCase();
   return (
     <div className="app-shell-sidebar">
-      <aside className="sidebar">
+      <div className="mobile-topbar">
+        <span className="sidebar-brand">
+          <span className="sidebar-brand-mark"><IconPlane /></span>
+          <span>BookPilot<span className="sidebar-brand-ai">AI</span></span>
+        </span>
+        <button className="mobile-nav-toggle" aria-label={mobileNavOpen ? "Close menu" : "Open menu"} onClick={() => setMobileNavOpen((v) => !v)}>
+          {mobileNavOpen ? <IconX /> : <IconMenu />}
+        </button>
+      </div>
+      {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={"sidebar" + (mobileNavOpen ? " mobile-open" : "")}>
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark"><IconPlane /></span>
           <span>BookPilot<span className="sidebar-brand-ai">AI</span></span>

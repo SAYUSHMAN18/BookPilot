@@ -147,3 +147,21 @@ export function IconPlane(props) {
     </svg>
   );
 }
+
+// Mobile sidebar drawer toggle (DashboardLayout.jsx) — the sidebar itself
+// has no equivalent on mobile until this, so these two didn't exist before.
+export function IconMenu(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 5.5h14M3 10h14M3 14.5h14" />
+    </svg>
+  );
+}
+
+export function IconX(props) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 5l10 10M15 5L5 15" />
+    </svg>
+  );
+}
